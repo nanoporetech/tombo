@@ -1,0 +1,4 @@
+include README.md
+include tombo/R_scripts/*.R
+include tombo/tombo_models/*
+recursive-include cython *
