@@ -4,7 +4,7 @@ from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext as _build_ext
 
 def readme():
-    with open('README.md') as f:
+    with open('README.rst') as f:
         return f.read()
 
 try:
@@ -19,10 +19,14 @@ except:
         '*' * 60 + '\n')
     sys.exit(1)
 
+if not sys.version_info[0] == 2:
+    sys.exit("Sorry, Python 3 is not supported (yet)")
+
 setup(
-    name = "tombo",
-    version = "1.0",
+    name = "ont-tombo",
+    version = "1.0.1",
     packages = ["tombo"],
+    python_requires = '<3',
     install_requires = ['h5py', 'numpy', 'scipy', 'cython', 'setuptools >= 18.0'],
     extras_require={'plot':['rpy2'], 'alt_est':['scikit-learn'],
                     'full':['rpy2', 'scikit-learn']},
