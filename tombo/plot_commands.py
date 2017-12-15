@@ -370,8 +370,9 @@ def get_event_data(
             reg_events = get_reg_events(
                 reg_data.reads, reg_data.start, reg_data.end, strand)
             for pos, base_read_means in enumerate(reg_events):
-                # skip bases with no coverage
-                if sum(~np.isnan(base_read_means)) == 0:
+                # skip bases with zero or 1 read as ggplot won't
+                # be able to estimate the density
+                if sum(~np.isnan(base_read_means)) < 2:
                     continue
                 # remove nan  regions of reads from partial overlaps
                 base_read_means = base_read_means[
@@ -652,10 +653,10 @@ def plot_corrections(
             break
     if len(OldSegDat) == 0:
         sys.stderr.write(
-            'ERROR: No reads were able to be processed. Check ' +
-            '--fast5-basedirs for FAST5 files and that ' +
-            '--corrected-group and --basecall-subgroup are correct ' +
-            'for the reads provided .\n')
+            'ERROR: No reads were able to be processed. This command is ' +
+            'only applicable to reads processed with event_resquiggle. ' +
+            'Also check that --corrected-group and --basecall-subgroup ' +
+            'match the event_resquiggle command.\n')
         sys.exit()
     if VERBOSE and len(OldSegDat) < num_reads:
         sys.stderr.write(
@@ -1152,10 +1153,7 @@ def plot_model_single_sample(
 
 def plot_per_read_modification(
         plot_intervals, raw_read_coverage, tb_model_fn, alt_model_fn, pdf_fn,
-        fm_lag, num_reads, box_center, plot_default_alt):
-    if alt_model_fn is None and plot_default_alt is not None:
-        alt_model_fn = ts.get_default_alt_ref(
-            plot_default_alt, raw_read_coverage)
+        fm_lag, num_reads, box_center):
     if alt_model_fn is not None:
         alt_ref, upstrm_bases, alt_base, _ = ts.parse_tombo_model(alt_model_fn)
         dnstrm_bases = len(next(alt_ref.iterkeys())) - upstrm_bases - 1
@@ -1236,20 +1234,39 @@ def plot_per_read_modification(
 #### Plot processing methods ####
 #################################
 
+def get_valid_model_fns(
+        tb_model_fn, plot_default_stnd, alt_model_fn,
+        plot_default_alt, raw_read_coverage, f5_dirs2=None):
+    # if no model was requested
+    if (tb_model_fn is None and not plot_default_stnd and
+        alt_model_fn is None and not plot_default_alt):
+        return None, None
+
+    if tb_model_fn is None:
+        tb_model_fn = ts.get_default_standard_ref(raw_read_coverage)
+    if alt_model_fn is None and plot_default_alt is not None:
+        alt_model_fn = ts.get_default_alt_ref(
+            plot_default_alt, raw_read_coverage)
+
+    if f5_dirs2 is not None and tb_model_fn is not None:
+        sys.stderr.write(
+            '********* WARNING ******** Both a second set of FAST5s and a ' +
+            'tombo model were provided. Two samples with model plotting is not ' +
+            'currently available. Models requested will be ignored.\n')
+
+    return tb_model_fn, alt_model_fn
+
 def plot_max_coverage(
         f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
         f5_dirs2, num_regions, num_bases, overplot_thresh, overplot_type,
         tb_model_fn, alt_model_fn, plot_default_stnd, plot_default_alt):
-    if f5_dirs2 is not None and tb_model_fn is not None:
-        sys.stderr.write(
-            '********* WARNING ******** Both a second set of FAST5s and a ' +
-            'tombo model were provided. Two sample model plotting is not ' +
-            'currently available. Second set of FAST5 files will be ignored.\n')
-
     raw_read_coverage = th.parse_fast5s(
         f5_dirs1, corrected_group, basecall_subgroups)
     read_coverage = th.get_coverage(raw_read_coverage)
 
+    tb_model_fn, alt_model_fn = get_valid_model_fns(
+        tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
+        raw_read_coverage, f5_dirs2)
     if f5_dirs2 is None:
         coverage_regions = []
         for (chrom, strand), chrom_coverage in read_coverage.items():
@@ -1267,19 +1284,14 @@ def plot_max_coverage(
             for rn, (stat, start, chrm, strand) in
             enumerate(sorted(coverage_regions, reverse=True)[:num_regions])]
 
-        if tb_model_fn is not None or plot_default_stnd:
-            if tb_model_fn is None:
-                tb_model_fn = ts.get_default_standard_ref(raw_read_coverage)
-            if alt_model_fn is None and plot_default_alt is not None:
-                alt_model_fn = ts.get_default_alt_ref(
-                    plot_default_alt, raw_read_coverage)
-            plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
-        else:
+        if tb_model_fn is None:
             plot_single_sample(
                 plot_intervals, raw_read_coverage, overplot_thresh,
                 overplot_type, pdf_fn)
+        else:
+            plot_model_single_sample(
+                plot_intervals, raw_read_coverage, tb_model_fn,
+                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
     else:
         raw_read_coverage2 = th.parse_fast5s(
             f5_dirs2, corrected_group, basecall_subgroups)
@@ -1326,12 +1338,6 @@ def plot_genome_locations(
         f5_dirs2, num_bases, overplot_thresh, overplot_type,
         genome_locations, tb_model_fn, alt_model_fn, plot_default_stnd,
         plot_default_alt):
-    if f5_dirs2 is not None and tb_model_fn is not None:
-        sys.stderr.write(
-            '********* WARNING ******** Both a second set of FAST5s and a ' +
-            'tombo model were provided. Two sample model plotting is not ' +
-            'currently available. Second set of FAST5 files will be ignored.\n')
-
     if VERBOSE: sys.stderr.write('Parsing genome locations.\n')
     # ignore strand for genome location plotting
     genome_locations = [
@@ -1353,21 +1359,19 @@ def plot_genome_locations(
 
     raw_read_coverage = th.parse_fast5s(
         f5_dirs1, corrected_group, basecall_subgroups)
+    tb_model_fn, alt_model_fn = get_valid_model_fns(
+        tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
+        raw_read_coverage, f5_dirs2)
 
     if f5_dirs2 is None:
-        if tb_model_fn is not None or plot_default_stnd:
-            if tb_model_fn is None:
-                tb_model_fn = ts.get_default_standard_ref(raw_read_coverage)
-            if alt_model_fn is None and plot_default_alt is not None:
-                alt_model_fn = ts.get_default_alt_ref(
-                    plot_default_alt, raw_read_coverage)
-            plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
-        else:
+        if tb_model_fn is None:
             plot_single_sample(
                 plot_intervals, raw_read_coverage, overplot_thresh,
                 overplot_type, pdf_fn)
+        else:
+            plot_model_single_sample(
+                plot_intervals, raw_read_coverage, tb_model_fn,
+                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
     else:
         raw_read_coverage2 = th.parse_fast5s(
             f5_dirs2, corrected_group, basecall_subgroups)
@@ -1382,11 +1386,11 @@ def plot_per_read_mods_genome_location(
         num_bases, genome_locations, tb_model_fn, alt_model_fn,
         fm_lag, num_reads, box_center, plot_default_stnd,
         plot_default_alt):
-    if tb_model_fn is None and not plot_default_stnd:
-        sys.stderr.write(
-            '********* ERROR ******** Must provide either a standard tombo ' +
-            'model (via --tombo-model-filename) or specify --plot-standard-model.\n')
-        sys.exit()
+    if (tb_model_fn is None and not plot_default_stnd and
+        alt_model_fn is None and not plot_default_alt):
+        sys.stderr.write('*********** WARNING ********\n\tNo model ' +
+                         'indicated, so loading default standard model.\n')
+        plot_default_stnd = True
 
     if VERBOSE: sys.stderr.write(
             'Parsing per read modifications at genome locations.\n')
@@ -1409,12 +1413,13 @@ def plot_per_read_mods_genome_location(
 
     raw_read_coverage = th.parse_fast5s(
         f5_dirs1, corrected_group, basecall_subgroups)
-    if tb_model_fn is None:
-        tb_model_fn = ts.get_default_standard_ref(raw_read_coverage)
+    tb_model_fn, alt_model_fn = get_valid_model_fns(
+        tb_model_fn, plot_default_stnd, alt_model_fn,
+        plot_default_alt, raw_read_coverage)
 
     plot_per_read_modification(
         plot_intervals, raw_read_coverage, tb_model_fn, alt_model_fn, pdf_fn,
-        fm_lag, num_reads, box_center, plot_default_alt)
+        fm_lag, num_reads, box_center)
 
     return
 
@@ -1423,14 +1428,7 @@ def plot_motif_centered(
         f5_dirs2, num_regions, num_bases, overplot_thresh, overplot_type,
         motif, fasta_fn, deepest_coverage, tb_model_fn, alt_model_fn,
         plot_default_stnd, plot_default_alt):
-    if f5_dirs2 is not None and tb_model_fn is not None:
-        sys.stderr.write(
-            '********* WARNING ******** Both a second set of FAST5s and a ' +
-            'tombo model were provided. Two sample model plotting is not ' +
-            'currently available. Second set of FAST5 files will be ignored.\n')
-
-    if VERBOSE: sys.stderr.write(
-            'Identifying genomic k-mer locations.\n')
+    if VERBOSE: sys.stderr.write('Identifying genomic k-mer locations.\n')
     fasta_records = th.parse_fasta(fasta_fn)
     motif_pat = th.parse_motif(motif)
     motif_len = len(motif)
@@ -1459,6 +1457,10 @@ def plot_motif_centered(
 
     raw_read_coverage = th.parse_fast5s(
         f5_dirs1, corrected_group, basecall_subgroups)
+    tb_model_fn, alt_model_fn = get_valid_model_fns(
+        tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
+        raw_read_coverage, f5_dirs2)
+
     if deepest_coverage:
         read_coverage = th.get_coverage(raw_read_coverage)
     if f5_dirs2 is not None:
@@ -1574,19 +1576,14 @@ def plot_motif_centered(
                             int_end, strand))
                 if len(plot_intervals) >= num_regions: break
 
-        if tb_model_fn is not None or plot_default_stnd:
-            if tb_model_fn is None:
-                tb_model_fn = ts.get_default_standard_ref(raw_read_coverage)
-            if alt_model_fn is None and plot_default_alt is not None:
-                alt_model_fn = ts.get_default_alt_ref(
-                    plot_default_alt, raw_read_coverage)
-            plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
-        else:
+        if tb_model_fn is None:
             plot_single_sample(
                 plot_intervals, raw_read_coverage, overplot_thresh,
                 overplot_type, pdf_fn)
+        else:
+            plot_model_single_sample(
+                plot_intervals, raw_read_coverage, tb_model_fn,
+                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
 
     return
 
@@ -1641,12 +1638,6 @@ def plot_most_signif(
         f5_dirs2, num_regions, overplot_thresh, seqs_fn, num_bases,
         overplot_type, qval_thresh, stats_fn, tb_model_fn, alt_model_fn,
         plot_default_stnd, plot_default_alt, stat_order):
-    if f5_dirs2 is not None and tb_model_fn is not None:
-        sys.stderr.write(
-            '********* WARNING ******** Both a second set of FAST5s and a ' +
-            'tombo model were provided. Two sample model plotting is not ' +
-            'currently available. Second set of FAST5 files will be ignored.\n')
-
     if VERBOSE: sys.stderr.write('Loading statistics from file.\n')
     all_stats, stat_type = ts.parse_stats(stats_fn)
 
@@ -1655,21 +1646,19 @@ def plot_most_signif(
     plot_intervals = ts.get_most_signif_regions(
         all_stats, num_bases, num_regions, qval_thresh,
         fraction_order=not stat_order)
+    tb_model_fn, alt_model_fn = get_valid_model_fns(
+        tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
+        raw_read_coverage, f5_dirs2)
 
     if f5_dirs2 is None:
-        if tb_model_fn is not None or plot_default_stnd:
-            if tb_model_fn is None:
-                tb_model_fn = ts.get_default_standard_ref(raw_read_coverage)
-            if alt_model_fn is None and plot_default_alt is not None:
-                alt_model_fn = ts.get_default_alt_ref(
-                    plot_default_alt, raw_read_coverage)
-            plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
-        else:
+        if tb_model_fn is None:
             plot_single_sample(
                 plot_intervals, raw_read_coverage, overplot_thresh,
                 overplot_type, pdf_fn)
+        else:
+            plot_model_single_sample(
+                plot_intervals, raw_read_coverage, tb_model_fn,
+                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
     else:
         raw_read_coverage2 = th.parse_fast5s(
             f5_dirs2, corrected_group, basecall_subgroups)

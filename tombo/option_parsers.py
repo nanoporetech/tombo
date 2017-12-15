@@ -66,8 +66,9 @@ bcgrp_opt=('--basecall-group', {
     'Default: %(default)s'})
 bcsubgrps_opt=('--basecall-subgroups', {
     'default':['BaseCalled_template',], 'nargs':'+',
-    'help':'FAST5 subgroup(s) (under Analyses/[corrected-group]) containing ' +
-    'basecalls. Default: %(default)s'})
+    'help':'FAST5 subgroup(s) (under /Analyses/[--basecall-group]/) containing ' +
+    'basecalls and created within [--corrected-group] containing re-squiggle ' +
+    'results. Default: %(default)s'})
 
 gnmloc_opt=('--genome-locations', {
     'nargs':'+',
@@ -106,6 +107,16 @@ rdata_opt=('--r-data-filename', {
 seqs_opt=('--sequences-filename', {
     'help':'File for sequences from selected regions. Sequences will be ' +
     'stored in FASTA format. Default: %(default)s.'})
+densbn_opt=('--save-density-basename', {
+    'help':"Basename to save alternative model estimation density " +
+    "estimation information. See scripts/debug_est_alt.R for info use " +
+    "example. Default: Don't save."})
+altden_opt=('--alternate-density-filename', {
+    'help':'File containing k-mer level kernel density estimates for the ' +
+    'alternative sample saved using --save-density-basename.'})
+ctrlden_opt=('--control-density-filename', {
+    'help':'File containing k-mer level kernel density estimates for the ' +
+    'control sample saved using --save-density-basename.'})
 
 
 ############################
@@ -156,14 +167,6 @@ bndwdth_opt=('--bandwidth', {
     'type':int, 'default':501,
     'help':'Bandwidth of events for dynamic sequence to event mapping. ' +
     'Default: %(default)d'})
-mexpct_opt=('--match-expected-value', {
-    'type':float, 'default':0.5,
-    'help':'Expected value when a matched event to genomic sequence is ' +
-    'encountered. Default: %(default)f'})
-skippen_opt=('--skip-penalty', {
-    'type':float, 'default':1.0,
-    'help':'Penalty applied to skipped genomic bases in event to sequence ' +
-    'assignment. Default: %(default)f'})
 minobs_opt=('--min-obs-per-base', {
     'type':int,
     'help':'Minimum raw observations to assign to a genomic base. ' +
@@ -196,9 +199,6 @@ numobs_opt=('--num-obs', {
     'help':'Number of observations to plot. Default: %(default)d'})
 numreg_opt=('--num-regions', {
     'type':int, 'help':'Number of regions to plot. Default: %(default)d'})
-qvalthresh_opt=('--q-value-threshold', {
-    'type':float,
-    'help':'Plot all regions below provied q-value. Overrides --num-regions.'})
 
 slides_opt=('--slide-span', {
     'type':int, 'default':0,
@@ -270,6 +270,11 @@ kmspec_opt=('--kmer-specific-sd', {
 incldsd_opt=('--include-event-stdev', {
     'default':False, 'action':'store_true',
     'help':'Include corrected event standard deviation in output FAST5 data.'})
+fitscl_opt=('--fit-scale-per-read', {
+    'default':False, 'action':'store_true',
+    'help':'Fit the scaling parameter for each read. If not set then a ' +
+    'global scaling parameter is estimated from a random subset of reads, ' +
+    'which has could provide more robust results.'})
 
 readmean_opt=('--read-mean', {
     'default':False, 'action':'store_true',
@@ -304,6 +309,14 @@ quiet_opt=(('--quiet', '-q'), {
 ###### Float arguments ######
 ##############################
 
+mexpct_opt=('--match-expected-value', {
+    'type':float, 'default':0.5,
+    'help':'Expected value when a matched event to genomic sequence is ' +
+    'encountered. Default: %(default)f'})
+skippen_opt=('--skip-penalty', {
+    'type':float, 'default':1.0,
+    'help':'Penalty applied to skipped genomic bases in event to sequence ' +
+    'assignment. Default: %(default)f'})
 otlthresh_opt=('--outlier-threshold', {
     'default':5, 'type':float,
     'help':'Windosrize the signal at this number of scale values. ' +
@@ -317,15 +330,28 @@ snglrdthrsh_opt=('--single-read-threshold', {
     'help':'P-value or log likelihood ratio threshold when computing ' +
     'fraction of significant reads at each genomic position. Default: ' +
     'pvalue:0.01; likelihood ratio:2'})
-altfrac_opt=('--min-alt-base-percentage', {
-    'default':5, 'type':float,
-    'help':'Minimum estimated percent of non-standard base distribution ' +
-    'for inclusion of k-mer in non-standard model. Default: %(default)f'})
-sdthrsh_opt=('--sd-threshold', {
-    'default':1.5, 'type':float,
-    'help':'Minimum level standard deviation difference between estimated ' +
-    'non-standard distribution mean and standard model mean for inclusion ' +
-    'of k-mer in non-standard model. Default: %(default)f'})
+altfrac_opt=('--alt-fraction-percentile', {
+    'default':1, 'type':float,
+    'help':'When esitmating the alternative base incorporation rate, this ' +
+    'percent of k-mers are assumed to have significantly shifted signal so ' +
+    'the alternative distribution minimally overlaps the standard base ' +
+    'distribution. Default: %(default)f'})
+kernden_opt=('--kernel-density-bandwidth', {
+    'default':0.05, 'type':float,
+    'help':'Bandwidth applied when performing Gaussian kernal density ' +
+    'esitmation on standard and alternative base signal distributions. ' +
+    'Default: %(default)f'})
+qvalthresh_opt=('--q-value-threshold', {
+    'type':float,
+    'help':'Plot all regions below provied q-value. Overrides --num-regions.'})
+pctfilt_opt=('--percent-to-filter', {
+    'type':float, 'default':10,
+    'help':'Percentage of all reads to filter. Reads are randomly selected ' +
+    'weighted according to the approximate coverage at the mapped genomic ' +
+    'location. This can be useful in modeling and testing.'})
+fxdscl_opt=('--fixed-scale', {
+    'type':float,
+    'help':'Fixed scaling parameter to use for raw signal normalization.'})
 
 
 ##############################
@@ -429,6 +455,9 @@ def get_eventless_resquiggle_parser():
     alg_args.add_argument(mexpct_opt[0], **mexpct_opt[1])
     alg_args.add_argument(skippen_opt[0], **skippen_opt[1])
     alg_args.add_argument(bndwdth_opt[0], **bndwdth_opt[1])
+    alg_args.add_argument(fitscl_opt[0], **fitscl_opt[1])
+    alg_args.add_argument(fxdscl_opt[0], **fxdscl_opt[1])
+    alg_args.add_argument(otlthresh_opt[0], **otlthresh_opt[1])
 
     io_args = parser.add_argument_group('Input/Output Arguments')
     io_args.add_argument(skpidx_opt[0], **skpidx_opt[1])
@@ -437,7 +466,6 @@ def get_eventless_resquiggle_parser():
 
     filt_args = parser.add_argument_group('Read Filtering Argument')
     filt_args.add_argument(obsfilt_opt[0], **obsfilt_opt[1])
-    filt_args.add_argument(otlthresh_opt[0], **otlthresh_opt[1])
 
     multi_args = parser.add_argument_group('Multiprocessing Arguments')
     multi_args.add_argument(proc_opt[0], default=2, **proc_opt[1])
@@ -552,7 +580,7 @@ def get_model_resquiggle_parser():
 ###### Model estimation parsers ######
 ######################################
 
-def get_write_kmer_ref_parser():
+def get_est_ref_parser():
     parser = argparse.ArgumentParser(
         description='Estimate standard tombo model for use in re-squiggle ' +
         'and  testing without an amplified (un-modified) sample.', add_help=False)
@@ -579,63 +607,50 @@ def get_write_kmer_ref_parser():
 
     return parser
 
-def get_write_alt_ref_parser():
+def get_est_alt_ref_parser():
     parser = argparse.ArgumentParser(
         description='Estimate alternative k-mer reference model for use ' +
         'in testing for specific modification types. [--fast5-basedirs] ' +
         'should contain a sample spiked with a single known randomly ' +
         'incorporated base.', add_help=False)
     req_args = parser.add_argument_group('Required Arguments')
-    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(atbmod_opt[0], required=True, **atbmod_opt[1])
     req_args.add_argument(altname_opt[0], required=True, **altname_opt[1])
     req_args.add_argument(altbs_opt[0], required=True, **altbs_opt[1])
 
+    dens_args = parser.add_argument_group(
+        'Signal Data Arguments (Must provide either FAST5 dirs or ' +
+        'previous density estimates)')
+    dens_args.add_argument(fast5dir_opt[0], **fast5dir_opt[1])
+    dens_args.add_argument(ctrlfast5dir_opt[0], **ctrlfast5dir_opt[1])
+    dens_args.add_argument(altden_opt[0], **altden_opt[1])
+    dens_args.add_argument(ctrlden_opt[0], **ctrlden_opt[1])
+
     stat_args = parser.add_argument_group('Modeling Arguments')
     stat_args.add_argument(tbmod_opt[0], **tbmod_opt[1])
     stat_args.add_argument(altfrac_opt[0], **altfrac_opt[1])
-    stat_args.add_argument(sdthrsh_opt[0], **sdthrsh_opt[1])
+    stat_args.add_argument(kernden_opt[0], **kernden_opt[1])
 
     filt_args = parser.add_argument_group('Filtering Argument')
     filt_args.add_argument(minkmer_opt[0], default=1000, **minkmer_opt[1])
+
+    io_args = parser.add_argument_group('Output Argument')
+    io_args.add_argument(densbn_opt[0], **densbn_opt[1])
 
     fast5_args, misc_args, parser = add_default_args(parser)
 
     return parser
 
-
-############################
-###### Filter parsers ######
-############################
-
-def get_clear_filters_parser():
+def get_estimate_scale_parser():
     parser = argparse.ArgumentParser(
-        description='Clear all filters applied to re-squiggled reads.',
-        add_help=False)
+        description='Estimate a global scaling parameter from a ' +
+        'sub-set of reads.', add_help=False)
     req_args = parser.add_argument_group('Required Arguments')
-    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
+    req_args.add_argument(basedir_opt[0], **basedir_opt[1])
 
-    fast5_args = parser.add_argument_group('FAST5 Data Arguments')
-    fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
-
-    misc_args, parser = add_misc_args(parser)
-
-    return parser
-
-def get_filter_stuck_parser():
-    parser = argparse.ArgumentParser(
-        description='Filter reads based on observations ' +
-        'per base thresholds.', add_help=False)
-    req_args = parser.add_argument_group('Required Arguments')
-    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
-
-    filter_args = parser.add_argument_group('Read Filtering Arguments')
-    filter_args.add_argument(obsfilt_opt[0], **obsfilt_opt[1])
-
-    fast5_args = parser.add_argument_group('FAST5 Data Arguments')
-    fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
-
-    misc_args, parser = add_misc_args(parser)
+    misc_args = parser.add_argument_group('Miscellaneous Arguments')
+    misc_args.add_argument(*quiet_opt[0], **quiet_opt[1])
+    misc_args.add_argument(*help_opt[0], **help_opt[1])
 
     return parser
 
@@ -671,6 +686,59 @@ def get_test_signif_parser():
     multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
 
     fast5_args, misc_args, parser = add_default_args(parser)
+
+    return parser
+
+
+############################
+###### Filter parsers ######
+############################
+
+def get_clear_filters_parser():
+    parser = argparse.ArgumentParser(
+        description='Clear all filters applied to re-squiggled reads.',
+        add_help=False)
+    req_args = parser.add_argument_group('Required Argument')
+    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
+
+    fast5_args = parser.add_argument_group('FAST5 Data Argument')
+    fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
+
+    misc_args, parser = add_misc_args(parser)
+
+    return parser
+
+def get_filter_stuck_parser():
+    parser = argparse.ArgumentParser(
+        description='Filter reads based on observations ' +
+        'per base thresholds.', add_help=False)
+    req_args = parser.add_argument_group('Required Argument')
+    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
+
+    filter_args = parser.add_argument_group('Read Filtering Argument')
+    filter_args.add_argument(obsfilt_opt[0], **obsfilt_opt[1])
+
+    fast5_args = parser.add_argument_group('FAST5 Data Argument')
+    fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
+
+    misc_args, parser = add_misc_args(parser)
+
+    return parser
+
+def get_filter_coverage_parser():
+    parser = argparse.ArgumentParser(
+        description='Filter reads by downsampling for more even coverage.',
+        add_help=False)
+    req_args = parser.add_argument_group('Required Arguments')
+    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
+
+    filter_args = parser.add_argument_group('Read Filtering Argument')
+    filter_args.add_argument(pctfilt_opt[0], **pctfilt_opt[1])
+
+    fast5_args = parser.add_argument_group('FAST5 Data Arguments')
+    fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
+
+    misc_args, parser = add_misc_args(parser)
 
     return parser
 
@@ -1015,12 +1083,10 @@ def get_wiggle_parser():
     parser = argparse.ArgumentParser(
         description='Write wiggle files for specified data types.',
         add_help=False)
-    req_args = parser.add_argument_group('Required Argument')
-    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
-
-    alt_args = parser.add_argument_group('Comparison Arguments')
-    alt_args.add_argument(ctrlfast5dir_opt[0], **ctrlfast5dir_opt[1])
-    alt_args.add_argument(statfn_opt[0], **statfn_opt[1])
+    data_args = parser.add_argument_group('Data Arguments')
+    data_args.add_argument(fast5dir_opt[0], **fast5dir_opt[1])
+    data_args.add_argument(ctrlfast5dir_opt[0], **ctrlfast5dir_opt[1])
+    data_args.add_argument(statfn_opt[0], **statfn_opt[1])
 
     out_args = parser.add_argument_group('Output Arguments')
     out_args.add_argument(wigfn_opt[0], **wigfn_opt[1])

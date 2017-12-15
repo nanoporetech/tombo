@@ -1,7 +1,19 @@
+import os
 import sys
+
+import re
 
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext as _build_ext
+
+# Get the version number from version.py, and exe_path
+verstrline = open(os.path.join('tombo', 'version.py'), 'r').read()
+vsre = r"^TOMBO_VERSION = ['\"]([^'\"]*)['\"]"
+mo = re.search(vsre, verstrline)
+if mo:
+    __version__ = mo.group(1)
+else:
+    raise RuntimeError('Unable to find version string in "tombo/version.py".'.format(__pkg_name__))
 
 def readme():
     with open('README.rst') as f:
@@ -24,12 +36,12 @@ if not sys.version_info[0] == 2:
 
 setup(
     name = "ont-tombo",
-    version = "1.0.1",
+    version = __version__,
     packages = ["tombo"],
     python_requires = '<3',
     install_requires = ['h5py', 'numpy', 'scipy', 'cython', 'setuptools >= 18.0'],
-    extras_require={'plot':['rpy2'], 'alt_est':['scikit-learn'],
-                    'full':['rpy2', 'scikit-learn']},
+    extras_require={'plot':['rpy2<=2.8.6'], 'alt_est':['scikit-learn'],
+                    'full':['rpy2<=2.8.6', 'scikit-learn']},
 
     author = "Marcus Stoiber",
     author_email = "marcus.stoiber@nanoporetech.com",

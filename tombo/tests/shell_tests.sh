@@ -1,7 +1,7 @@
 natDir='test_data/native_reads/'
 ampDir='test_data/amplified_reads/'
 rcsvDir='test_data/recursive_test/'
-nrModFn='tombo_kmer.DNA.model'
+nrModFn='tombo_standard.DNA.model'
 altModFn='tombo_alt.5mC.model'
 poreModel="r9_250bps.nucleotide.5mer.template.model"
 genomeFn="e_coli.K12.NEB5alpha.fasta"
@@ -40,11 +40,12 @@ tombo cluster_most_significant -h
 
 tombo clear_filters -h
 tombo filter_stuck -h
+tombo filter_coverage -h
 
 tombo event_resquiggle -h
 tombo model_resquiggle -h
 
-tombo estimate_kmer_reference -h
+tombo estimate_reference -h
 tombo estimate_alt_reference -h
 fi
 
@@ -127,6 +128,8 @@ printf "\n\n********* Testing filter functions **********\n"
 tombo clear_filters --fast5-basedirs $natDir
 tombo filter_stuck --fast5-basedirs $natDir \
       --obs-per-base-filter 99:200 100:5000
+tombo filter_coverage --fast5-basedirs $natDir \
+      --percent-to-filter 10
 
 
 printf "\n\n********* Testing single sample genome-anchored plotting functions **********\n"
@@ -173,7 +176,7 @@ tombo plot_motif_centered --fast5-basedirs $natDir --motif ATC \
 
 printf "\n\n********* Testing statistical testing. **********\n"
 rm test_stats.2samp.tombo.stats test_stats.model.tombo.stats \
-   test_stats.alt_model.5mC.tombo.stats test_stats.alt_default_model.5mC.tombo.stats test_kmer.model
+   test_stats.alt_model.5mC.tombo.stats test_stats.alt_default_model.5mC.tombo.stats test_standard.model
 tombo test_significance --fast5-basedirs $natDir \
       --control-fast5-basedirs $ampDir \
       --statistics-file-basename test_stats.2samp
@@ -187,10 +190,11 @@ tombo test_significance --fast5-basedirs $natDir \
 tombo test_significance --fast5-basedirs $natDir \
       --alternate-bases 5mC \
       --statistics-file-basename test_stats.alt_default_model
-tombo estimate_kmer_reference --fast5-basedirs $natDir \
-      --tombo-model-filename test_kmer.model \
+tombo estimate_reference --fast5-basedirs $natDir \
+      --tombo-model-filename test_standard.model \
       --upstream-bases 1 --downstream-bases 2 --minimum-kmer-observations 1
 tombo estimate_alt_reference --fast5-basedirs $natDir \
+      --control-fast5-basedirs $ampDir \
       --tombo-model-filename $nrModFn \
       --alternate-model-filename test_alt.model \
       --alternate-model-name 5mC --alternate-model-base C \
@@ -290,12 +294,6 @@ tombo plot_most_significant --fast5-basedirs $natDir \
         --statistics-filename test_stats.model.tombo.stats \
         --overplot-threshold 15 --overplot-type Density \
         --pdf-filename testing.model_plotting.density.pdf
-tombo plot_genome_location --fast5-basedirs $natDir \
-        --tombo-model-filename $nrModFn \
-        --genome-locations $genomeLocs \
-        --num-bases 21 --overplot-threshold 1000 \
-        --corrected-group RawModelCorrected \
-        --pdf-filename testing.genome_loc.w_model.pdf
 tombo plot_genome_location --fast5-basedirs $ampDir \
         --tombo-model-filename $nrModFn \
         --alternate-model-filename $altModFn \
@@ -303,20 +301,20 @@ tombo plot_genome_location --fast5-basedirs $ampDir \
         --num-bases 21 --overplot-threshold 1000 \
         --pdf-filename testing.genome_loc.two_model_comp.pdf
 
-printf "\n\n********* Testing model-resquiggled plotting **********\n"
+printf "\n\n********* Testing event-resquiggled plotting **********\n"
 tombo plot_max_coverage --fast5-basedirs $natDir \
         --tombo-model-filename $nrModFn \
         --pdf-filename testing.max_cov.1_samp.model.model_resq.pdf \
-        --corrected-group RawModelCorrected
+        --corrected-group RawEventCorrected
 tombo plot_most_significant --fast5-basedirs $natDir \
         --tombo-model-filename $nrModFn \
-        --corrected-group RawModelCorrected \
+        --corrected-group RawEventCorrected \
         --statistics-filename test_stats.model.tombo.stats \
         --pdf-filename testing.model_plotting.resq_most_signif.pdf
 tombo plot_max_coverage --fast5-basedirs $natDir \
         --tombo-model-filename $nrModFn \
         --pdf-filename testing.max_cov.1_samp.model.model_resq.pdf \
-        --corrected-group RawModelCorrected
+        --corrected-group RawEventCorrected
 
 printf "\n\n********* Testing correction plotting commands **********\n"
 tombo plot_correction --fast5-basedirs $natDir --region-type random \

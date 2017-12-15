@@ -731,7 +731,7 @@ def find_adaptive_base_assignment(
             genome_loc.Start + dnstrm_bases, '-', genome_loc.Chrom)
 
     # for short reads, just search the whole read with a larger bandwidth
-    if (event_means.shape[0] < start_bandwidth + seq_len or
+    if (event_means.shape[0] < start_bandwidth + start_seq_window or
         seq_len < start_seq_window):
         seq_events = get_short_read_event_mapping(
             event_means, r_ref_means, r_ref_sds, skip_pen, stay_pen,
@@ -838,7 +838,7 @@ def resquiggle_read(
         basecall_group, corrected_group, compute_sd, skip_pen, stay_pen, z_shift,
         bandwidth, obs_filter, del_fix_window=5, min_event_to_seq_ratio=1.1,
         max_new_cpts=None, in_place=True, skip_index=False, reg_id=None,
-        debug_fps=None):
+        debug_fps=None, const_scale=None):
     """
     Perform banded dynamic programming sequence to event alignment for this read
 
@@ -888,11 +888,15 @@ def resquiggle_read(
     if num_events / bandwidth > len(genome_seq):
         raise NotImplementedError, 'Too much raw signal for short mapped sequence'
     # normalize signal
-    # print read id for resquiggle shift and scale output
-    #sys.stdout.write(read_info.ID + "\t")
-    norm_signal, scale_values = th.normalize_raw_signal(
-        all_raw_signal, 0, all_raw_signal.shape[0],
-        'median', channel_info, outlier_thresh)
+    if const_scale is not None:
+        norm_signal, scale_values = th.normalize_raw_signal(
+            all_raw_signal, 0, all_raw_signal.shape[0],
+            'median_const_scale', channel_info, outlier_thresh,
+            const_scale=const_scale)
+    else:
+        norm_signal, scale_values = th.normalize_raw_signal(
+            all_raw_signal, 0, all_raw_signal.shape[0],
+            'median', channel_info, outlier_thresh)
 
     (segs, r_ref_means, r_ref_sds, read_start_rel_to_raw,
      genome_seq, genome_loc) = find_adaptive_base_assignment(
@@ -959,7 +963,7 @@ def resquiggle_read(
 def _resquiggle_worker(
         basecalls_q, progress_q, failed_reads_q, index_q, basecall_group,
         corrected_group, tb_model_fn, outlier_thresh, compute_sd, skip_pen,
-        match_evalue, bandwidth, obs_filter):
+        match_evalue, bandwidth, obs_filter, const_scale):
     num_processed = 0
     skip_index = index_q is None
     if not skip_index: proc_index_data = []
@@ -1006,7 +1010,7 @@ def _resquiggle_worker(
                     genome_loc, read_info, basecall_group, corrected_group,
                     compute_sd, skip_pen, stay_pen, z_shift, bandwidth,
                     obs_filter, skip_index=skip_index, reg_id=num_processed,
-                    debug_fps=debug_fps)
+                    debug_fps=debug_fps, const_scale=const_scale)
                 if not skip_index:
                     proc_index_data.append(index_data)
                     if index_data[1][6]:
@@ -1146,7 +1150,9 @@ def parse_m5_output(align_output, batch_reads_data):
 
     return batch_align_failed_reads, batch_align_data
 
-def parse_sam_record(r_sam_record, genome_index, read_id, bc_subgroup):
+def parse_sam_record(
+        r_sam_record, genome_index, read_id, bc_subgroup,
+        skip_align_stats=False):
     """
     Parse a single of sam formatted alignment
     """
@@ -1163,7 +1169,7 @@ def parse_sam_record(r_sam_record, genome_index, read_id, bc_subgroup):
 
         return cigar
 
-    def get_tseq(cigar, strand):
+    def get_just_tseq(cigar, strand):
         start_clipped_bases = 0
         end_clipped_bases = 0
         # handle clipping elements (H and S)
@@ -1203,14 +1209,105 @@ def parse_sam_record(r_sam_record, genome_index, read_id, bc_subgroup):
 
         return tSeq, start_clipped_bases, end_clipped_bases
 
+    def get_qseq(cigar, strand):
+        # record clipped bases and remove from query seq as well as cigar
+        qSeq = r_sam_record['seq'] if strand == '+' else th.rev_comp(
+            r_sam_record['seq'])
+        start_clipped_bases = 0
+        end_clipped_bases = 0
+        # handle clipping elements (H and S)
+        if cigar[0][1] == 'H':
+            start_clipped_bases += cigar[0][0]
+            cigar = cigar[1:]
+        if cigar[-1][1] == 'H':
+            end_clipped_bases += cigar[-1][0]
+            cigar = cigar[:-1]
+        if cigar[0][1] == 'S':
+            start_clipped_bases += cigar[0][0]
+            qSeq = qSeq[cigar[0][0]:]
+            cigar = cigar[1:]
+        if cigar[-1][1] == 'S':
+            end_clipped_bases += cigar[-1][0]
+            qSeq = qSeq[:-cigar[-1][0]]
+            cigar = cigar[:-1]
+
+        return qSeq, start_clipped_bases, end_clipped_bases, cigar
+
+    def get_tseq(qSeq, start_clipped_bases, end_clipped_bases, cigar, strand):
+        tLen = sum([reg_len for reg_len, reg_type in cigar
+                    if reg_type in 'MDN=X'])
+        tSeq = genome_index[r_sam_record['rName']][
+            int(r_sam_record['pos']) - 1:
+            int(r_sam_record['pos']) + tLen - 1]
+        if strand == '-': tSeq = th.rev_comp(tSeq)
+
+        # check that cigar starts and ends with matched bases
+        while cigar[0][1] not in 'M=X':
+            if cigar[0][1] in 'IP':
+                tSeq = tSeq[cigar[0][0]:]
+            else:
+                qSeq = qSeq[cigar[0][0]:]
+                start_clipped_bases += cigar[0][0]
+            cigar = cigar[1:]
+        while cigar[-1][1] not in 'M=X':
+            if cigar[-1][1] in 'IP':
+                tSeq = tSeq[:-cigar[-1][0]]
+            else:
+                qSeq = qSeq[:-cigar[-1][0]]
+                end_clipped_bases += cigar[0][0]
+            cigar = cigar[:-1]
+
+        qLen = sum([reg_len for reg_len, reg_type in cigar
+                    if reg_type in 'MIP=X'])
+        assert len(qSeq) == qLen, 'Read sequence from SAM and ' + \
+            'cooresponding cigar string do not agree.'
+
+        return tSeq, qSeq, start_clipped_bases, end_clipped_bases, cigar
+
+    def get_align_stats(tSeq, qSeq, cigar, strand):
+        num_ins, num_del, num_match, num_mismatch = 0, 0, 0, 0
+        tPos, qPos = 0, 0
+        for reg_len, reg_type in cigar:
+            if reg_type in 'M=X':
+                num_reg_match = sum(
+                    qBase == tBase for qBase, tBase in
+                    zip(qSeq[qPos:qPos+reg_len],
+                        tSeq[tPos:tPos+reg_len]))
+                num_match += num_reg_match
+                num_mismatch += reg_len - num_reg_match
+                tPos += reg_len
+                qPos += reg_len
+            elif reg_type in 'IP':
+                num_ins += reg_len
+                qPos += reg_len
+            else:
+                num_del += reg_len
+                tPos += reg_len
+
+        return num_ins, num_del, num_match, num_mismatch
+
     strand = '-' if int(r_sam_record['flag']) & 0x10 else '+'
     cigar = parse_cigar(r_sam_record['cigar'])
-    tSeq, start_clipped_bases, end_clipped_bases = get_tseq(cigar, strand)
+    if skip_align_stats:
+        # if alignment statistics are not requested, then only the template
+        # (genome) sequence is required and can be parsed slightly more quickly
+        # not command line option is available for this at the moment, but
+        # could be easily added with this code present. The resquiggle command
+        # has a lot of command line options and this seems a better default
+        (tSeq, start_clipped_bases,
+         end_clipped_bases) = get_just_tseq(cigar, strand)
+        num_ins, num_del, num_match, num_mismatch = 0, 0, 0, 0
+    else:
+        qSeq, start_clipped_bases, end_clipped_bases, cigar = get_qseq(
+            cigar, strand)
+        tSeq, qSeq, start_clipped_bases, end_clipped_bases, cigar = get_tseq(
+            qSeq, start_clipped_bases, end_clipped_bases, cigar, strand)
+        num_ins, num_del, num_match, num_mismatch = get_align_stats(
+            tSeq, qSeq, cigar, strand)
 
-    # TOOD compute indel/match/mismatch counts
     read_info = readInfo(
         read_id, bc_subgroup, start_clipped_bases, end_clipped_bases,
-        0, 0, 0, 0)
+        num_ins, num_del, num_match, num_mismatch)
     genome_loc = th.genomeLoc(
         int(r_sam_record['pos']) - 1, strand, r_sam_record['rName'])
 
@@ -1493,7 +1590,7 @@ def resquiggle_all_reads(
         basecall_group, basecall_subgroups, corrected_group, tb_model_fn,
         outlier_thresh, overwrite, align_batch_size, num_align_ps,
         align_threads_per_proc, num_resquiggle_ps, compute_sd, skip_index,
-        skip_pen, match_evalue, bandwidth, obs_filter):
+        skip_pen, match_evalue, bandwidth, obs_filter, const_scale):
     """
     Perform genomic alignment and event-less re-squiggle algorithm batched across reads
     """
@@ -1531,7 +1628,8 @@ def resquiggle_all_reads(
 
     rsqgl_args = (basecalls_q, progress_q, failed_reads_q, index_q,
                   basecall_group, corrected_group, tb_model_fn, outlier_thresh,
-                  compute_sd, skip_pen, match_evalue, bandwidth, obs_filter)
+                  compute_sd, skip_pen, match_evalue, bandwidth, obs_filter,
+                  const_scale)
     resquiggle_ps = []
     for p_id in xrange(num_resquiggle_ps):
         p = mp.Process(target=_resquiggle_worker, args=rsqgl_args)
@@ -1609,35 +1707,7 @@ def resquiggle_all_reads(
 
     return dict(failed_reads), all_index_data
 
-def eventless_resquiggle_main(args):
-    """
-    Main method for event-less resquiggle
-    """
-    global VERBOSE
-    VERBOSE = not args.quiet
-
-    if args.basecall_group == args.corrected_group:
-        sys.stderr.write(
-            '********** ERROR *********\n\t--basecall-group and ' +
-            '--corrected-group must be different.\n')
-        sys.exit()
-
-    # currently required, but adding new mappers shortly
-    if all(map_exe is None for map_exe in (
-            args.minimap2_executable, args.bwa_mem_executable,
-            args.graphmap_executable)):
-        sys.stderr.write(
-            '*' * 60 + '\nERROR: Must provide either a ' + \
-            'minimap22d, graphmap or bwa-mem executable.\n' + '*' * 60 + '\n')
-        sys.exit()
-    if args.minimap2_executable is not None:
-        mapper_data = mapperData(
-            args.minimap2_executable, 'minimap2', args.minimap2_index)
-    elif args.bwa_mem_executable is not None:
-        mapper_data = mapperData(args.bwa_mem_executable, 'bwa_mem')
-    else:
-        mapper_data = mapperData(args.graphmap_executable, 'graphmap')
-
+def parse_files(args):
     if VERBOSE: sys.stderr.write('Getting file list.\n')
     try:
         if not os.path.isdir(args.fast5_basedir):
@@ -1664,6 +1734,49 @@ def eventless_resquiggle_main(args):
             'directory or within immediate subdirectories.\n' + '*' * 60 + '\n')
         sys.exit()
 
+    return files, fast5_basedir, index_fn
+
+def get_mapper_data(args):
+    if all(map_exe is None for map_exe in (
+            args.minimap2_executable, args.bwa_mem_executable,
+            args.graphmap_executable)):
+        sys.stderr.write(
+            '*' * 60 + '\nERROR: Must provide either a ' + \
+            'minimap2, graphmap or bwa-mem executable.\n' + '*' * 60 + '\n')
+        sys.exit()
+    if args.minimap2_executable is not None:
+        mapper_data = mapperData(
+            args.minimap2_executable, 'minimap2', args.minimap2_index)
+    elif args.bwa_mem_executable is not None:
+        mapper_data = mapperData(args.bwa_mem_executable, 'bwa_mem')
+    else:
+        mapper_data = mapperData(args.graphmap_executable, 'graphmap')
+
+    return mapper_data
+
+def eventless_resquiggle_main(args):
+    """
+    Main method for event-less resquiggle
+    """
+    global VERBOSE
+    VERBOSE = not args.quiet
+
+    if args.basecall_group == args.corrected_group:
+        sys.stderr.write(
+            '********** ERROR *********\n\t--basecall-group and ' +
+            '--corrected-group must be different.\n')
+        sys.exit()
+
+    mapper_data = get_mapper_data(args)
+
+    files, fast5_basedir, index_fn = parse_files(args)
+
+    const_scale = None
+    if args.fixed_scale is not None:
+        const_scale = args.fixed_scale
+    elif not args.fit_scale_per_read:
+        const_scale = th.estimate_global_scale(files)
+
     outlier_thresh = args.outlier_threshold if (
         args.outlier_threshold > 0) else None
 
@@ -1685,7 +1798,8 @@ def eventless_resquiggle_main(args):
         args.tombo_model_filename, outlier_thresh, args.overwrite,
         args.alignment_batch_size, args.align_processes, align_threads_per_proc,
         num_resquiggle_ps, args.include_event_stdev, args.skip_index,
-        args.skip_penalty, args.match_expected_value, args.bandwidth, obs_filter)
+        args.skip_penalty, args.match_expected_value, args.bandwidth, obs_filter,
+        const_scale)
     if not args.skip_index:
         th.write_index_file(all_index_data, index_fn, fast5_basedir)
     fail_summary = [(err, len(fns)) for err, fns in failed_reads.items()]

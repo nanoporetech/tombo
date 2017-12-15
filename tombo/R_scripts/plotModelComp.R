@@ -97,7 +97,7 @@ plotModelComp <- function(sigDat, quantDat, boxDat, eventDat,
             }
             p <- p + geom_path(
                          aes(x=Position, y=Signal, color=Group, group=Read),
-                         alpha=0.3, size=0.5, show.legend=FALSE)
+                         alpha=0.3, size=0.2, show.legend=FALSE)
         } else if(reg_i %in% quantDat$Region) {
             reg_model_dat <- do.call(
                 rbind.data.frame,

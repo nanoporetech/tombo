@@ -258,7 +258,16 @@ def wiggle_main(args):
     ts.VERBOSE = VERBOSE
 
     if (any(data_type in args.wiggle_types
-            for data_type in ['stat', 'mt_stat']) and
+            for data_type in ['signal', 'difference', 'coverage',
+                              'signal_sd', 'length']) and
+        args.fast5_basedirs is None):
+        sys.stderr.write(
+            '*' * 60 + '\nERROR: Must provide a fast5 basedir to output ' +
+            'signal, difference, coverage, signal_sd and/or length wiggle ' +
+            'files.\n' + '*' * 60 + '\n')
+        sys.exit()
+    if (any(data_type in args.wiggle_types
+            for data_type in ['stat', 'mt_stat', 'fraction']) and
         args.statistics_filename is None):
         sys.stderr.write(
             '*' * 60 + '\nERROR: Must provide a statistics filename to output ' +

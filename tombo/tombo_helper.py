@@ -8,6 +8,7 @@ import fnmatch
 import numpy as np
 
 from glob import glob
+from operator import itemgetter
 from itertools import izip, repeat
 from collections import defaultdict, namedtuple
 
@@ -33,7 +34,8 @@ scaleValues = namedtuple(
 genomeLoc = namedtuple(
     'genomeLoc', ('Start', 'Strand', 'Chrom'))
 
-NORM_TYPES = ('none', 'pA', 'pA_raw', 'median', 'robust_median')
+NORM_TYPES = ('none', 'pA', 'pA_raw', 'median', 'robust_median',
+              'median_const_scale')
 STANDARD_MODELS = {'DNA':'tombo.DNA.model',
                    'RNA':'tombo.RNA.200mV.model'}
 ALTERNATE_MODELS = {'DNA_5mC':'tombo.DNA.5mC.model',}
@@ -276,7 +278,7 @@ def filter_reads(fast5s_dir, corr_grp, obs_filter):
                 from_base_fn, start, end, rsrr, corr_grp, s_grp,
                 read_is_stuck(fast5s_dir + '/' + from_base_fn, s_grp), rna))
             for from_base_fn, start, end, rsrr, c_grp,
-            s_grp, filtered, rna in cs_raw_data]
+            s_grp, filtered, rna in cs_raw_data if not filtered]
         num_reads += len(cs_raw_data)
         num_filt_reads += sum([1 for i_data in cs_filt_reads if i_data[1][6]])
         filt_index_data.extend(cs_filt_reads)
@@ -290,7 +292,7 @@ def filter_reads(fast5s_dir, corr_grp, obs_filter):
 
     return
 
-def _filter_reads_for_coverage(fast5s_dir, corr_grp, pct_to_filter):
+def filter_reads_for_coverage(fast5s_dir, corr_grp, frac_to_filter):
     fast5s_dir = (fast5s_dir if fast5s_dir.endswith('/') else
                   fast5s_dir + '/')
     index_fn = get_index_fn(fast5s_dir, corr_grp)
@@ -300,25 +302,50 @@ def _filter_reads_for_coverage(fast5s_dir, corr_grp, pct_to_filter):
         import pickle
     with open(index_fn, 'rb') as index_fp:
         index_data = pickle.load(index_fp)
-    filt_index_data = []
-    num_reads, num_filt_reads = 0, 0
+    unfilt_data = []
+    unfilt_reads_cov = []
+    prev_filt_data = []
     for chrm_strand, cs_raw_data in index_data.iteritems():
-        cs_filt_reads = [
-            (chrm_strand, (
-                from_base_fn, start, end, rsrr, corr_grp, s_grp,
-                read_is_stuck(fast5s_dir + '/' + from_base_fn, s_grp), rna))
-            for from_base_fn, start, end, rsrr, c_grp,
-            s_grp, filtered, rna in cs_raw_data]
-        num_reads += len(cs_raw_data)
-        num_filt_reads += sum([1 for i_data in cs_filt_reads if i_data[1][6]])
-        filt_index_data.extend(cs_filt_reads)
+        max_end = max(end for (_, _, end, _, _, _, _, _) in cs_raw_data)
+        cs_coverage = np.zeros(max_end, dtype=np.int_)
+        for (from_base_fn, start, end, rsrr, c_grp,
+             s_grp, filtered, rna) in cs_raw_data:
+            if filtered: continue
+            cs_coverage[start:end] += 1
+        # now go through and compute coverage as well
+        for (from_base_fn, start, end, rsrr, c_grp,
+             s_grp, filtered, rna) in cs_raw_data:
+            if filtered:
+                prev_filt_data.append((chrm_strand, (
+                    from_base_fn, start, end, rsrr, c_grp, s_grp, filtered, rna)))
+                continue
+            # add approximate coverage from middle of read
+            # faster than mean over the whole read
+            unfilt_reads_cov.append(cs_coverage[start + int((end - start)/2)])
+            unfilt_data.append((chrm_strand, (
+                from_base_fn, start, end, rsrr, c_grp, s_grp, filtered, rna)))
 
+    num_reads = len(unfilt_data)
+    num_filt_reads = int(frac_to_filter * num_reads)
     sys.stderr.write(
         'Filtered ' + str(num_filt_reads) +
         ' reads due to observations per base filter from a ' +
         'total of ' + str(num_reads) + ' reads in ' + fast5s_dir + '.\n')
 
-    write_index_file(filt_index_data, index_fn, fast5s_dir)
+    # create probabilities array with coverage values normalized to sum to 1
+    unfilt_reads_cov = np.array(unfilt_reads_cov, dtype=np.float)
+    unfilt_reads_p = unfilt_reads_cov / unfilt_reads_cov.sum()
+    filt_indices = np.random.choice(
+        num_reads, size=num_filt_reads, replace=False, p=unfilt_reads_p)
+    filt_index_data = [
+        (chrm_strand, (from_base_fn, start, end, rsrr, c_grp, s_grp, True, rna))
+        for (chrm_strand, (from_base_fn, start, end, rsrr, c_grp, s_grp, _, rna))
+        in itemgetter(*filt_indices)(unfilt_data)]
+    unfilt_index_data = list(itemgetter(*list(set(range(num_reads)).difference(
+        filt_indices)))(unfilt_data))
+
+    write_index_file(prev_filt_data + filt_index_data + unfilt_index_data,
+                     index_fn, fast5s_dir)
 
     return
 
@@ -366,7 +393,8 @@ def parse_fast5s_wo_index(
 
 def convert_index(index_data, fast5s_dir, corr_grp, new_corr_grp):
     """
-    Convert an index and save under a new corrected group. Mostly for model_resquiggle
+    Convert an index and save under a new corrected group. Mostly for
+    model_resquiggle
     """
     new_index_data = []
     for (chrm, strand), cs_raw_data in index_data.iteritems():
@@ -570,11 +598,39 @@ def get_valid_cpts(norm_signal, min_base_obs, num_events):
 
     return valid_cpts
 
+def estimate_global_scale(fast5_fns, num_reads=500):
+    sys.stderr.write('Estimating global scale parameter\n')
+    np.random.shuffle(fast5_fns)
+    read_mads = []
+    for fast5_fn in fast5_fns:
+        try:
+            with h5py.File(fast5_fn, 'r') as fast5_data:
+                all_sig = fast5_data['/Raw/Reads'].values()[0]['Signal'].value
+            shift = np.median(all_sig)
+            read_mads.append(np.median(np.abs(all_sig - shift)))
+        except:
+            continue
+        if len(read_mads) >= num_reads:
+            break
+
+    if len(read_mads) == 0:
+        sys.stderr.write(
+            '******** ERROR *********\n\tNo reads contain raw signal for ' +
+            'global scale parameter estimation.\n')
+        sys.exit()
+    if len(read_mads) < num_reads:
+        sys.stderr.write(
+            '******** WARNING *********\n\tFew reads contain raw signal for ' +
+            'global scale parameter estimation. Results may not be optimal.\n')
+
+    return np.mean(read_mads)
+
 def normalize_raw_signal(
         all_raw_signal, read_start_rel_to_raw, read_obs_len,
         norm_type=None, channel_info=None, outlier_thresh=None,
         shift=None, scale=None, lower_lim=None, upper_lim=None,
-        pore_model=None, event_means=None, event_kmers=None):
+        pore_model=None, event_means=None, event_kmers=None,
+        const_scale=None):
     """
     Apply scaling and windsorizing parameters to normalize raw signal
     """
@@ -611,6 +667,10 @@ def normalize_raw_signal(
         elif norm_type == 'median':
             shift = np.median(raw_signal)
             scale = np.median(np.abs(raw_signal - shift))
+        elif norm_type == 'median_const_scale':
+            assert const_scale is not None
+            shift = np.median(raw_signal)
+            scale = const_scale
         elif norm_type == 'robust_median':
             shift = np.mean(np.percentile(
                 raw_signal, robust_quantiles))
@@ -1375,6 +1435,22 @@ def filter_stuck_main(args):
     obs_filter = parse_obs_filter(args.obs_per_base_filter)
     for fast5s_dir in args.fast5_basedirs:
         filter_reads(fast5s_dir, args.corrected_group, obs_filter)
+
+    return
+
+def filter_coverage_main(args):
+    global VERBOSE
+    VERBOSE = not args.quiet
+
+    if not 0 < args.percent_to_filter < 100:
+        sys.stderr.write(
+            '********** ERROR ********\n\t--percent-to-filter must be between ' +
+            '0 and 100.\n')
+        sys.exit()
+
+    for fast5s_dir in args.fast5_basedirs:
+        filter_reads_for_coverage(
+            fast5s_dir, args.corrected_group, args.percent_to_filter / 100.0)
 
     return
 

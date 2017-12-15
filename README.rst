@@ -2,9 +2,9 @@
 Summary
 =======
 
-Tombo is a suite of tools primarily for the identification of modified
-nucleotides from nanopore sequencing data. Tombo also provides tools for
-the analysis and visualization of raw nanopore signal.
+Tombo is a suite of tools primarily for the identification of modified nucleotides from nanopore sequencing data.
+
+Tombo also provides tools for the analysis and visualization of raw nanopore signal.
 
 ============
 Installation
@@ -23,148 +23,151 @@ Basic tombo installation (python2.7 support only)
 
 ..
 
-    Additional installation instructions options
+    Additional installation instructions options below
 
-=========
-Use Cases
-=========
+==================
+Full Documentation
+==================
 
-Perform re-squiggle algorithm (once per root directory of FAST5 files)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Detailed documentation can be found at https://nanoporetech.github.io/tombo/
 
-\* Need not contain Events data, but must contain Fastq slot
+==============
+Tombo Examples
+==============
+
+Re-squiggle (Raw Data Alignment)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
     tombo resquiggle path/to/amplified/dna/fast5s/ genome.fasta --minimap2-executable ./minimap2 --processes 4
 
-Identify modified nucleotides comparing to an alternative 5mC model
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..
+
+    FAST5 files need not contain Events data, but must contain Fastq slot.
+
+    Only R9.4/5 data (DNA or RNA) is supported at this time. Processing of other samples may produce sub-optimal results.
+
+Identify Modified Bases
+^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ --alternate-bases 5mC --statistics-file-basename sample_compare
-    tombo write_wiggles --fast5-basedirs path/to/native/dna/fast5s/ --wiggle-basename sample_compare.5mC --statistics-filename sample_compare.5mC.tombo.stats
+    # comparing to an alternative 5mC model
+    tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ \
+        --alternate-bases 5mC --statistics-file-basename sample_compare
 
-Identify modified nucleotides from a single sample
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    # comparing to a control sample (e.g. PCR)
+    tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ \
+        --control-fast5-basedirs path/to/amplified/dna/fast5s/  --statistics-file-basename sample_compare
 
-::
+    # compare to the canonical base model
+    tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ \
+        --statistics-file-basename sample --processes 4
 
-    tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ --statistics-file-basename sample --processes 4
-    tombo write_wiggles --fast5-basedirs path/to/native/dna/fast5s/ --wiggle-basename sample --statistics-filename sample.tombo.stats
+..
 
-Identify modified nucleotides comparing two samples
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Must run ``resquiggle`` on reads before testing for modified bases.
+   
+    ``test_significance`` produces a binary file. See ``write_wiggles`` for several text outputs or ``plot_most_significant`` to use for genome region selection.
 
-::
-
-    tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ --control-fast5-basedirs path/to/amplified/dna/fast5s/  --statistics-file-basename sample_compare
-    tombo write_wiggles --fast5-basedirs path/to/native/dna/fast5s/ --control-fast5-basedirs path/to/amplified/dna/fast5s/ --wiggle-basename sample_compare --statistics-filename sample_compare.tombo.stats
-
-Identify modified RNA nucleotides from a single sample
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-::
-
-    tombo resquiggle path/to/native/rna/fast5s/ transcriptome.fasta --minimap2-executable ./minimap2 --processes 4
-    tombo test_significance --fast5-basedirs path/to/native/rna/fast5s/ --statistics-file-basename rna_sample --processes 4
-    tombo write_wiggles --fast5-basedirs path/to/native/rna/fast5s/ --wiggle-basename rna_sample --statistics-filename rna_sample.tombo.stats
-
-Some plotting examples
-^^^^^^^^^^^^^^^^^^^^^^
+Text Output (Wiggle file format)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    tombo plot_max_coverage --fast5-basedirs path/to/native/rna/fast5s/ --tombo-model-filename /path/to/tombo/root/tombo/tombo_models/tombo.DNA.model
-    tombo plot_motif_centered --fast5-basedirs path/to/native/rna/fast5s/ --motif AWC --genome-fasta genome.fasta --control-fast5-basedirs path/to/amplified/dna/fast5s/ --deepest-coverage
-    tombo plot_per_read --fast5-basedirs path/to/native/rna/fast5s/ --genome-locations chromosome:1000 chromosome:2000:- --alternate-model-filename /path/to/tombo/root/tombo/tombo_models/tombo.DNA.5mC.model
+    # extract fraction of reads modified at each genomic base in wiggle file format
+    tombo write_wiggles --wiggle-types fraction --statistics-filename sample.5mC.tombo.stats
 
-Extract sequences surrounding modified positions
+    # extract read depth from mapped and re-squiggled reads
+    tombo write_wiggles --wiggle-types coverage --fast5-basedirs path/to/native/dna/fast5s/
+
+Extract Sequences Surrounding Modified Positions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    tombo write_most_significant_fasta --statistics-filename sample_compare.5mC.tombo.stats --genome-fasta genome.fasta
+    tombo write_most_significant_fasta --statistics-filename sample_compare.5mC.tombo.stats \
+        --genome-fasta genome.fasta
 
-=====
-Usage
-=====
-
-::
-
-    tombo -h
-    tombo [command] [options]
-
-Resquiggle (Must be run before any other commands):
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Plotting Examples
+^^^^^^^^^^^^^^^^^
 
 ::
 
-     resquiggle                    Re-annotate raw signal with genomic aignement of existing basecalls.
+    # plot raw signal with standard model overlay at reions with maximal coverage
+    tombo plot_max_coverage --fast5-basedirs path/to/native/rna/fast5s/ --plot-standard-model
+    
+    # plot raw signal along with signal from a control (PCR) sample at locations with the AWC motif
+    tombo plot_motif_centered --fast5-basedirs path/to/native/rna/fast5s/ \
+        --motif AWC --genome-fasta genome.fasta --control-fast5-basedirs path/to/amplified/dna/fast5s/
+    
+    # plot raw signal at genome locations with the most significantly/consistently modified bases
+    tombo plot_most_significant --fast5-basedirs path/to/native/rna/fast5s/ \
+        --statistics-filename sample_compare.5mC.tombo.stats --plot-alternate-model 5mC
+    
+    # plot per-read test statistics using the 5mC alternative model testing method
+    tombo plot_per_read --fast5-basedirs path/to/native/rna/fast5s/ \
+        --genome-locations chromosome:1000 chromosome:2000:- --plot-alternate-model 5mC
 
-Statistical Testing Command:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+===============
+Common Commands
+===============
 
 ::
 
-     test_significance             Test for shifts in signal against a reference or against another set of reads.
+   # get tombo help
+   tombo -h
+   # run tombo sub-commands
+   tombo [command] [options]
+
+Re-squiggle (Raw Data Alignment):
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..
+
+    Must be run before any other commands.
+
+::
+
+   resquiggle                    Re-annotate raw signal with genomic alignment from existing basecalls.
+
+Modified Base Detection:
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+   test_significance             Test for shifts in signal indicative of non-canonical bases.
 
 Text Output Commands:
 ^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-     write_wiggles                 Write wiggle files for nanopore signal values, coverage, and statistics.
-     write_most_significant_fasta  Write sequence where signal differs the most significantly between two groups.
+   write_wiggles                 Write text outputs for genome browser visualization and bioinformatic processing (wiggle file format).
+   write_most_significant_fasta  Write sequence centered on most modified genomic locations.
 
 Genome Anchored Plotting Commands:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-     plot_max_coverage             Plot signal in regions with maximal coverage.
-     plot_genome_location          Plot signal at defined genomic locations.
-     plot_motif_centered           Plot locations centered on a specific motif.
-     plot_max_difference           Plot locations where signal differs the most between two groups.
-     plot_most_significant         Plot locations where signal differs most significantly between two groups.
-     plot_model_most_significant   Plot locations where signal differs most significantly from the kmer model.
-     plot_motif_with_stats         Plot signal from several regions and test statistics centered on a k-mer of interst.
-     plot_per_read                 Plot per read modified base predictions.
+   plot_max_coverage             Plot raw signal in regions with maximal coverage.
+   plot_genome_location          Plot raw signal at defined genomic locations.
+   plot_motif_centered           Plot raw signal at a specific motif.
+   plot_max_difference           Plot raw signal where signal differs most between two read groups.
+   plot_most_significant         Plot raw signal at most modified locations.
+   plot_motif_with_stats         Plot example signal and statistic distributions around a motif of interst.
+   plot_per_read                 Plot per read modified base probabilities.
 
-Sequencing Time Anchored Plotting Commands:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-::
-
-     plot_correction               Plot segmentation before and after correction.
-     plot_multi_correction         Plot multiple raw signals anchored by genomic location.
-
-Other Plotting Commands:
-^^^^^^^^^^^^^^^^^^^^^^^^
+Read Filtering:
+^^^^^^^^^^^^^^^
 
 ::
 
-     cluster_most_significant      Clustering traces at bases with significant differences.
-     plot_kmer                     Plot signal quantiles acorss kmers.
-
-Read Filtering (Only effects tombo index file):
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-::
-
-     clear_filters                 Clear filters to process all successfully re-squiggled reads.
-     filter_stuck                  Apply filter based on observations per base thresholds.
-
-Event-based Re-squiggle (Primarily for producing new models):
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-::
-
-     event_resquiggle              Re-annotate raw signal with genomic alignment from existing basecalls.
-     model_resquiggle              Re-annotate raw signal with genomic bases by shifting the signal to more closely match a k-mer model.
-     estimate_kmer_reference       Estimate reference k-mer model derived from the provided reads.
-     estimate_alt_reference        Estimate alternative tombo model from a sample containing standard bases spiked with a single non-standard base at random positions.
+   clear_filters                 Clear filters to process all successfully re-squiggled reads.
+   filter_stuck                  Apply filter based on observations per base thresholds.
+   filter_coverage               Apply filter to downsample for more even coverage.
 
 ..
 
@@ -211,11 +214,10 @@ Optional packages for alternative model estimation:
 
 -  sklearn
 
-Installation along with additional dependencies
------------------------------------------------
+Advanced Installation Instructions
+----------------------------------
 
-Install tombo with all optional dependencies (for plotting and model
-estimation)
+Install tombo with all optional dependencies (for plotting and model estimation)
 
 ::
 
@@ -244,8 +246,7 @@ Install github version of tombo (most versions on pypi should be up-to-date)
 Citation
 ========
 
-Stoiber, M.H. et al. De novo Identification of DNA Modifications Enabled
-by Genome-Guided Nanopore Signal Processing. bioRxiv (2016).
+Stoiber, M.H. et al. De novo Identification of DNA Modifications Enabled by Genome-Guided Nanopore Signal Processing. bioRxiv (2016).
 
 http://biorxiv.org/content/early/2017/04/10/094672
 

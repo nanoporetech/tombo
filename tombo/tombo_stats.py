@@ -26,12 +26,12 @@ VERBOSE = False
 PROFILE_SIGNIF = False
 PROFILE_EST_KMER = False
 
-DEBUG_EST_ALT = True
+DEBUG_EST_STD = False
 DEBUG_EST_BW = 0.05
 DEBUG_EST_NUM_KMER_SAVE = 500
 
 DNA_BASES = ['A','C','G','T']
-MIN_POSITION_SD = 0.01
+MIN_POSITION_SD = 0.1
 
 #######################################################
 ##### Pair-wise distance functions for clustering #####
@@ -120,6 +120,10 @@ def get_most_signif_regions(
             sys.exit()
 
     if fraction_order:
+        # TODO consider adding valid fraction as in ROC curve script analysis
+        # first reverse sort by alternative fraction so largest alt fractions
+        # show up first as opposed to all 0 fractions randomly sorted
+        all_stats[::-1].sort(order='alt_frac')
         all_stats.sort(order='frac')
     else:
         all_stats.sort(order='stat')
@@ -192,7 +196,8 @@ def parse_tombo_models(alt_fns, ref_upstrm_bases, ref_kmer_width):
     """
     alt_refs = []
     for alt_model_fn in alt_fns:
-        alt_ref, alt_upstrm_bases, alt_base, alt_name = parse_tombo_model(alt_model_fn)
+        alt_ref, alt_upstrm_bases, alt_base, alt_name = parse_tombo_model(
+            alt_model_fn)
         if (ref_upstrm_bases != alt_upstrm_bases or
             ref_kmer_width != len(next(alt_ref.iterkeys()))):
             sys.stderr.write(
@@ -202,7 +207,8 @@ def parse_tombo_models(alt_fns, ref_upstrm_bases, ref_kmer_width):
             continue
         if alt_base is None:
             sys.stderr.write(
-                '********* WARNING *********\n\tAlternative model ' + alt_model_fn +
+                '********* WARNING *********\n\tAlternative model ' +
+                alt_model_fn +
                 ' appears to be a standard model and will not be processed.\n')
             continue
 
@@ -212,8 +218,12 @@ def parse_tombo_models(alt_fns, ref_upstrm_bases, ref_kmer_width):
 
 def get_default_standard_ref(raw_read_coverage):
     if th.is_rna(raw_read_coverage):
+        if VERBOSE: sys.stderr.write(
+                'Using default canonical ***** RNA ***** model.\n')
         standard_ref_fn = th.STANDARD_MODELS['RNA']
     else:
+        if VERBOSE: sys.stderr.write(
+                'Using default canonical ***** DNA ***** model.\n')
         standard_ref_fn = th.STANDARD_MODELS['DNA']
     # get full filename path with setuptools
     standard_ref_fn = pkg_resources.resource_filename(
@@ -223,8 +233,12 @@ def get_default_standard_ref(raw_read_coverage):
 
 def get_default_standard_ref_from_files(fast5_fns):
     if th.is_rna_from_files(fast5_fns):
+        if VERBOSE: sys.stderr.write(
+                'Using default canonical ***** RNA ***** model.\n')
         standard_ref_fn = th.STANDARD_MODELS['RNA']
     else:
+        if VERBOSE: sys.stderr.write(
+                'Using default canonical ***** DNA ***** model.\n')
         standard_ref_fn = th.STANDARD_MODELS['DNA']
     # get full filename path with setuptools
     standard_ref_fn = pkg_resources.resource_filename(
@@ -440,7 +454,7 @@ def estimate_kmer_model(
     if VERBOSE: sys.stderr.write('Tabulating k-mer model statistics.\n')
     all_kmer_mean_sds = []
     kmer_width = upstrm_bases + dnstrm_bases + 1
-    if DEBUG_EST_ALT:
+    if DEBUG_EST_STD:
         from sklearn.neighbors import KernelDensity
         kmer_dens = []
         save_x = np.linspace(-5, 5, DEBUG_EST_NUM_KMER_SAVE)[:, np.newaxis]
@@ -462,7 +476,7 @@ def estimate_kmer_model(
             sys.exit()
         all_kmer_mean_sds.append((kmer, np.median(kmer_levels[:,0]),
                                   np.mean(kmer_levels[:,1])))
-        if DEBUG_EST_ALT:
+        if DEBUG_EST_STD:
             kmer_kde = KernelDensity(
                 kernel='gaussian', bandwidth=DEBUG_EST_BW).fit(
                     kmer_levels[:,0][:,np.newaxis])
@@ -470,7 +484,7 @@ def estimate_kmer_model(
                 kmer_dens.append((
                     kmer, np.exp(kmer_kde.score_samples(save_x))))
 
-    if DEBUG_EST_ALT:
+    if DEBUG_EST_STD:
         with open('debug_est_standard_ref.density.txt', 'w') as fp:
             fp.write('Kmer\tSignal\tDensity\n')
             fp.write('\n'.join('\t'.join(map(str, (kmer, x, y)))
@@ -486,14 +500,14 @@ def estimate_kmer_model(
 
     return
 
-def parse_kmer_levels(
+def parse_base_levels(
         all_reads, kmer_width, upstrm_bases, check_min_kmer_batch,
         kmer_obs_thresh, max_kmer_obs, min_kmer_obs_to_est):
     """
     Parse base levels and store grouped by k-mer
     """
     dnstrm_bases = kmer_width - upstrm_bases - 1
-    mixed_kmers_levels = dict(
+    mixed_base_levels = dict(
         (''.join(kmer), [])
         for kmer in product(DNA_BASES, repeat=kmer_width))
     # store set of k-mers with enough observations to save on memory footprint
@@ -507,20 +521,20 @@ def parse_kmer_levels(
         n_reads += 1
         r_kmers = [r_seq[i:i+kmer_width]
                    for i in range(len(r_seq)-kmer_width+1)]
-        r_kmer_levels = defaultdict(list)
+        r_base_levels = defaultdict(list)
         for kmer, level in zip(r_kmers, r_means[upstrm_bases:-dnstrm_bases]):
-            r_kmer_levels[kmer].append(level)
+            r_base_levels[kmer].append(level)
         # only add observations for k-mers that have not been seen enough times
         # save memory for abundent k-mers
-        for kmer in set(r_kmer_levels.keys()).difference(completed_kmers):
-            mixed_kmers_levels[kmer].extend(r_kmer_levels[kmer])
+        for kmer in set(r_base_levels.keys()).difference(completed_kmers):
+            mixed_base_levels[kmer].extend(r_base_levels[kmer])
 
         # every check_min_kmer_batch check to see if there are enough
         # observations of each kmer to continue to estimation
         if n_reads % check_min_kmer_batch == 0:
             kmer_levels_counts = sorted([
                 (len(kmer_levels), kmer)
-                for kmer, kmer_levels in mixed_kmers_levels.iteritems()])
+                for kmer, kmer_levels in mixed_base_levels.iteritems()])
             if kmer_levels_counts[0][0] > kmer_obs_thresh:
                 break
             if VERBOSE: sys.stderr.write(
@@ -535,10 +549,10 @@ def parse_kmer_levels(
                     break
                 completed_kmers.add(kmer)
 
-    if min(len(kmer_levels) for kmer_levels in
-           mixed_kmers_levels.itervalues()) < kmer_obs_thresh:
+    if min(len(base_levels) for base_levels in
+           mixed_base_levels.itervalues()) < kmer_obs_thresh:
         fewest_kmer_obs = min(len(kmer_levels) for kmer_levels in
-                              mixed_kmers_levels.itervalues())
+                              mixed_base_levels.itervalues())
         if fewest_kmer_obs < min_kmer_obs_to_est:
             sys.stderr.write(
                 '********* ERROR ********\n\tToo few minimal k-mer ' +
@@ -553,100 +567,227 @@ def parse_kmer_levels(
             'Continuing to estimation using a k-mer with ' +
             str(fewest_kmer_obs) + ' total observations\n')
 
-    return mixed_kmers_levels
+    return mixed_base_levels
 
-def estimate_alt_model(
-        f5_dirs, corrected_group, basecall_subgroups,
-        standard_ref_fn, alt_base, min_alt_base_frac, kmer_obs_thresh,
-        num_sd_thresh, alt_name, check_min_kmer_batch=1000,
-        max_kmer_obs=10000, min_kmer_obs_to_est=50):
-    """
-    Estimate an alternative model from a standard bases only sample with a single,
-    known spiked-in alternative base
-    """
-    from sklearn import mixture
+def write_kmer_densities_file(dens_fn):
+    with open(dens_fn, 'w') as fp:
+        fp.write('Kmer\tSignal\tDensity\n')
+        fp.write('\n'.join('\t'.join(map(str, (kmer, x, y)))
+                           for kmer, dens_i in kmer_dens.items()
+                           for x, y in zip(save_x[:,0], dens_i)) + '\n')
 
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs, corrected_group, basecall_subgroups)
+    return
+
+def parse_kmer_densities_file(dens_fn):
+    kmer_dens_raw = defaultdict(list)
+    with open(dens_fn) as dens_fp:
+        # read in header
+        dens_fp.readline()
+        for line in dens_fp:
+            kmer, _, dens_i = line.split()
+            kmer_dens_raw[kmer].append(float(dens_i))
+
+    kmer_dens = {}
+    first_len = None
+    for kmer, dens_i in kmer_dens_raw.items():
+        if first_len is None: first_len = len(dens_i)
+        if len(dens_i) != first_len:
+            sys.stderr.write(
+                '******** ERROR *********\n\tDensity file is valid.\n')
+            sys.exit()
+        kmer_dens[kmer] = np.array(dens_i)
+
+    return kmer_dens
+
+def est_kernel_density(
+        raw_read_coverage, kmer_width, upstrm_bases, kmer_obs_thresh,
+        density_basename, save_x, kernel_dens_bw, alt_or_stnd_name='alt',
+        check_min_kmer_batch=1000, max_kmer_obs=10000, min_kmer_obs_to_est=50):
+    from sklearn.neighbors import KernelDensity
     all_reads = [r_data for cs_reads in raw_read_coverage.values()
                  for r_data in cs_reads]
     np.random.shuffle(all_reads)
+    base_levels = parse_base_levels(
+        all_reads, kmer_width, upstrm_bases, check_min_kmer_batch,
+        kmer_obs_thresh, max_kmer_obs, min_kmer_obs_to_est)
+
+    if VERBOSE: sys.stderr.write('Fitting kernel densities for k-mer levels\n')
+    kmer_dens = {}
+    for kmer, norm_levels in base_levels.items():
+        # reshape norm levels for sklearn format and conver to numpy array
+        norm_levels = np.array(norm_levels).reshape(-1,1)
+        kmer_kde = KernelDensity(
+            kernel='gaussian', bandwidth=kernel_dens_bw).fit(norm_levels)
+        with np.errstate(under='ignore'):
+            kmer_dens[kmer] = np.exp(kmer_kde.score_samples(save_x))
+
+    if density_basename is not None:
+        write_kmer_densities_file(
+            density_basename + '.' + alt_or_stnd_name + '_density.txt',
+            kmer_dens, save_x)
+
+    return kmer_dens
+
+def estimate_kmer_densities(
+        f5_dirs, control_dirs, corrected_group, basecall_subgroups,
+        standard_ref_fn, kmer_obs_thresh, density_basename, kernel_dens_bw,
+        save_x):
+    raw_read_coverage = th.parse_fast5s(
+        f5_dirs, corrected_group, basecall_subgroups)
+    cntrl_read_coverage = th.parse_fast5s(
+        control_dirs, corrected_group, basecall_subgroups)
 
     if VERBOSE: sys.stderr.write('Parsing standard model file\n')
     if standard_ref_fn is None:
         standard_ref_fn = get_default_standard_ref(raw_read_coverage)
-
     standard_ref, upstrm_bases, _, _ = parse_tombo_model(standard_ref_fn)
     kmer_width = len(next(standard_ref.iterkeys()))
+
+    if VERBOSE: sys.stderr.write('Parsing base levels from alternative reads\n')
+    alt_dens = est_kernel_density(
+        raw_read_coverage, kmer_width, upstrm_bases, kmer_obs_thresh,
+        density_basename, save_x, kernel_dens_bw, 'alternate')
+    if VERBOSE: sys.stderr.write('Parsing base levels from standard reads\n')
+    standard_dens = est_kernel_density(
+        cntrl_read_coverage, kmer_width, upstrm_bases, kmer_obs_thresh,
+        density_basename, save_x, kernel_dens_bw, 'control')
+
+    return alt_dens, standard_dens, standard_ref, upstrm_bases
+
+def load_kmer_densities(
+        alt_dens_fn, standard_dens_fn, f5_dirs, corrected_group,
+        basecall_subgroups, standard_ref_fn):
+    if VERBOSE: sys.stderr.write('Parsing standard model file\n')
+    if standard_ref_fn is None:
+        if f5_dirs is None:
+            sys.stderr.write(
+                '******** ERROR ********\n\tMust provide either a FAST5s ' +
+                'directory (in order to determine the correct canonical ' +
+                'model) or a canonical model file.\n')
+            sys.exit()
+        raw_read_coverage = th.parse_fast5s(
+            f5_dirs, corrected_group, basecall_subgroups)
+        standard_ref_fn = get_default_standard_ref(raw_read_coverage)
+    standard_ref, upstrm_bases, _, _ = parse_tombo_model(standard_ref_fn)
+
+    if VERBOSE: sys.stderr.write('Parsing density files\n')
+    alt_dens = parse_kmer_densities_file(alt_dens_fn)
+    standard_dens = parse_kmer_densities_file(standard_dens_fn)
+    num_dens_points = alt_dens.values()[0].shape[0]
+    if num_dens_points != standard_dens.values()[0].shape[0]:
+        sys.stderr.write(
+            '******** ERROR *********\n\tAlternative and standard density ' +
+            'estimates do not correspond.\n')
+        sys.exit()
+
+    save_x = np.linspace(-5, 5, num_dens_points)[:, np.newaxis]
+
+    return alt_dens, standard_dens, standard_ref, upstrm_bases, save_x
+
+def isolate_alt_density(
+        alt_dens, standard_dens, alt_base, alt_frac_pctl, standard_ref, save_x):
+    def get_alt_shift(kmer):
+        kmer_standard_dens = standard_dens[kmer]
+        kmer_alt_dens = alt_dens[kmer]
+
+        # find highest peak in standard density
+        standard_peak = np.argmax(kmer_standard_dens)
+
+        # find closest peak in alternative density
+        alt_local_peaks = np.where(np.concatenate([
+            [False,], np.logical_and(
+                kmer_alt_dens[1:-1] > kmer_alt_dens[:-2],
+                kmer_alt_dens[1:-1] > kmer_alt_dens[2:]) + [False,]]))[0]
+        matched_alt_peak = alt_local_peaks[
+            np.argmin(abs(alt_local_peaks - standard_peak))]
+
+        # shift alternative density so these peaks match
+        peak_offset = matched_alt_peak - standard_peak
+        if peak_offset < 0:
+            shifted_kmer_alt_dens = np.concatenate([
+                [0.0,] * -peak_offset,
+                kmer_alt_dens[:peak_offset]])
+        else:
+            shifted_kmer_alt_dens = np.concatenate([
+                kmer_alt_dens[peak_offset:],
+                [0.0,] * peak_offset])
+
+        return (
+            kmer_alt_dens[matched_alt_peak] / kmer_standard_dens[standard_peak],
+            shifted_kmer_alt_dens)
+
+
+    # estimate alternative base incorporation rate based on single alt base
+    all_kmers = standard_dens.keys()
+    alt_peak_frac, shifted_alt_dens = zip(*[
+        get_alt_shift(kmer) for kmer in all_kmers])
+    shifted_alt_dens = dict(zip(all_kmers, shifted_alt_dens))
+    # estimate the alternative base incorporation rate
+    standard_frac = np.percentile([
+        peak_frac for peak_frac, kmer in zip(alt_peak_frac, all_kmers)
+        if kmer.count(alt_base) == 1], alt_frac_pctl)
+    if VERBOSE: sys.stderr.write(
+            'Alternative base incorporation rate estimate: ' +
+            str(1 - standard_frac) + '\n')
+    if standard_frac >= 1:
+        sys.stderr.write(
+            '******** WARNING *******\n\tAlternative base incorporation rate ' +
+            'estimate is approximately 0. Consider lowering ' +
+            '--alt-fraction-percentile.\n')
+
     # get mean model SD. most models will be constant, but use mean in case
     model_sd = np.mean(zip(*standard_ref.values())[1])
-
-    if VERBOSE: sys.stderr.write('Parsing k-mer levels from reads\n')
-    mixed_kmers_levels = parse_kmer_levels(
-        all_reads, kmer_width, upstrm_bases, check_min_kmer_batch,
-        kmer_obs_thresh, max_kmer_obs, min_kmer_obs_to_est)
-
-    if VERBOSE: sys.stderr.write(
-            'Fitting mixture models to k-mer level distributions\n')
-    kmers_mix_fit_data = []
-    if DEBUG_EST_ALT:
-        from sklearn.neighbors import KernelDensity
-        kmer_dens = []
-        save_x = np.linspace(-5, 5, DEBUG_EST_NUM_KMER_SAVE)[:, np.newaxis]
-    for kmer, norm_levels in mixed_kmers_levels.items():
-        # reshape norm levels for sklearn format and conver to numpy array
-        norm_levels = np.array(norm_levels).reshape(-1,1)
-        clf = mixture.GaussianMixture(n_components=2, covariance_type='tied')
-        clf.fit(norm_levels)
-        kmers_mix_fit_data.append((kmer, clf.means_[:,0], clf.weights_))
-        if DEBUG_EST_ALT:
-            kmer_kde = KernelDensity(
-                kernel='gaussian', bandwidth=DEBUG_EST_BW).fit(norm_levels)
-            with np.errstate(under='ignore'):
-                kmer_dens.append((kmer, np.exp(kmer_kde.score_samples(save_x))))
-    if VERBOSE: sys.stderr.write('Analyzing fitted mixture distributions\n')
-    if DEBUG_EST_ALT:
-        with open('debug_est_alt.' + alt_base + '.' + alt_name +
-                  '.txt', 'w') as fp:
-            fp.write('peaks_diff\tminor_frac\tcontains_alt\tkmer\t' +
-                     'sd_width\tmin_frac\n')
-            fp.write('\n'.join(
-                '\t'.join(map(str, (
-                    np.diff(comp_means)[0], min(comp_weights),
-                    len(re.findall(alt_base, kmer)) > 0, kmer,
-                    model_sd * num_sd_thresh, min_alt_base_frac)))
-                for kmer, comp_means, comp_weights in
-                kmers_mix_fit_data) + '\n')
-        with open('debug_est_alt.' + alt_base + '.' + alt_name +
-                  '.density.txt', 'w') as fp:
-            fp.write('Kmer\tSignal\tDensity\n')
-            fp.write('\n'.join('\t'.join(map(str, (kmer, x, y)))
-                               for kmer, dens_i in kmer_dens
-                               for x, y in zip(save_x[:,0], dens_i)) + '\n')
-    # filter results to get k-mers that contribute to the final alternative model
-    alt_model_data = dict(
-        (kmer, comp_means) for kmer, comp_means, comp_weights in
-        kmers_mix_fit_data
-        if np.diff(comp_means)[0] > model_sd * num_sd_thresh and
-        min(comp_weights) > min_alt_base_frac and
-        len(re.findall(alt_base, kmer)) > 0)
-
-    # determine which mixture component matches is further from the standard
-    # model should be the minor component, but definitely should be the
-    # one further from the standard base model.
+    # subtract off fraction of standard density from alt density
+    # to estimate mean of isolated alternative distribution
     alt_ref = []
     for kmer, (standard_level, _) in standard_ref.iteritems():
-        try:
-            comp_levels = alt_model_data[kmer]
-            alt_level = comp_levels[np.argmax(np.abs(
-                comp_levels - standard_level))]
-        except KeyError:
-            # if the level did not pass thresholds above use standard base level
-            alt_level = standard_level
+        if kmer.count(alt_base) == 0:
+            alt_ref.append((kmer, standard_level, model_sd))
+            continue
+        # assuming random incorporation the prortion of standard base
+        # observations at this k-mer is the standard fraction raised
+        # to the number of alt_base occurences in the sample
+        kmer_standard_frac = standard_frac**kmer.count(alt_base)
+        with np.errstate(under='ignore'):
+            diff_dens = shifted_alt_dens[kmer] - (
+                standard_dens[kmer] * kmer_standard_frac)
+            diff_dens[diff_dens < 0] = 0
+            alt_level = np.average(save_x[:,0], weights=diff_dens)
         alt_ref.append((kmer, alt_level, model_sd))
 
+    kmer_width = len(next(standard_ref.iterkeys()))
     alt_ref = np.array(alt_ref, dtype=[('kmer', 'S' + str(kmer_width)),
                                        ('mean', 'f8'), ('sd', 'f8')])
+
+    return alt_ref
+
+def estimate_alt_model(
+        f5_dirs, control_dirs, corrected_group, basecall_subgroups,
+        standard_ref_fn, alt_base, alt_frac_pctl, kmer_obs_thresh,
+        density_basename, kernel_dens_bw, alt_dens_fn, standard_dens_fn,
+        num_dens_points=500):
+    """
+    Estimate an alternative model from a sample with a single,
+    known, randomly-incorporated alternative base
+    """
+    if alt_dens_fn is not None and standard_dens_fn is not None:
+        (alt_dens, standard_dens, standard_ref,
+         upstrm_bases, save_x) = load_kmer_densities(
+             alt_dens_fn, standard_dens_fn, f5_dirs, corrected_group,
+             basecall_subgroups, standard_ref_fn)
+    else:
+        save_x = np.linspace(-5, 5, num_dens_points)[:, np.newaxis]
+        (alt_dens, standard_dens, standard_ref,
+         upstrm_bases) = estimate_kmer_densities(
+             f5_dirs, control_dirs, corrected_group, basecall_subgroups,
+             standard_ref_fn, kmer_obs_thresh, density_basename, kernel_dens_bw,
+             save_x)
+
+    if VERBOSE: sys.stderr.write('Isolating alternative base distribtuions\n')
+    # perform alternative density isolation algorithm
+    alt_ref = isolate_alt_density(
+        alt_dens, standard_dens, alt_base, alt_frac_pctl, standard_ref,
+        save_x)
 
     return alt_ref, upstrm_bases
 
@@ -1454,7 +1595,7 @@ def test_shifts_main(args):
 
     return
 
-def write_kmer_ref_main(args):
+def est_ref_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
@@ -1475,19 +1616,52 @@ def write_kmer_ref_main(args):
 
     return
 
-def write_alt_ref_main(args):
+def est_alt_ref_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
 
-    min_alt_frac = args.min_alt_base_percentage / 100.0
     alt_ref, upstrm_bases = estimate_alt_model(
-        args.fast5_basedirs, args.corrected_group, args.basecall_subgroups,
-        args.tombo_model_filename, args.alternate_model_base, min_alt_frac,
-        args.minimum_kmer_observations, args.sd_threshold,
-        args.alternate_model_name)
+        args.fast5_basedirs, args.control_fast5_basedirs,
+        args.corrected_group, args.basecall_subgroups,
+        args.tombo_model_filename, args.alternate_model_base,
+        args.alt_fraction_percentile, args.minimum_kmer_observations,
+        args.save_density_basename, args.kernel_density_bandwidth,
+        args.alternate_density_filename, args.control_density_filename)
     write_tombo_model(alt_ref, args.alternate_model_filename, upstrm_bases,
                       args.alternate_model_base, args.alternate_model_name)
+
+    return
+
+def estimate_scale_main(args):
+    global VERBOSE
+    VERBOSE = not args.quiet
+    th.VERBOSE = VERBOSE
+
+    try:
+        if not os.path.isdir(args.fast5_basedir):
+            sys.stderr.write(
+                '*' * 60 + '\nERROR: Provided [fast5-basedir] is ' +
+                'not a directory.\n' + '*' * 60 + '\n')
+            sys.exit()
+        fast5_basedir = (
+            args.fast5_basedir if args.fast5_basedir.endswith('/') else
+            args.fast5_basedir + '/')
+        fast5_fns = th.get_files_list(fast5_basedir)
+    except OSError:
+        sys.stderr.write(
+            '*' * 60 + '\nERROR: Reads base directory, a sub-directory ' +
+            'or an old (hidden) index file does not appear to be ' +
+            'accessible. Check directory permissions.\n' + '*' * 60 + '\n')
+        sys.exit()
+    if len(fast5_fns) < 1:
+        sys.stderr.write(
+            '*' * 60 + '\nERROR: No files identified in the specified ' +
+            'directory or within immediate subdirectories.\n' + '*' * 60 + '\n')
+        sys.exit()
+
+    sys.stdout.write('Global scaling estimate: ' +
+                     str(th.estimate_global_scale(fast5_fns)) + '\n')
 
     return
 

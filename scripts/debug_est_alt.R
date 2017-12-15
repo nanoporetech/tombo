@@ -12,10 +12,10 @@ sDiffs <- sort(unlist(lapply(sAllDat, function(x)
     weighted.mean(x[x$Sample == 'Alternative','Signal'], x[x$Sample == 'Alternative','Density']) -
     weighted.mean(x[x$Sample == 'Standard','Signal'], x[x$Sample == 'Standard','Density']))))
 
-upDat <- do.call(rbind.data.frame, lapply(names(head(sDiffs, 1)), function(kmer) sAllDat[[kmer]]))
-dnDat <- do.call(rbind.data.frame, lapply(names(tail(sDiffs, 1)), function(kmer) sAllDat[[kmer]]))
+upDat <- do.call(rbind.data.frame, lapply(names(head(sDiffs, 20)), function(kmer) sAllDat[[kmer]]))
+dnDat <- do.call(rbind.data.frame, lapply(names(tail(sDiffs, 20)), function(kmer) sAllDat[[kmer]]))
 
-pdf('alternate_model_estimation.density.C.one_kmer.pdf', width=15)
+pdf('alternate_model_estimation.density.C.pdf', width=10)
 ggplot(upDat, aes(x=Signal, y=Kmer, height=Density, fill=Sample)) + geom_ridgeline(alpha=0.4, size=0, color='white') +
     scale_fill_discrete(name='Contains\nAlternative\nBase') + theme_ridges()
 ggplot(dnDat, aes(x=Signal, y=Kmer, height=Density, fill=Sample)) + geom_ridgeline(alpha=0.4, size=0, color='white') +

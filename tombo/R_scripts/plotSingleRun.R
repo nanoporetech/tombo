@@ -18,7 +18,7 @@ plotSingleRun <- function(sigDat, quantDat, boxDat, eventDat,
             base_pos <- min(reg_sig_dat$Signal)
             p <- ggplot(reg_sig_dat) +
                 geom_path(aes(x=Position, y=Signal, group=Read),
-                          alpha=0.3, size=0.05, show.legend=FALSE)
+                          alpha=0.3, size=0.2, show.legend=FALSE)
         } else if(reg_i %in% quantDat$Region) {
             reg_quant_dat <- quantDat[quantDat$Region == reg_i,]
             base_pos <- min(reg_quant_dat$Lower)

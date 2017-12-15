@@ -1,12 +1,15 @@
+# options to pass for the user
 GENOME_FASTA='e_coli.fasta'
 ALT_MODEL_STATS_FN='e_coli.5mC.tombo.stats'
 MODEL_OR_PCR_STATS_FN='e_coli.5mC.pcr_or_model.tombo.stats'
+# set to false if the model or pcr stats are from a model-based comparison
 IS_MODEL_STATS=True
 COV_THRESH=10
 MOTIF='CCWGG'
 # second position in motif is the ground truth modified base
 MOD_POS=2
 NUM_ROC_PLOT_POINTS=1000
+
 
 
 # load modules
@@ -17,11 +20,15 @@ from numpy.lib import recfunctions
 
 from tombo.tombo_helper import parse_fasta, rev_comp, parse_motif
 
+
+
 # parse genome and motif
 genome_seq = parse_fasta(GENOME_FASTA)
 motif_pat = parse_motif(MOTIF)
 motif_len = len(MOTIF)
 mod_base = MOTIF[MOD_POS - 1]
+
+
 
 # parse valid stat positions from alternative model stats
 with h5py.File(ALT_MODEL_STATS_FN) as dat:
@@ -64,7 +71,6 @@ vs_alt_fp_rate = vs_alt_fp_rate[::vs_alt_fp_rate.shape[0] / NUM_ROC_PLOT_POINTS]
 
 
 
-
 # now compute true and false positive rates for either a versus standard model or versus PCR sample stats
 with h5py.File(MODEL_OR_PCR_STATS_FN) as dat:
    stats = dat['stats'].value
@@ -96,6 +102,9 @@ vs_pcr_or_model_fp_rate = vs_pcr_or_model_fp_rate / float(vs_pcr_or_model_fp_rat
 vs_pcr_or_model_tp_rate = vs_pcr_or_model_tp_rate[::vs_pcr_or_model_tp_rate.shape[0] / 1000]
 vs_pcr_or_model_fp_rate = vs_pcr_or_model_fp_rate[::vs_pcr_or_model_fp_rate.shape[0] / 1000]
 
+
+
+# output to file for plotting with roc_curve.R
 with open('roc_output.txt', 'w') as roc_fp:
     roc_fp.write('TP\tFP\tComparison\n')
     roc_fp.write('\n'.join(

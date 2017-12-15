@@ -22,7 +22,7 @@ plotGroupComp <- function(sigDat, quantDat, boxDat, eventDat,
             p <- ggplot(reg_sig_dat) +
                 geom_path(
                     aes(x=Position, y=Signal, color=Group, group=Read),
-                    alpha=0.3, size=0.5, show.legend=FALSE)
+                    alpha=0.3, size=0.2, show.legend=FALSE)
         } else if(reg_i %in% quantDat$Region) {
             reg_quant_dat <- quantDat[quantDat$Region == reg_i,]
             base_pos <- min(reg_quant_dat$Lower)
