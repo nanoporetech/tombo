@@ -1,0 +1,37 @@
+language: python
+python:
+    - "2.7"
+dist: trusty
+sudo: required
+
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - libhdf5-dev
+
+
+install:
+  - echo $TRAVIS_PYTHON_VERSION
+  - pip install --upgrade pip setuptools wheel
+  - pip install --only-binary=numpy,scipy numpy scipy
+  - pip install .
+
+
+script:
+  - echo "No testing implemented"
+
+
+before_deploy:
+  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then bash build_docs.sh; fi
+
+deploy:
+  provider: pages
+  skip_cleanup: true
+  github_token: $GHPAGES_TOKEN
+  local_dir: docs/_build/html
+  target_branch: gh-pages
+  on:
+    branch: master
+    python: "2.7"
