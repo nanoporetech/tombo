@@ -10,6 +10,14 @@ Tombo also provides tools for the analysis and visualization of raw nanopore sig
 Installation
 ------------
 
+|bioconda_badge| |pypi_badge|
+
+.. |bioconda_badge| image:: https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat-square
+    :target: http://bioconda.github.io/recipes/ont-tombo/README.html
+
+.. |pypi_badge| image:: https://badge.fury.io/py/ont-tombo.svg
+    :target: https://badge.fury.io/py/ont-tombo
+
 Basic Tombo installation (python2.7 support only)::
 
     # install via bioconda environment

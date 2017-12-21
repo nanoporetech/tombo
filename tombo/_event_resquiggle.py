@@ -619,22 +619,22 @@ def parse_sam_record(r_sam_record, genome_index):
 
         # check that cigar starts and ends with matched bases
         while cigar[0][1] not in 'M=X':
-            if cigar[0][1] in 'IP':
+            if cigar[0][1] in 'ND':
                 tSeq = tSeq[cigar[0][0]:]
             else:
                 qSeq = qSeq[cigar[0][0]:]
                 start_clipped_bases += cigar[0][0]
             cigar = cigar[1:]
         while cigar[-1][1] not in 'M=X':
-            if cigar[-1][1] in 'IP':
+            if cigar[-1][1] in 'ND':
                 tSeq = tSeq[:-cigar[-1][0]]
             else:
                 qSeq = qSeq[:-cigar[-1][0]]
-                end_clipped_bases += cigar[0][0]
+                end_clipped_bases += cigar[-1][0]
             cigar = cigar[:-1]
 
         qLen = sum([reg_len for reg_len, reg_type in cigar
-                    if reg_type in 'MIP=X'])
+                    if reg_type in 'MI=X'])
         assert len(qSeq) == qLen, 'Read sequence from SAM and ' + \
             'cooresponding cigar string do not agree.'
 
@@ -691,8 +691,8 @@ def parse_sam_output(align_output, batch_reads_data, genome_index):
     for read_fn_sg, r_sam_record in alignments.iteritems():
         if r_sam_record is None:
             batch_align_failed_reads.append(
-                ('Alignment not produced. Potentially failed ' +
-                 'to locate BWA index files.', read_fn_sg))
+                ('Alignment not produced (if all reads failed ' +
+                 'check for index files).', read_fn_sg))
         else:
             try:
                 batch_align_data[read_fn_sg] = parse_sam_record(
@@ -936,6 +936,8 @@ def get_read_data(fast5_fn, basecall_group, basecall_subgroup):
             starts_rel_to_read[::-1] + read_start_rel_to_raw -
             raw_len)
         read_start_rel_to_raw = starts_rel_to_read[0]
+        # due to floating point time value errors this value may extend beyond
+        # the raw signal
         if read_start_rel_to_raw < 0:
             starts_rel_to_read -= read_start_rel_to_raw
             read_start_rel_to_raw = 0
@@ -1172,6 +1174,7 @@ def check_for_albacore(files, basecall_group, num_reads=50):
 def event_resquiggle_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
+    th.VERBOSE = VERBOSE
 
     # currently required, but adding new mappers shortly
     if all(map_exe is None for map_exe in (
@@ -1270,9 +1273,9 @@ def event_resquiggle_main(args):
     return
 
 def args_and_main():
-    import option_parsers
+    import _option_parsers
     event_resquiggle_main(
-        option_parsers.get_resquiggle_parser().parse_args())
+        _option_parsers.get_resquiggle_parser().parse_args())
     return
 
 if __name__ == '__main__':

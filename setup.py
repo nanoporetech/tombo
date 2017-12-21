@@ -6,14 +6,14 @@ import re
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext as _build_ext
 
-# Get the version number from version.py, and exe_path
-verstrline = open(os.path.join('tombo', 'version.py'), 'r').read()
+# Get the version number from _version.py, and exe_path
+verstrline = open(os.path.join('tombo', '_version.py'), 'r').read()
 vsre = r"^TOMBO_VERSION = ['\"]([^'\"]*)['\"]"
 mo = re.search(vsre, verstrline)
 if mo:
     __version__ = mo.group(1)
 else:
-    raise RuntimeError('Unable to find version string in "tombo/version.py".'.format(__pkg_name__))
+    raise RuntimeError('Unable to find version string in "tombo/_version.py".'.format(__pkg_name__))
 
 def readme():
     with open('README.rst') as f:
@@ -33,6 +33,20 @@ except:
 
 if not sys.version_info[0] == 2:
     sys.exit("Sorry, Python 3 is not supported (yet)")
+
+ext_modules = [
+    Extension("tombo.dynamic_programming",
+              ["tombo/dynamic_programming.pyx"],
+              include_dirs=include_dirs,
+              language="c++"),
+    Extension("tombo.c_helper",
+              ["tombo/c_helper.pyx"],
+              include_dirs=include_dirs,
+              language="c++")
+]
+
+for e in ext_modules:
+    e.cython_directives = {"embedsignature": True}
 
 setup(
     name = "ont-tombo",
@@ -57,16 +71,7 @@ setup(
         ]
     },
     include_package_data=True,
-    ext_modules=[
-        Extension("tombo.dynamic_programming",
-                  ["tombo/dynamic_programming.pyx"],
-                  include_dirs=include_dirs,
-                  language="c++"),
-        Extension("tombo.c_helper",
-                  ["tombo/c_helper.pyx"],
-                  include_dirs=include_dirs,
-                  language="c++")
-    ],
+    ext_modules=ext_modules,
     test_suite='nose2.collector.collector',
     tests_require=['nose2'],
 )

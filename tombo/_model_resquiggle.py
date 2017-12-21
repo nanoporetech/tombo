@@ -517,15 +517,17 @@ if OPTIMIZE_RSQGL:
 
 def model_resquiggle(
         f5_dirs1, corr_group, bc_subgrps,
-        tb_model_fn, z_trans_lag, p_value_thresh, reg_context, base_reg_context,
-        max_base_shift, b_max_base_shift, min_obs_per_base, base_space_iters,
-        compute_sd, new_corr_grp, num_processes, overwrite, in_place=True):
+        tb_model_fn, bio_samp_type, z_trans_lag, p_value_thresh, reg_context,
+        base_reg_context, max_base_shift, b_max_base_shift, min_obs_per_base,
+        base_space_iters, compute_sd, new_corr_grp, num_processes, overwrite,
+        in_place=True):
     z_thresh = ts.p_value_to_z_score(p_value_thresh)
     raw_read_coverage = th.parse_fast5s(
         f5_dirs1, corr_group, bc_subgrps, new_corr_grp)
 
     if tb_model_fn is None:
-        tb_model_fn = ts.get_default_standard_ref_from_files(fast5_fns)
+        tb_model_fn, bio_samp_type = ts.get_default_standard_ref_from_files(
+            fast5_fns, bio_samp_type)
 
     # load reads into Queue
     manager = mp.Manager()
@@ -586,7 +588,7 @@ def model_resquiggle_main(args):
 
     failed_reads = model_resquiggle(
         args.fast5_basedirs, args.corrected_group, args.basecall_subgroups,
-        args.tombo_model_filename, args.stouffer_z_context,
+        args.tombo_model_filename, args.bio_sample_type, args.stouffer_z_context,
         args.p_value_threshold, args.region_context,
         args.base_score_region_context, args.max_bases_shift,
         args.base_score_max_bases_shift, args.min_obs_per_base,

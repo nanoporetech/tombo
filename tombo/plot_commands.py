@@ -64,7 +64,8 @@ def plot_kmer_dist(
              for r_data in cs_r_data]
     np.random.shuffle(files)
     for r_data in files:
-        means, seq = th.get_read_means_and_seq(r_data)
+        means, seq = th.get_multiple_slots_read_centric(
+            r_data, ['norm_mean', 'base'])
         if means is None: continue
         seq = ''.join(seq)
 
@@ -313,7 +314,8 @@ def get_read_correction_data(
     return old_dat, new_dat, sig_dat, diff_dat
 
 def get_read_reg_events(r_data, int_start, int_end):
-    r_means = th.get_read_base_means(r_data)
+    r_means = th.get_single_slot_genome_centric(r_data, 'norm_mean')
+    if r_means is None: return None
     if r_data.start > int_start and r_data.end < int_end:
         # handle reads that are contained in a region
         start_overlap = int_end - r_data.start
@@ -389,7 +391,9 @@ def get_event_data(
     return r.DataFrame({
         'Position':r.IntVector(Position),
         'Signal':r.FloatVector(Signal),
-        'Strand':r.StrVector(Strand),
+        'Strand':r.FactorVector(
+            r.StrVector(Strand),
+            ordered=True, levels=r.StrVector((FWD_STRAND, REV_STRAND))),
         'Region':r.StrVector(Region),
         'Group':r.StrVector(list(repeat(group_num, len(Position))))})
 
@@ -430,7 +434,9 @@ def get_boxplot_data(
         'SigMed':r.FloatVector(SigMed),
         'Sig75':r.FloatVector(Sig75),
         'SigMax':r.FloatVector(SigMax),
-        'Strand':r.StrVector(Strand),
+        'Strand':r.FactorVector(
+            r.StrVector(Strand),
+            ordered=True, levels=r.StrVector((FWD_STRAND, REV_STRAND))),
         'Region':r.StrVector(Region),
         'Group':r.StrVector(list(repeat(group_num, len(Position))))})
 
@@ -471,11 +477,13 @@ def get_quant_data(
         'Position':r.FloatVector(Position),
         'Lower':r.FloatVector(Lower),
         'Upper':r.FloatVector(Upper),
-        'Strand':r.StrVector(Strand),
+        'Strand':r.FactorVector(
+            r.StrVector(Strand),
+            ordered=True, levels=r.StrVector((FWD_STRAND, REV_STRAND))),
         'Region':r.StrVector(Region),
         'Group':r.StrVector(list(repeat(group_num, len(Position))))})
 
-def get_signal_data(
+def get_raw_signal_data(
         all_reg_data, plot_types, overplot_thresh, group_num='Group1'):
     not_warned = True
     Position, Signal, Read, Strand, Region = [], [], [], [], []
@@ -498,7 +506,7 @@ def get_signal_data(
             reg_reads = plus_reads + minus_reads
         for r_num, r_data in enumerate(reg_reads):
             try:
-                r_sig, overlap_seg_data, start_offset = th.get_signal(
+                r_sig, overlap_seg_data, start_offset = th.get_raw_signal(
                     r_data, reg_data.start, reg_data.end)
             except:
                 if not_warned:
@@ -527,12 +535,14 @@ def get_signal_data(
         'Position':r.FloatVector(Position),
         'Signal':r.FloatVector(Signal),
         'Read':r.StrVector(Read),
-        'Strand':r.StrVector(Strand),
+        'Strand':r.FactorVector(
+            r.StrVector(Strand),
+            ordered=True, levels=r.StrVector((FWD_STRAND, REV_STRAND))),
         'Region':r.StrVector(Region),
         'Group':r.StrVector(list(repeat(group_num, len(Position))))})
 
 def get_plot_types_data(plot_args, quant_offset=0):
-    SignalData = get_signal_data(*plot_args)
+    SignalData = get_raw_signal_data(*plot_args)
     QuantData = get_quant_data(*plot_args, pos_offest=quant_offset)
     BoxData = get_boxplot_data(*plot_args)
     EventData = get_event_data(*plot_args)
@@ -570,7 +580,9 @@ def get_base_r_data(all_reg_data, zero_start=False, is_rna=False):
         'Position':r.FloatVector(BaseStart),
         'Base':r.StrVector(Bases),
         'Region':r.StrVector(BaseRegion),
-        'Strand':r.StrVector(BaseStrand)})
+        'Strand':r.FactorVector(
+            r.StrVector(BaseStrand),
+            ordered=True, levels=r.StrVector((FWD_STRAND, REV_STRAND)))})
 
 
 def get_model_r_data(all_reg_model_data):
@@ -593,7 +605,9 @@ def get_model_r_data(all_reg_model_data):
 
     return r.DataFrame({
         'Position':r.FloatVector(Position),
-        'Strand':r.StrVector(Strand),
+        'Strand':r.FactorVector(
+            r.StrVector(Strand),
+            ordered=True, levels=r.StrVector((FWD_STRAND, REV_STRAND))),
         'Mean':r.FloatVector(Mean),
         'SD':r.FloatVector(SD),
         'Region':r.StrVector(Region)})
@@ -1243,9 +1257,9 @@ def get_valid_model_fns(
         return None, None
 
     if tb_model_fn is None:
-        tb_model_fn = ts.get_default_standard_ref(raw_read_coverage)
+        tb_model_fn, _ = ts.get_default_standard_ref(raw_read_coverage)
     if alt_model_fn is None and plot_default_alt is not None:
-        alt_model_fn = ts.get_default_alt_ref(
+        alt_model_fn, _ = ts.get_default_alt_ref(
             plot_default_alt, raw_read_coverage)
 
     if f5_dirs2 is not None and tb_model_fn is not None:
@@ -1599,8 +1613,8 @@ def plot_max_diff(
     chrm_sizes = th.get_chrm_sizes(raw_read_coverage1, raw_read_coverage2)
 
     if VERBOSE: sys.stderr.write('Getting base signal.\n')
-    base_means1 = th.get_base_means(raw_read_coverage1, chrm_sizes)
-    base_means2 = th.get_base_means(raw_read_coverage2, chrm_sizes)
+    base_means1 = th.get_all_mean_levels(raw_read_coverage1, chrm_sizes)
+    base_means2 = th.get_all_mean_levels(raw_read_coverage2, chrm_sizes)
 
     if VERBOSE: sys.stderr.write(
             'Get differences between base signal.\n')
@@ -1843,8 +1857,8 @@ def cluster_most_signif(
     if VERBOSE: sys.stderr.write('Getting base signal.\n')
     chrm_sizes = th.get_chrm_sizes(raw_read_coverage1, raw_read_coverage2)
 
-    base_means1 = th.get_base_means(raw_read_coverage1, chrm_sizes)
-    base_means2 = th.get_base_means(raw_read_coverage2, chrm_sizes)
+    base_means1 = th.get_all_mean_levels(raw_read_coverage1, chrm_sizes)
+    base_means2 = th.get_all_mean_levels(raw_read_coverage2, chrm_sizes)
 
     if VERBOSE: sys.stderr.write('Getting region signal difference.\n')
     slide_span_val = slide_span if slide_span else 0

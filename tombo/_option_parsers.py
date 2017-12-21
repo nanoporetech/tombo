@@ -44,6 +44,8 @@ failed_opt=('--failed-reads-filename', {
     'help':'Output failed read filenames with assoicated error. Default: ' +
     'Do not store failed reads.'})
 
+sfast5dir_opt = ('--fast5-basedir', {
+    'help':'Directory containing fast5 files.'})
 fast5dir_opt = ('--fast5-basedirs', {
     'nargs':'+', 'help':'Directories containing fast5 files.'})
 ctrlfast5dir_opt=('--control-fast5-basedirs', {
@@ -69,6 +71,10 @@ bcsubgrps_opt=('--basecall-subgroups', {
     'help':'FAST5 subgroup(s) (under /Analyses/[--basecall-group]/) containing ' +
     'basecalls and created within [--corrected-group] containing re-squiggle ' +
     'results. Default: %(default)s'})
+bcsubgrp_opt=('--basecall-subgroup', {
+    'default':'BaseCalled_template',
+    'help':'FAST5 subgroup (under /Analyses/[--basecall-group]/) under which ' +
+    'to store basecalls from FASTQs. Default: %(default)s'})
 
 gnmloc_opt=('--genome-locations', {
     'nargs':'+',
@@ -87,6 +93,10 @@ obsfilt_opt=('--obs-per-base-filter', {
     'thresholds. Format thresholds as "percentile:thresh ' +
     '[pctl2:thresh2 ...]". For example to filter reads with 99th ' +
     'pctl > 200 obs/base or max > 5k obs/base use "99:200 100:5000".'})
+
+fastqs_opt = ('--fastq-filenames', {
+    'nargs':'+', 'help':'FASTQ filenames containing basecalls to be added to ' +
+    'raw FAST5 files.'})
 
 wigfn_opt=('--wiggle-basename', {
     'default':'tombo_results',
@@ -395,6 +405,15 @@ wigtypes_opt=('--wiggle-types', {
                'stat', 'mt_stat', 'difference'],
     'help':'Data types of wiggles to produce. Default: "coverage fraction"'})
 
+dna_opt=('--dna', {
+    'dest':'bio_sample_type', 'action':'store_const', 'const':'DNA',
+    'help':'Explicitly select default DNA model. Default: Automatically ' +
+    'determine from FAST5s'})
+rna_opt=('--rna', {
+    'dest':'bio_sample_type', 'action':'store_const', 'const':'RNA',
+    'help':'Explicitly select default RNA model. Default: Automatically ' +
+    'determine from FAST5s'})
+
 
 ###########################
 ###### Help argument ######
@@ -449,9 +468,13 @@ def get_eventless_resquiggle_parser():
     mapper_args.add_argument(graphmap_opt[0], **graphmap_opt[1])
     mapper_args.add_argument(batchsize_opt[0], **batchsize_opt[1])
 
+    mod_args = parser.add_argument_group('Model Parameters')
+    mod_args.add_argument(tbmod_opt[0], **tbmod_opt[1])
+    mod_args.add_argument(dna_opt[0], **dna_opt[1])
+    mod_args.add_argument(rna_opt[0], **rna_opt[1])
+
     alg_args = parser.add_argument_group(
         'Event to Sequence Assignment Parameters')
-    alg_args.add_argument(tbmod_opt[0], **tbmod_opt[1])
     alg_args.add_argument(mexpct_opt[0], **mexpct_opt[1])
     alg_args.add_argument(skippen_opt[0], **skippen_opt[1])
     alg_args.add_argument(bndwdth_opt[0], **bndwdth_opt[1])
@@ -550,6 +573,8 @@ def get_model_resquiggle_parser():
 
     modr_args = parser.add_argument_group('Model Re-squiggle Arguments')
     modr_args.add_argument(tbmod_opt[0], **tbmod_opt[1])
+    modr_args.add_argument(dna_opt[0], **dna_opt[1])
+    modr_args.add_argument(rna_opt[0], **rna_opt[1])
     modr_args.add_argument(maxbase_opt[0], **maxbase_opt[1])
     modr_args.add_argument(minobs_opt[0], default=3, **minobs_opt[1])
 
@@ -570,6 +595,28 @@ def get_model_resquiggle_parser():
 
     multi_args = parser.add_argument_group('Multiprocessing Argument')
     multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
+
+    misc_args, parser = add_misc_args(parser)
+
+    return parser
+
+
+###################################
+###### Pre-processing parser ######
+###################################
+
+def get_add_fastqs_parser():
+    parser = argparse.ArgumentParser(
+        description='Annotate raw FAST5 files with basecalls from a FASTQ.',
+        add_help=False)
+    req_args = parser.add_argument_group('Required Arguments')
+    req_args.add_argument(sfast5dir_opt[0], required=True, **sfast5dir_opt[1])
+    req_args.add_argument(fastqs_opt[0], required=True, **fastqs_opt[1])
+
+    fast5_args = parser.add_argument_group('FAST5 Data Arguments')
+    fast5_args.add_argument(bcgrp_opt[0], **bcgrp_opt[1])
+    fast5_args.add_argument(bcsubgrp_opt[0], **bcsubgrp_opt[1])
+    fast5_args.add_argument(ovrwrt_opt[0], **ovrwrt_opt[1])
 
     misc_args, parser = add_misc_args(parser)
 
@@ -626,8 +673,10 @@ def get_est_alt_ref_parser():
     dens_args.add_argument(altden_opt[0], **altden_opt[1])
     dens_args.add_argument(ctrlden_opt[0], **ctrlden_opt[1])
 
-    stat_args = parser.add_argument_group('Modeling Arguments')
+    stat_args = parser.add_argument_group('Standard Model Arguments')
     stat_args.add_argument(tbmod_opt[0], **tbmod_opt[1])
+    stat_args.add_argument(dna_opt[0], **dna_opt[1])
+    stat_args.add_argument(rna_opt[0], **rna_opt[1])
     stat_args.add_argument(altfrac_opt[0], **altfrac_opt[1])
     stat_args.add_argument(kernden_opt[0], **kernden_opt[1])
 
@@ -673,6 +722,8 @@ def get_test_signif_parser():
         'standard model)')
     alt_args.add_argument(ctrlfast5dir_opt[0], **ctrlfast5dir_opt[1])
     alt_args.add_argument(tbmod_opt[0], **tbmod_opt[1])
+    alt_args.add_argument(dna_opt[0], **dna_opt[1])
+    alt_args.add_argument(rna_opt[0], **rna_opt[1])
     alt_args.add_argument(atbmods_opt[0], **atbmods_opt[1])
     alt_args.add_argument(modbs_opt[0], **modbs_opt[1])
 

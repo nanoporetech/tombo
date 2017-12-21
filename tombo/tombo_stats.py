@@ -216,8 +216,10 @@ def parse_tombo_models(alt_fns, ref_upstrm_bases, ref_kmer_width):
 
     return alt_refs
 
-def get_default_standard_ref(raw_read_coverage):
-    if th.is_rna(raw_read_coverage):
+def get_default_standard_ref(raw_read_coverage, bio_samp_type=None):
+    if bio_samp_type is not None:
+        standard_ref_fn = th.STANDARD_MODELS[bio_samp_type]
+    elif th.is_rna(raw_read_coverage):
         if VERBOSE: sys.stderr.write(
                 'Using default canonical ***** RNA ***** model.\n')
         standard_ref_fn = th.STANDARD_MODELS['RNA']
@@ -229,10 +231,12 @@ def get_default_standard_ref(raw_read_coverage):
     standard_ref_fn = pkg_resources.resource_filename(
         'tombo', 'tombo_models/' + standard_ref_fn)
 
-    return standard_ref_fn
+    return standard_ref_fn, bio_samp_type
 
-def get_default_standard_ref_from_files(fast5_fns):
-    if th.is_rna_from_files(fast5_fns):
+def get_default_standard_ref_from_files(fast5_fns, bio_samp_type=None):
+    if bio_samp_type is not None:
+        standard_ref_fn = th.STANDARD_MODELS[bio_samp_type]
+    elif th.is_rna_from_files(fast5_fns):
         if VERBOSE: sys.stderr.write(
                 'Using default canonical ***** RNA ***** model.\n')
         standard_ref_fn = th.STANDARD_MODELS['RNA']
@@ -244,17 +248,22 @@ def get_default_standard_ref_from_files(fast5_fns):
     standard_ref_fn = pkg_resources.resource_filename(
         'tombo', 'tombo_models/' + standard_ref_fn)
 
-    return standard_ref_fn
+    return standard_ref_fn, bio_samp_type
 
-def get_default_alt_ref(alt_name, raw_read_coverage):
-    if th.is_rna(raw_read_coverage):
-        samp_type = 'RNA'
+def get_default_alt_ref(alt_name, raw_read_coverage, bio_samp_type=None):
+    if bio_samp_type is not None:
+        try:
+            alt_model_fn = th.ALTERNATE_MODELS[bio_samp_type + '_' + alt_name]
+        except KeyError:
+            alt_model_fn = None
+    elif th.is_rna(raw_read_coverage):
+        bio_samp_type = 'RNA'
         try:
             alt_model_fn = th.ALTERNATE_MODELS['RNA_' + alt_name]
         except KeyError:
             alt_model_fn = None
     else:
-        samp_type = 'DNA'
+        bio_samp_type = 'DNA'
         try:
             alt_model_fn = th.ALTERNATE_MODELS['DNA_' + alt_name]
         except KeyError:
@@ -266,19 +275,20 @@ def get_default_alt_ref(alt_name, raw_read_coverage):
     if alt_model_fn is None or not os.path.isfile(alt_model_fn):
         sys.stderr.write(
             '******** WARNING *********\n\tTombo default model for ' +
-            alt_name + ' in ' + samp_type + ' does not exists.\n')
-        return
+            alt_name + ' in ' + bio_samp_type + ' does not exists.\n')
+        return None, None
 
-    return alt_model_fn
+    return alt_model_fn, bio_samp_type
 
 def load_alt_refs(alt_names, raw_read_coverage,
-                  ref_upstrm_bases, ref_kmer_width):
+                  ref_upstrm_bases, ref_kmer_width, bio_samp_type=None):
     """
     Load several default alternative tombo models
     """
     alt_fns = []
     for alt_name in alt_names:
-        alt_model_fn = get_default_alt_ref(alt_name, raw_read_coverage)
+        alt_model_fn, _ = get_default_alt_ref(
+            alt_name, raw_read_coverage, bio_samp_type)
         if alt_model_fn is None:
             continue
         alt_fns.append(alt_model_fn)
@@ -515,7 +525,8 @@ def parse_base_levels(
     completed_kmers = set()
     n_reads = 0
     for r_data in all_reads:
-        r_means, r_seq = th.get_read_means_and_seq(r_data)
+        r_means, r_seq = th.get_multiple_slots_read_centric(
+            r_data, ['norm_mean', 'base'])
         if r_means is None: continue
         r_seq = ''.join(r_seq)
         n_reads += 1
@@ -630,8 +641,8 @@ def est_kernel_density(
 
 def estimate_kmer_densities(
         f5_dirs, control_dirs, corrected_group, basecall_subgroups,
-        standard_ref_fn, kmer_obs_thresh, density_basename, kernel_dens_bw,
-        save_x):
+        standard_ref_fn, bio_samp_type, kmer_obs_thresh, density_basename,
+        kernel_dens_bw, save_x):
     raw_read_coverage = th.parse_fast5s(
         f5_dirs, corrected_group, basecall_subgroups)
     cntrl_read_coverage = th.parse_fast5s(
@@ -639,7 +650,8 @@ def estimate_kmer_densities(
 
     if VERBOSE: sys.stderr.write('Parsing standard model file\n')
     if standard_ref_fn is None:
-        standard_ref_fn = get_default_standard_ref(raw_read_coverage)
+        standard_ref_fn, bio_samp_type = get_default_standard_ref(
+            raw_read_coverage, bio_samp_type)
     standard_ref, upstrm_bases, _, _ = parse_tombo_model(standard_ref_fn)
     kmer_width = len(next(standard_ref.iterkeys()))
 
@@ -656,18 +668,21 @@ def estimate_kmer_densities(
 
 def load_kmer_densities(
         alt_dens_fn, standard_dens_fn, f5_dirs, corrected_group,
-        basecall_subgroups, standard_ref_fn):
+        basecall_subgroups, standard_ref_fn, bio_samp_type):
     if VERBOSE: sys.stderr.write('Parsing standard model file\n')
     if standard_ref_fn is None:
-        if f5_dirs is None:
+        if f5_dirs is None and bio_samp_type is None:
             sys.stderr.write(
-                '******** ERROR ********\n\tMust provide either a FAST5s ' +
-                'directory (in order to determine the correct canonical ' +
-                'model) or a canonical model file.\n')
+                '******** ERROR ********\n\tMust provide a FAST5s ' +
+                'directory, a canonical model file or spcify the ' +
+                'biological sample type.\n')
             sys.exit()
-        raw_read_coverage = th.parse_fast5s(
-            f5_dirs, corrected_group, basecall_subgroups)
-        standard_ref_fn = get_default_standard_ref(raw_read_coverage)
+        raw_read_coverage = None
+        if f5_dirs is not None:
+            raw_read_coverage = th.parse_fast5s(
+                f5_dirs, corrected_group, basecall_subgroups)
+        standard_ref_fn, bio_samp_type = get_default_standard_ref(
+            raw_read_coverage, bio_samp_type)
     standard_ref, upstrm_bases, _, _ = parse_tombo_model(standard_ref_fn)
 
     if VERBOSE: sys.stderr.write('Parsing density files\n')
@@ -763,7 +778,7 @@ def isolate_alt_density(
 
 def estimate_alt_model(
         f5_dirs, control_dirs, corrected_group, basecall_subgroups,
-        standard_ref_fn, alt_base, alt_frac_pctl, kmer_obs_thresh,
+        standard_ref_fn, bio_samp_type, alt_base, alt_frac_pctl, kmer_obs_thresh,
         density_basename, kernel_dens_bw, alt_dens_fn, standard_dens_fn,
         num_dens_points=500):
     """
@@ -774,14 +789,14 @@ def estimate_alt_model(
         (alt_dens, standard_dens, standard_ref,
          upstrm_bases, save_x) = load_kmer_densities(
              alt_dens_fn, standard_dens_fn, f5_dirs, corrected_group,
-             basecall_subgroups, standard_ref_fn)
+             basecall_subgroups, standard_ref_fn, bio_samp_type)
     else:
         save_x = np.linspace(-5, 5, num_dens_points)[:, np.newaxis]
         (alt_dens, standard_dens, standard_ref,
          upstrm_bases) = estimate_kmer_densities(
              f5_dirs, control_dirs, corrected_group, basecall_subgroups,
-             standard_ref_fn, kmer_obs_thresh, density_basename, kernel_dens_bw,
-             save_x)
+             standard_ref_fn, bio_samp_type, kmer_obs_thresh, density_basename,
+             kernel_dens_bw, save_x)
 
     if VERBOSE: sys.stderr.write('Isolating alternative base distribtuions\n')
     # perform alternative density isolation algorithm
@@ -1060,9 +1075,10 @@ def get_region_stats(
 
     def get_read_comp_stats(r_data, ctrl_means, ctrl_sds):
         def comp_clip_and_flip():
-            r_means, _ = th.get_read_means_and_seq(r_data)
+            r_means = th.get_single_slot_read_centric(r_data, 'norm_mean')
             if r_means is None:
-                return None, None
+                raise NotImplementedError, (
+                    'Read does not contain re-squiggled level means.')
 
             read_start, read_end = r_data.start, r_data.end
             if read_start + fm_offset < reg_start:
@@ -1109,13 +1125,10 @@ def get_region_stats(
         r_z_scores = get_read_comp_z_score(r_means, read_start, read_end)
 
         if np.sum(np.logical_not(np.isnan(r_z_scores))) == 0:
-            return None, None
+            raise NotImplementedError, 'No valid z-scores in read.'
         r_pvals, r_poss = get_pvals(r_z_scores)
         if fm_offset > 0:
-            try:
-                r_pvals = calc_window_fishers_method(r_pvals, fm_offset)
-            except NotImplementedError:
-                return None, None
+            r_pvals = calc_window_fishers_method(r_pvals, fm_offset)
             r_poss = np.where(np.logical_not(np.isnan(r_pvals)))[0]
             r_pvals = r_pvals[r_poss]
         else:
@@ -1127,9 +1140,11 @@ def get_region_stats(
 
     def clip_and_flip_data(r_data):
         def get_mean_seq():
-            r_means, r_seq = th.get_read_means_and_seq(r_data)
+            r_means, r_seq = th.get_multiple_slots_read_centric(
+                r_data, ['norm_mean', 'base'])
             if r_means is None or r_seq is None or len(r_seq) <= kmer_width:
-                raise NotImplementedError
+                raise NotImplementedError, (
+                    'Read does not contain valid re-squiggled data.')
             r_seq = ''.join(r_seq)
 
             read_start, read_end = r_data.start, r_data.end
@@ -1158,7 +1173,8 @@ def get_region_stats(
             # if this read does not cover enough of this region for stat
             # computation raise an error to be handled below
             if len(r_seq) < kmer_width:
-                raise NotImplementedError
+                raise NotImplementedError, (
+                    'Read does not contain information in this region.')
 
             return r_means, r_seq, read_start, read_end
 
@@ -1203,19 +1219,13 @@ def get_region_stats(
                 read_end, r_alt_means, r_alt_sds)
 
     def get_read_stats(r_data):
-        try:
-            (r_means, r_seq, r_ref_means, r_ref_sds,
-             read_start, read_end, _, _) = clip_and_flip_data(r_data)
-        except NotImplementedError:
-            return None, None
+        (r_means, r_seq, r_ref_means, r_ref_sds,
+         read_start, read_end, _, _) = clip_and_flip_data(r_data)
 
         z_scores = np.abs(r_means - r_ref_means) / r_ref_sds
         r_pvals = stats.norm.cdf(-z_scores) * 2.0
         if fm_offset > 0:
-            try:
-                r_pvals = calc_window_fishers_method(r_pvals, fm_offset)
-            except NotImplementedError:
-                return None, None
+            r_pvals = calc_window_fishers_method(r_pvals, fm_offset)
 
         # ignore errors in max over NAN values if fisher's method was used
         with np.errstate(invalid='ignore'):
@@ -1226,11 +1236,8 @@ def get_region_stats(
         return r_pvals, r_poss
 
     def get_read_alt_stats(r_data):
-        try:
-            (r_means, r_seq, r_ref_means, r_ref_sds, read_start, read_end,
-             r_alt_means, r_alt_sds) = clip_and_flip_data(r_data)
-        except NotImplementedError:
-            return None, None
+        (r_means, r_seq, r_ref_means, r_ref_sds, read_start, read_end,
+         r_alt_means, r_alt_sds) = clip_and_flip_data(r_data)
         r_ref_vars = np.square(r_ref_sds)
         r_alt_vars = np.square(r_alt_sds)
 
@@ -1266,12 +1273,16 @@ def get_region_stats(
 
     reg_stats, reg_poss = [], []
     for r_data in reg_reads:
-        if ctrl_reg_reads is not None:
-            r_stats, r_poss = get_read_comp_stats(r_data, ctrl_means, ctrl_sds)
-        elif alt_ref is None:
-            r_stats, r_poss = get_read_stats(r_data)
-        else:
-            r_stats, r_poss = get_read_alt_stats(r_data)
+        try:
+            if ctrl_reg_reads is not None:
+                r_stats, r_poss = get_read_comp_stats(
+                    r_data, ctrl_means, ctrl_sds)
+            elif alt_ref is None:
+                r_stats, r_poss = get_read_stats(r_data)
+            else:
+                r_stats, r_poss = get_read_alt_stats(r_data)
+        except NotImplementedError:
+            continue
         if r_stats is None: continue
         reg_stats.append(r_stats)
         reg_poss.append(r_poss)
@@ -1370,8 +1381,9 @@ def _test_signif_worker(
                         r_data.end <= reg_start)]
         reg_stats = get_region_stats(
             chrm, strand, reg_start, reg_reads,
-            fm_offset, min_test_vals, region_size, single_read_thresh,
-            ctrl_reg_reads, kmer_ref, upstrm_bases, alt_ref, alt_base)
+            fm_offset, min_test_vals, region_size,
+            single_read_thresh, ctrl_reg_reads, kmer_ref, upstrm_bases,
+            alt_ref, alt_base)
         if reg_stats is not None:
             stats_q.put(reg_stats)
         if VERBOSE:
@@ -1542,8 +1554,12 @@ def test_shifts_main(args):
             ctrl_read_coverage=ctrl_read_coverage)
     else:
         tb_model_fn = args.tombo_model_filename
+        bio_samp_type = args.bio_sample_type
+        if bio_samp_type is None:
+            bio_samp_type = 'RNA' if th.is_rna(raw_read_coverage) else 'DNA'
         if tb_model_fn is None:
-            tb_model_fn = get_default_standard_ref(raw_read_coverage)
+            tb_model_fn, bio_samp_type = get_default_standard_ref(
+                raw_read_coverage, bio_samp_type)
         kmer_ref, upstrm_bases, _, _ = parse_tombo_model(tb_model_fn)
 
         # if no alt model provided perform de novo testing for shifts
@@ -1556,8 +1572,8 @@ def test_shifts_main(args):
             all_stats = test_significance(
                 raw_read_coverage, args.minimum_test_reads,
                 args.fishers_method_context, single_read_thresh,
-                args.multiprocess_region_size, args.processes, kmer_ref=kmer_ref,
-                upstrm_bases=upstrm_bases)
+                args.multiprocess_region_size, args.processes,
+                kmer_ref=kmer_ref, upstrm_bases=upstrm_bases)
         # else perform comparison model testing
         else:
             stat_type = 'model_compare'
@@ -1570,7 +1586,7 @@ def test_shifts_main(args):
             else:
                 alt_refs = load_alt_refs(
                     args.alternate_bases, raw_read_coverage,
-                    upstrm_bases, kmer_width)
+                    upstrm_bases, kmer_width, bio_samp_type)
             if len(alt_refs) == 0:
                 sys.stderr.write(
                     '********* ERROR *********\n\tNo alternative models ' +
@@ -1624,10 +1640,11 @@ def est_alt_ref_main(args):
     alt_ref, upstrm_bases = estimate_alt_model(
         args.fast5_basedirs, args.control_fast5_basedirs,
         args.corrected_group, args.basecall_subgroups,
-        args.tombo_model_filename, args.alternate_model_base,
-        args.alt_fraction_percentile, args.minimum_kmer_observations,
-        args.save_density_basename, args.kernel_density_bandwidth,
-        args.alternate_density_filename, args.control_density_filename)
+        args.tombo_model_filename, args.bio_sample_type,
+        args.alternate_model_base, args.alt_fraction_percentile,
+        args.minimum_kmer_observations, args.save_density_basename,
+        args.kernel_density_bandwidth, args.alternate_density_filename,
+        args.control_density_filename)
     write_tombo_model(alt_ref, args.alternate_model_filename, upstrm_bases,
                       args.alternate_model_base, args.alternate_model_name)
 
@@ -1638,6 +1655,7 @@ def estimate_scale_main(args):
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
 
+    if VERBOSE: sys.stderr.write('Getting files list\n')
     try:
         if not os.path.isdir(args.fast5_basedir):
             sys.stderr.write(

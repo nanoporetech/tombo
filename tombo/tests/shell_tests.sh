@@ -354,6 +354,8 @@ tombo write_wiggles --fast5-basedirs $natDir \
         --wiggle-types coverage fraction signal signal_sd length stat \
         mt_stat difference \
         --statistics-filename test_stats.2samp.tombo.stats
+tombo write_wiggles --wiggle-types fraction stat mt_stat \
+        --statistics-filename test_stats.2samp.tombo.stats
 
 printf "\n\n********* Testing other plotting commands **********\n"
 tombo cluster_most_significant --fast5-basedirs $natDir \

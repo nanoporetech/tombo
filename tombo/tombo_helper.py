@@ -9,10 +9,10 @@ import numpy as np
 
 from glob import glob
 from operator import itemgetter
-from itertools import izip, repeat
+from itertools import izip, repeat, islice
 from collections import defaultdict, namedtuple
 
-from version import TOMBO_VERSION
+from _version import TOMBO_VERSION
 from c_helper import c_new_mean_stds, c_new_means, c_apply_outlier_thresh
 
 SMALLEST_PVAL = 1e-50
@@ -55,6 +55,11 @@ VERBOSE = False
 # got quantiles from analysis of stability after shift-only normalization
 robust_quantiles = (46.5, 53.5)
 
+
+######################################
+###### Various Helper Functions ######
+######################################
+
 COMP_BASES = string.maketrans('ACGT', 'TGCA')
 def comp_seq(seq):
     """
@@ -74,19 +79,108 @@ def rev_transcribe(seq):
     """
     return seq.translate(U_TO_T)
 
+def parse_fasta(fasta_fn):
+    """
+    Parse a fasta file for sequence extraction (mostly for BAM processing)
+    """
+    # Tried Biopython index and that opened the fail again for each
+    # record access request and was thus far too slow
+
+    # could consider a conditional dependence on pyfaix if on-disk
+    # indexing is required for larger genomes
+    # testing shows that human genome only takes 3.2 GB with raw parser
+    # so raw parsing is probably fine
+    fasta_fp = open(fasta_fn)
+
+    fasta_records = {}
+    curr_id = None
+    curr_seq = ''
+    for line in fasta_fp:
+        if line.startswith('>'):
+            if (curr_id is not None and
+                curr_seq is not ''):
+                fasta_records[curr_id] = curr_seq
+            curr_seq = ''
+            curr_id = line.replace(">","").strip().split()[0]
+        else:
+            curr_seq += line.strip()
+
+    # add last record
+    if (curr_id is not None and
+        curr_seq is not ''):
+        fasta_records[curr_id] = curr_seq
+
+    fasta_fp.close()
+
+    return fasta_records
+
+def get_chrm_sizes(raw_read_coverage, raw_read_coverage2=None):
+    """
+    Get covered chromosome sizes from a set of reads
+    """
+    strand_chrm_sizes = defaultdict(list)
+    for (chrm, strand), cs_read_cov in \
+        raw_read_coverage.iteritems():
+        strand_chrm_sizes[chrm].append(max(
+            r_data.end for r_data in cs_read_cov))
+    if raw_read_coverage2 is not None:
+        for (chrm, strand), cs_read_cov in \
+            raw_read_coverage2.iteritems():
+            strand_chrm_sizes[chrm].append(max(
+                r_data.end for r_data in cs_read_cov))
+
+    return dict((chrm, max(strnd_sizes))
+                for chrm, strnd_sizes in
+                strand_chrm_sizes.iteritems())
+
+def parse_motif(motif):
+    """
+    Parse a single letter code motif into a pattern for matching
+    """
+    invalid_chars = re.findall(
+        '[^' + ''.join(SINGLE_LETTER_CODE.keys()) + ']',
+        motif)
+    if len(invalid_chars) > 0:
+       sys.stderr.write(
+           '********* ERROR *********\n\tInvalid characters in motif: ' +
+           ', '.join(invalid_chars) + '\n')
+       sys.exit()
+
+    return re.compile(''.join(
+        SINGLE_LETTER_CODE[letter] for letter in motif))
+
+
+#############################################
+###### Automatic Sample-Type Detection ######
+#############################################
+
 def is_read_rna(fast5_data):
     """
     Determine if a read is RNA or DNA
     """
+    # check both experiment type and kit slots for "rna"
+    exp_type, exp_kit = None, None
     try:
         exp_type = fast5_data['UniqueGlobalKey/context_tags'].attrs[
             'experiment_type']
         # remove the word internal since it contains rna.
         exp_type = exp_type.replace('internal', '')
-        rna = re.search('rna', exp_type) is not None
     except:
-        # if this slot is not available assume dna sample
+        pass
+    try:
+        exp_kit = fast5_data['UniqueGlobalKey/context_tags'].attrs[
+            'experiment_kit']
+        # remove the word internal since it contains rna.
+        exp_kit = exp_kit.replace('internal', '')
+    except:
+        pass
+
+    if exp_type is None and exp_kit is None:
         rna = False
+    else:
+        rna = (
+            (exp_type is not None and re.search('rna', exp_type) is not None) or
+            (exp_kit is not None and re.search('rna', exp_kit) is not None))
 
     return rna
 
@@ -123,53 +217,10 @@ def is_rna_from_files(fast5_fns, n_reads=10):
             break
     return True
 
-def get_files_list(fast5s_dir):
-    """
-    Get all fast5 files recursively listed below the directory
-    """
-    all_fast5s = []
-    # walk through directory structure searching for fast5 files
-    for root, _, fns in os.walk(fast5s_dir):
-        for fn in fnmatch.filter(fns, '*.fast5'):
-            all_fast5s.append(os.path.join(root, fn))
 
-    return all_fast5s
-
-def parse_motif(motif):
-    """
-    Parse a single letter code motif into a pattern for matching
-    """
-    invalid_chars = re.findall('[^ACGTBDHKMNRSVWY]', motif)
-    if len(invalid_chars) > 0:
-       sys.stderr.write(
-           '********* ERROR ********* Invalid characters in motif: ' +
-           ', '.join(invalid_chars) + ' *********\n')
-       sys.exit()
-
-    return re.compile(''.join(
-        SINGLE_LETTER_CODE[letter] for letter in motif))
-
-def parse_obs_filter(obs_filter):
-    """
-    Parse observations per base formatted filtering
-    """
-    if len(obs_filter) < 1:
-        return None
-
-    # parse obs_filter
-    try:
-        obs_filter = [map(int, pctl_nobs.split(':'))
-                      for pctl_nobs in obs_filter]
-    except:
-        raise RuntimeError, 'Invalid format for observation filter'
-
-    if any(pctl < 0 or pctl > 100 for pctl in zip(*obs_filter)[0]):
-       sys.stderr.write(
-           '********* ERROR ********* Invalid percentile value. ' +
-           ' *********\n')
-       sys.exit()
-
-    return obs_filter
+#########################################
+###### Index File/Filter Functions ######
+#########################################
 
 def get_index_fn(fast5s_dir, corr_grp):
     """
@@ -207,13 +258,13 @@ def write_index_file(all_index_data, index_fn, basedir):
     except:
         import pickle
     index_data = defaultdict(list)
-    for chrm_strand, (fn, start, end, rsrr, c_grp, s_grp,
+    for chrm_strand, (fn, start, end, rsrtr, c_grp, s_grp,
                       filtered, rna) in all_index_data:
         # clip the basedir off the FAST5 filename in case later functions are
         # called from another relative path
         from_base_fn = fn.replace(basedir, '')
         index_data[chrm_strand].append((
-            from_base_fn, start, end, rsrr, c_grp, s_grp, filtered, rna))
+            from_base_fn, start, end, rsrtr, c_grp, s_grp, filtered, rna))
 
     with open(index_fn, 'w') as index_fp:
         pickle.dump(dict(index_data), index_fp)
@@ -231,18 +282,47 @@ def clear_filters(fast5s_dir, corr_grp):
         import cPickle as pickle
     except:
         import pickle
-    with open(index_fn, 'rb') as index_fp:
-        index_data = pickle.load(index_fp)
+    try:
+        with open(index_fn, 'rb') as index_fp:
+            index_data = pickle.load(index_fp)
+    except IOError:
+        sys.stderr.write(
+            '******** ERRROR *******\n\tFilters can only be applied to runs ' +
+            'with a Tombo index file. Re-run resquiggle without the ' +
+            '--skip-index option to apply filters.\n')
+        sys.exit()
     new_index_data = []
     for chrm_strand, cs_raw_data in index_data.iteritems():
         new_index_data.extend([(chrm_strand, (
-            from_base_fn, start, end, rsrr, corr_grp, s_grp, False, rna))
-                               for from_base_fn, start, end, rsrr, c_grp,
+            from_base_fn, start, end, rsrtr, corr_grp, s_grp, False, rna))
+                               for from_base_fn, start, end, rsrtr, c_grp,
                                s_grp, filtered, rna in cs_raw_data])
 
     write_index_file(new_index_data, index_fn, fast5s_dir)
 
     return
+
+def parse_obs_filter(obs_filter):
+    """
+    Parse observations per base formatted filtering
+    """
+    if len(obs_filter) < 1:
+        return None
+
+    # parse obs_filter
+    try:
+        obs_filter = [map(int, pctl_nobs.split(':'))
+                      for pctl_nobs in obs_filter]
+    except:
+        raise RuntimeError, 'Invalid format for observation filter'
+
+    if any(pctl < 0 or pctl > 100 for pctl in zip(*obs_filter)[0]):
+       sys.stderr.write(
+           '********* ERROR ********* Invalid percentile value. ' +
+           ' *********\n')
+       sys.exit()
+
+    return obs_filter
 
 def filter_reads(fast5s_dir, corr_grp, obs_filter):
     """
@@ -268,16 +348,23 @@ def filter_reads(fast5s_dir, corr_grp, obs_filter):
         import cPickle as pickle
     except:
         import pickle
-    with open(index_fn, 'rb') as index_fp:
-        index_data = pickle.load(index_fp)
+    try:
+        with open(index_fn, 'rb') as index_fp:
+            index_data = pickle.load(index_fp)
+    except IOError:
+        sys.stderr.write(
+            '******** ERRROR *******\n\tFilters can only be applied to runs ' +
+            'with a Tombo index file. Re-run resquiggle without the ' +
+            '--skip-index option to apply filters.\n')
+        sys.exit()
     filt_index_data = []
     num_reads, num_filt_reads = 0, 0
     for chrm_strand, cs_raw_data in index_data.iteritems():
         cs_filt_reads = [
             (chrm_strand, (
-                from_base_fn, start, end, rsrr, corr_grp, s_grp,
+                from_base_fn, start, end, rsrtr, corr_grp, s_grp,
                 read_is_stuck(fast5s_dir + '/' + from_base_fn, s_grp), rna))
-            for from_base_fn, start, end, rsrr, c_grp,
+            for from_base_fn, start, end, rsrtr, c_grp,
             s_grp, filtered, rna in cs_raw_data if not filtered]
         num_reads += len(cs_raw_data)
         num_filt_reads += sum([1 for i_data in cs_filt_reads if i_data[1][6]])
@@ -300,30 +387,38 @@ def filter_reads_for_coverage(fast5s_dir, corr_grp, frac_to_filter):
         import cPickle as pickle
     except:
         import pickle
-    with open(index_fn, 'rb') as index_fp:
-        index_data = pickle.load(index_fp)
+    try:
+        with open(index_fn, 'rb') as index_fp:
+            index_data = pickle.load(index_fp)
+    except IOError:
+        sys.stderr.write(
+            '******** ERRROR *******\n\tFilters can only be applied to runs ' +
+            'with a Tombo index file. Re-run resquiggle without the ' +
+            '--skip-index option to apply filters.\n')
+        sys.exit()
     unfilt_data = []
     unfilt_reads_cov = []
     prev_filt_data = []
     for chrm_strand, cs_raw_data in index_data.iteritems():
         max_end = max(end for (_, _, end, _, _, _, _, _) in cs_raw_data)
         cs_coverage = np.zeros(max_end, dtype=np.int_)
-        for (from_base_fn, start, end, rsrr, c_grp,
+        for (from_base_fn, start, end, rsrtr, c_grp,
              s_grp, filtered, rna) in cs_raw_data:
             if filtered: continue
             cs_coverage[start:end] += 1
         # now go through and compute coverage as well
-        for (from_base_fn, start, end, rsrr, c_grp,
+        for (from_base_fn, start, end, rsrtr, c_grp,
              s_grp, filtered, rna) in cs_raw_data:
             if filtered:
                 prev_filt_data.append((chrm_strand, (
-                    from_base_fn, start, end, rsrr, c_grp, s_grp, filtered, rna)))
+                    from_base_fn, start, end, rsrtr,
+                    c_grp, s_grp, filtered, rna)))
                 continue
             # add approximate coverage from middle of read
             # faster than mean over the whole read
             unfilt_reads_cov.append(cs_coverage[start + int((end - start)/2)])
             unfilt_data.append((chrm_strand, (
-                from_base_fn, start, end, rsrr, c_grp, s_grp, filtered, rna)))
+                from_base_fn, start, end, rsrtr, c_grp, s_grp, filtered, rna)))
 
     num_reads = len(unfilt_data)
     num_filt_reads = int(frac_to_filter * num_reads)
@@ -338,8 +433,8 @@ def filter_reads_for_coverage(fast5s_dir, corr_grp, frac_to_filter):
     filt_indices = np.random.choice(
         num_reads, size=num_filt_reads, replace=False, p=unfilt_reads_p)
     filt_index_data = [
-        (chrm_strand, (from_base_fn, start, end, rsrr, c_grp, s_grp, True, rna))
-        for (chrm_strand, (from_base_fn, start, end, rsrr, c_grp, s_grp, _, rna))
+        (chrm_strand, (from_base_fn, start, end, rsrtr, c_grp, s_grp, True, rna))
+        for (chrm_strand, (from_base_fn, start, end, rsrtr, c_grp, s_grp, _, rna))
         in itemgetter(*filt_indices)(unfilt_data)]
     unfilt_index_data = list(itemgetter(*list(set(range(num_reads)).difference(
         filt_indices)))(unfilt_data))
@@ -348,6 +443,138 @@ def filter_reads_for_coverage(fast5s_dir, corr_grp, frac_to_filter):
                      index_fn, fast5s_dir)
 
     return
+
+
+#####################################
+###### FAST5 Parsing Functions ######
+#####################################
+
+def annotate_with_fastqs(fastq_fns, fast5s_read_ids, fastq_slot):
+    if VERBOSE: sys.stderr.write('Annotating FAST5s with sequence from FASTQs.\n')
+    for fastq_fn in fastq_fns:
+        n_recs = 0
+        been_warned_ids = False
+        with open(fastq_fn) as fastq_fp:
+            while True:
+                fastq_rec = list(islice(fastq_fp, 4))
+                # if record contains fewer than 4 lines this indicates the
+                # EOF, so move to next file
+                if len(fastq_rec) != 4: break
+                # if sequence identifier line does not start with "@" or quality
+                # score line does not start with a "+" the file may be
+                # corrupted, so don't process any more records
+                if (re.match('@', fastq_rec[0]) is None or
+                    re.match('\+', fastq_rec[2]) is None):
+                    sys.stderr.write(
+                        '********* WARNING ********\n\tSuccessfully parsed ' +
+                        str(n_recs) + 'FASTQ records from ' + fastq_fn +
+                        ' before encountering an invalid record. The rest of ' +
+                        'this file will not be processed.\n')
+                    break
+
+                # extract read_id from fastq (which should be the first text
+                # after the "@" record delimiter up to the first white space or
+                # underscore
+                read_id = fastq_rec[0].split()[0].split('_')[0][1:]
+                if not been_warned_ids and read_id not in fast5s_read_ids:
+                    been_warned_ids = True
+                    sys.stderr.write(
+                        '********* WARNING ********\n\tSome records from ' +
+                        fastq_fn + ' contain read identifiers not found ' +
+                        'in any FAST5 files.\n')
+                    continue
+
+                with h5py.File(fast5s_read_ids[read_id]) as fast5_data:
+                    bc_slot = fast5_data[fastq_slot]
+                    bc_slot.create_dataset('Fastq', data=''.join(fastq_rec))
+
+    return
+
+def get_files_list(fast5s_dir):
+    """
+    Get all fast5 files recursively listed below the directory
+    """
+    all_fast5s = []
+    # walk through directory structure searching for fast5 files
+    for root, _, fns in os.walk(fast5s_dir):
+        for fn in fnmatch.filter(fns, '*.fast5'):
+            all_fast5s.append(os.path.join(root, fn))
+
+    return all_fast5s
+
+def prep_fast5_for_fastq(
+        fast5_data, basecall_group, basecall_subgroup, overwrite):
+    try:
+        read_id = fast5_data[
+            '/Raw/Reads/'].values()[0].attrs['read_id']
+    except:
+        return None
+
+    # if Analyses group doesn't exist yet, create it
+    try:
+        analyses_grp = fast5_data['/Analyses']
+    except:
+        analyses_grp = fast5_data.create_group('Analyses')
+
+    # create Fastq slot, unless value exists and --overwrite is not set
+    try:
+        bc_grp = analyses_grp[basecall_group]
+    except:
+        bc_grp = analyses_grp.create_group(basecall_group)
+        bc_subgrp = bc_grp.create_group(basecall_subgroup)
+    else:
+        if overwrite:
+            del analyses_grp[basecall_group]
+            bc_grp = analyses_grp.create_group(basecall_group)
+            bc_subgrp = bc_grp.create_group(basecall_subgroup)
+        else:
+            raise NotImplementedError, (
+                basecall_group + ' exists and --overwrite is not set.')
+
+    return read_id
+
+def get_read_ids_and_prep_fastq_slot(
+        fast5s_dir, basecall_group, basecall_subgroup, overwrite):
+    """
+    Extract read id from /Raw group and prep fastq slots for annotation with
+    associated FASTQ files.
+    """
+    if VERBOSE: sys.stderr.write(
+            'Preparing reads and extracting read identifiers.\n')
+    been_warned_overwrite = False
+    been_warned_unique = False
+    fast5s_read_ids = {}
+    # walk through directory structure searching for fast5 files
+    for root, _, fns in os.walk(fast5s_dir):
+        for fn in fnmatch.filter(fns, '*.fast5'):
+            fast5_fn = os.path.join(root, fn)
+            with h5py.File(fast5_fn) as fast5_data:
+                try:
+                    read_id = prep_fast5_for_fastq(
+                        fast5_data, basecall_group, basecall_subgroup, overwrite)
+                except NotImplementedError:
+                    if VERBOSE and not been_warned_overwrite:
+                        been_warned_overwrite = True
+                        sys.stderr.write(
+                            '********* WARNING ********\n\tBasecalls exsit in ' +
+                            basecall_group + ' slot. Set --overwrite option ' +
+                            'to overwrite these basecalls in this slot.\n')
+                    continue
+            if read_id is None:
+                continue
+            if read_id in fast5s_read_ids:
+                # Warn non-unique read_ids in directory
+                if VERBOSE and not been_warned_unique:
+                    been_warned_unique = True
+                    sys.stderr.write(
+                        '******** WARNING *********\n\tMultiple FAST5 files ' +
+                        'contain the same read identifiers. Ensure that ' +
+                        'FAST5 files are from a single run.\n')
+                continue
+
+            fast5s_read_ids[read_id] = fast5_fn
+
+    return fast5s_read_ids
 
 def parse_fast5s_wo_index(
         fast5_basedirs, corrected_group, basecall_subgroups, rna):
@@ -398,11 +625,11 @@ def convert_index(index_data, fast5s_dir, corr_grp, new_corr_grp):
     """
     new_index_data = []
     for (chrm, strand), cs_raw_data in index_data.iteritems():
-        for (from_base_fn, start, end, rsrr, c_grp, s_grp,
+        for (from_base_fn, start, end, rsrtr, c_grp, s_grp,
              filtered, rna) in cs_raw_data:
             if c_grp != corr_grp: continue
             new_index_data.append(((chrm, strand), (
-                from_base_fn, start, end, rsrr,
+                from_base_fn, start, end, rsrtr,
                 new_corr_grp, s_grp, filtered, rna)))
 
     fast5s_dir = (fast5s_dir if fast5s_dir.endswith('/') else
@@ -430,10 +657,10 @@ def parse_fast5s_w_index(fast5s_dir, corr_grp, subgroups, new_corr_grp):
         # TODO temporary check that filtered is a boolean value so that old
         # len_percentiles slots will be handled correctly should be removed
         cs_data = [
-            readData(start, end, filtered, rsrr, strand,
+            readData(start, end, filtered, rsrtr, strand,
                      os.path.join(fast5s_dir, from_base_fn),
                      corr_grp + '/' + s_grp, rna)
-            for from_base_fn, start, end, rsrr, c_grp,
+            for from_base_fn, start, end, rsrtr, c_grp,
             s_grp, filtered, rna in cs_raw_data
             if c_grp == corr_grp and s_grp in subgroups and
             not (isinstance(filtered, bool) and filtered)]
@@ -496,41 +723,12 @@ def parse_fast5s(fast5_basedirs, corrected_group, basecall_subgroups,
 
     return raw_read_coverage
 
-def get_channel_info(read_data):
-    """
-    Get channel information for a read
-    """
-    try:
-        fast5_info = read_data['UniqueGlobalKey/channel_id'].attrs
-    except:
-        raise RuntimeError, ("No channel_id group in HDF5 file. " +
-                             "Probably mux scan HDF5 file.")
 
-    channel_info = channelInfo(
-        fast5_info['offset'], fast5_info['range'],
-        fast5_info['digitisation'], fast5_info['channel_number'],
-        fast5_info['sampling_rate'].astype('int_'))
+###################################
+###### Statistical Functions ######
+###################################
 
-    return channel_info
-
-def get_chrm_sizes(raw_read_coverage, raw_read_coverage2=None):
-    """
-    Get covered chromosome sizes from a set of reads
-    """
-    strand_chrm_sizes = defaultdict(list)
-    for (chrm, strand), cs_read_cov in \
-        raw_read_coverage.iteritems():
-        strand_chrm_sizes[chrm].append(max(
-            r_data.end for r_data in cs_read_cov))
-    if raw_read_coverage2 is not None:
-        for (chrm, strand), cs_read_cov in \
-            raw_read_coverage2.iteritems():
-            strand_chrm_sizes[chrm].append(max(
-                r_data.end for r_data in cs_read_cov))
-
-    return dict((chrm, max(strnd_sizes))
-                for chrm, strnd_sizes in
-                strand_chrm_sizes.iteritems())
+# Some of these functions should likely be re-factored to tombo_stats
 
 def parse_pore_model(pore_model_fn):
     """
@@ -689,7 +887,140 @@ def normalize_raw_signal(
 
     return raw_signal, scaleValues(shift, scale, lower_lim, upper_lim)
 
-def get_signal(r_data, int_start, int_end):
+
+###########################################
+###### Events Table Access Functions ######
+###########################################
+
+def get_multiple_slots_read_centric(r_data, slot_names):
+    """
+    Extract read-centric slot_names from this read's Events table
+    """
+    try:
+        with h5py.File(r_data.fn, 'r') as read_data:
+            # note that it's more efficient to try to access the slot
+            # and except the error that check if the slot exists first
+            r_events = read_data['/'.join((
+                '/Analyses', r_data.corr_group, 'Events'))].value
+    except:
+        # probably truncated file or events don't exist
+        return [None,] * len(slot_names)
+
+    return [r_events[slot_name] for slot_name in slot_names]
+
+def get_single_slot_read_centric(r_data, slot_name):
+    """
+    Extract read-centric slot_name from this read's Events table
+    """
+    try:
+        with h5py.File(r_data.fn, 'r') as read_data:
+            # note that it's more efficient to try to access the slot
+            # and except the error that check if the slot exists first
+            r_events = read_data['/'.join((
+                '/Analyses', r_data.corr_group, 'Events'))].value
+            r_slot_values = r_events[slot_name]
+    except:
+        # probably truncated file or events don't exist
+        return None
+
+    return r_slot_values
+
+def get_single_slot_genome_centric(r_data, slot_name):
+    """
+    Extract genome-centric slot_name from this read's Events table
+    """
+    r_slot_values = get_single_slot_read_centric(r_data, slot_name)
+    if r_slot_values is None:
+        return None
+
+    if ((r_data.strand == '-' and not r_data.rna) or
+        (r_data.strand == '+' and r_data.rna)):
+        r_slot_values = r_slot_values[::-1]
+
+    return r_slot_values
+
+def get_mean_slot_genome_centric(cs_reads, chrm_len, slot_name):
+    """
+    Get the mean over all reads at each covered genomic location for this slots value
+    """
+    base_sums = np.zeros(chrm_len)
+    base_cov = np.zeros(chrm_len, dtype=np.int_)
+    for r_data in cs_reads:
+        # extract read means data so data across all chrms is not
+        # in RAM at one time
+        g_slot_values = get_single_slot_genome_centric(r_data, slot_name)
+        if g_slot_values is None: continue
+
+        base_sums[r_data.start:
+                  r_data.start + len(g_slot_values)] += g_slot_values
+        base_cov[r_data.start:r_data.start + len(g_slot_values)] += 1
+
+    return base_sums / base_cov
+
+def get_all_mean_slot_values(raw_read_coverage, chrm_sizes, slot_name):
+    """
+    Get the mean over all reads at each covered genomic location for this slots value over all covered chromosomes and strands
+    """
+    # ignore divide by zero errors that occur where there is no
+    # coverage. Need to correct nan values after subtracting two sets of
+    # coverage so leave as nan for now
+    old_err_settings = np.seterr(all='ignore')
+    # take the mean over all signal overlapping each base
+    all_mean_values = {}
+    for chrm, strand in [(c, s) for c in chrm_sizes.keys()
+                         for s in ('+', '-')]:
+        if (chrm, strand) in raw_read_coverage:
+            cs_mean_values = get_mean_slot_genome_centric(
+                raw_read_coverage[(chrm, strand)], chrm_sizes[chrm], slot_name)
+        else:
+            cs_mean_values = np.empty(chrm_sizes[chrm])
+            cs_mean_values[:] = np.nan
+        all_mean_values[(chrm, strand)] = cs_mean_values
+    _ = np.seterr(**old_err_settings)
+
+    return all_mean_values
+
+def get_all_mean_levels(raw_read_coverage, chrm_sizes):
+    """
+    Helper function to compute genome location mean levels
+    """
+    return get_all_mean_slot_values(raw_read_coverage, chrm_sizes, 'norm_mean')
+
+def get_all_mean_stdev(raw_read_coverage, chrm_sizes):
+    """
+    Helper function to compute genome location mean levels
+    """
+    return get_all_mean_slot_values(raw_read_coverage, chrm_sizes, 'norm_stdev')
+
+def get_all_mean_lengths(raw_read_coverage, chrm_sizes):
+    """
+    Helper function to compute genome location mean lengths
+    """
+    return get_all_mean_slot_values(raw_read_coverage, chrm_sizes, 'length')
+
+
+###########################################
+###### Special Data Access Functions ######
+###########################################
+
+def get_channel_info(read_data):
+    """
+    Get channel information for a read
+    """
+    try:
+        fast5_info = read_data['UniqueGlobalKey/channel_id'].attrs
+    except:
+        raise RuntimeError, ("No channel_id group in HDF5 file. " +
+                             "Probably mux scan HDF5 file.")
+
+    channel_info = channelInfo(
+        fast5_info['offset'], fast5_info['range'],
+        fast5_info['digitisation'], fast5_info['channel_number'],
+        fast5_info['sampling_rate'].astype('int_'))
+
+    return channel_info
+
+def get_raw_signal(r_data, int_start, int_end):
     """
     Extract raw signal from where this read overlaps a particular genomic region
     """
@@ -706,8 +1037,9 @@ def get_signal(r_data, int_start, int_end):
         upper_lim = corr_subgrp.attrs['upper_lim']
         all_sig = fast5_data['/Raw/Reads'].values()[0]['Signal'].value
 
+    rsrtr = r_data.read_start_rel_to_raw
     if r_data.rna:
-        # reverse signal for RNA
+        # reverse raw signal for RNA
         all_sig = all_sig[::-1]
 
     if r_data.strand == "-":
@@ -725,14 +1057,12 @@ def get_signal(r_data, int_start, int_end):
 
     num_reg_obs = overlap_seg_data[-1] - overlap_seg_data[0]
     if r_data.strand == "+":
-        reg_start_rel_raw = (r_data.read_start_rel_to_raw +
-                             overlap_seg_data[0])
+        reg_start_rel_raw = rsrtr + overlap_seg_data[0]
         r_sig, _ = normalize_raw_signal(
             all_sig, reg_start_rel_raw, num_reg_obs, shift=shift,
             scale=scale, lower_lim=lower_lim, upper_lim=upper_lim)
     else:
-        reg_start_rel_raw = (r_data.read_start_rel_to_raw +
-                             segs[-1] - overlap_seg_data[-1])
+        reg_start_rel_raw = rsrtr + segs[-1] - overlap_seg_data[-1]
         r_sig, _ = normalize_raw_signal(
             all_sig, reg_start_rel_raw, num_reg_obs, shift=shift,
             scale=scale, lower_lim=lower_lim, upper_lim=upper_lim)
@@ -740,48 +1070,10 @@ def get_signal(r_data, int_start, int_end):
 
     return r_sig, overlap_seg_data, start_offset
 
-def parse_fasta(fasta_fn):
-    """
-    Parse a fasta file for sequence extraction (mostly for BAM processing)
-    """
-    # Tried Biopython index and that opened the fail again for each
-    # record access request and was thus far too slow
-
-    # could consider a conditional dependence on pyfaix if on-memory
-    # indexing is required for larger genomes
-    # testing shows that human genome only takes 3.2 GB with raw parser
-    # so raw parsing is probably fine
-    fasta_fp = open(fasta_fn)
-
-    fasta_records = {}
-    curr_id = None
-    curr_seq = ''
-    for line in fasta_fp:
-        if line.startswith('>'):
-            if (curr_id is not None and
-                curr_seq is not ''):
-                fasta_records[curr_id] = curr_seq
-            curr_seq = ''
-            curr_id = line.replace(">","").strip().split()[0]
-        else:
-            curr_seq += line.strip()
-
-    # add last record
-    if (curr_id is not None and
-        curr_seq is not ''):
-        fasta_records[curr_id] = curr_seq
-
-    fasta_fp.close()
-
-    return fasta_records
-
 def parse_read_correction_data(r_data):
     """
     Parse correction data from an event resquiggled read
     """
-    # TODO this is broken for RNA with reversed events compared to called events
-    # this is also broken for event-less since the "original" events are
-    # discovered again and only deletions are fixed
     try:
         with h5py.File(r_data.fn, 'r') as fast5_data:
             raw_grp = fast5_data['/Raw/Reads'].values()[0]
@@ -806,82 +1098,12 @@ def parse_read_correction_data(r_data):
     events_end = event_data['start'][-1] + event_data['length'][-1]
     new_segs = np.concatenate([event_data['start'], [events_end,]])
 
+    if r_data.rna:
+        signal_data = signal_data[::-1]
+
     return (read_id, signal_data, raw_offset, shift, scale, lower_lim,
             upper_lim, old_segs, old_align_vals, new_align_vals,
             events_end, new_segs)
-
-def get_coverage(raw_read_coverage):
-    """
-    Get genome coverage for a set of reads
-    """
-    if VERBOSE: sys.stderr.write('Calculating read coverage.\n')
-    read_coverage = {}
-    for (chrm, strand), reads_data in raw_read_coverage.items():
-        max_end = max(r_data.end for r_data in reads_data)
-        chrm_coverage = np.zeros(max_end, dtype=np.int_)
-        for r_data in reads_data:
-            chrm_coverage[r_data.start:r_data.end] += 1
-        read_coverage[(chrm, strand)] = chrm_coverage
-
-    return read_coverage
-
-def get_read_base_means(r_data):
-    """
-    Extract the mean of the raw signal assigned to each base for this read
-
-    Note that this is genome oriented not read oriented
-    """
-    try:
-        with h5py.File(r_data.fn, 'r') as read_data:
-            # note that it's more efficient to try to access the slot
-            # and except the error that check if the slot exists first
-            read_events = read_data['/'.join((
-                '/Analyses', r_data.corr_group, 'Events'))].value
-            read_means = read_events['norm_mean']
-    except:
-        # probably truncated file or events don't exist
-        return None
-
-    if r_data.strand == '-':
-        read_means = read_means[::-1]
-
-    return read_means
-
-def get_read_means_and_seq(r_data):
-    """
-    Extract mean and associated genomic seqeunce for this read
-
-    Note that this is read centric not genome centric
-    """
-    try:
-        with h5py.File(r_data.fn, 'r') as read_data:
-            # note that it's more efficient to try to access the slot
-            # and except the error that check if the slot exists first
-            read_events = read_data['/'.join((
-                '/Analyses', r_data.corr_group, 'Events'))].value
-    except:
-        # probably truncated file or events don't exist
-        return None, None
-
-    return read_events['norm_mean'], read_events['base']
-
-def get_reads_base_means(chrm_strand_reads, chrm_len, rev_strand):
-    """
-    Get the mean signal level for a set of reads over a single chromosome/strand
-    """
-    base_sums = np.zeros(chrm_len)
-    base_cov = np.zeros(chrm_len, dtype=np.int_)
-    for r_data in chrm_strand_reads:
-        # extract read means data so data across all chrms is not
-        # in RAM at one time
-        read_means = get_read_base_means(r_data)
-        if read_means is None: continue
-
-        base_sums[r_data.start:
-                  r_data.start + len(read_means)] += read_means
-        base_cov[r_data.start:r_data.start + len(read_means)] += 1
-
-    return base_sums / base_cov
 
 def get_all_read_data(r_data):
     """
@@ -916,150 +1138,45 @@ def get_all_read_data(r_data):
             genomeLoc(algn_subgrp['mapped_start'], algn_subgrp['mapped_strand'],
                       algn_subgrp['mapped_chrom']))
 
-def get_base_means(raw_read_coverage, chrm_sizes):
+def get_coverage(raw_read_coverage):
     """
-    Get average signal at each covered genomic position for this set of reads
+    Get genome coverage for a set of reads
     """
-    # ignore divide by zero errors that occur where there is no
-    # coverage. Need to correct nan values after subtracting two sets of
-    # coverage so leave as nan for now
-    old_err_settings = np.seterr(all='ignore')
-    # take the mean over all signal overlapping each base
-    mean_base_signal = {}
-    for chrm, strand in [(c, s) for c in chrm_sizes.keys()
-                         for s in ('+', '-')]:
-        if (chrm, strand) in raw_read_coverage:
-            cs_base_means = get_reads_base_means(
-                raw_read_coverage[(chrm, strand)], chrm_sizes[chrm],
-                strand == '-')
-        else:
-            cs_base_means = np.empty(chrm_sizes[chrm])
-            cs_base_means[:] = np.nan
-        mean_base_signal[(chrm, strand)] = cs_base_means
-    _ = np.seterr(**old_err_settings)
+    if VERBOSE: sys.stderr.write('Calculating read coverage.\n')
+    read_coverage = {}
+    for (chrm, strand), reads_data in raw_read_coverage.items():
+        max_end = max(r_data.end for r_data in reads_data)
+        chrm_coverage = np.zeros(max_end, dtype=np.int_)
+        for r_data in reads_data:
+            chrm_coverage[r_data.start:r_data.end] += 1
+        read_coverage[(chrm, strand)] = chrm_coverage
 
-    return mean_base_signal
+    return read_coverage
 
-def get_reads_base_sds(chrm_strand_reads, chrm_len, rev_strand):
-    """
-    Extract reads mean SD at genomic positions over a single chromosome/strand
-    """
-    base_sd_sums = np.zeros(chrm_len)
-    base_cov = np.zeros(chrm_len, dtype=np.int_)
-    for r_data in chrm_strand_reads:
-        # extract read means data so data across all chrms is not
-        # in RAM at one time
-        try:
-            with h5py.File(r_data.fn, 'r') as read_data:
-                # note that it's more efficient to try to access the slot
-                # and except the error that check if the slot exists first
-                read_sds = read_data['/'.join((
-                    '/Analyses', r_data.corr_group,
-                    'Events'))].value['norm_stdev']
-        except:
-            # probably truncated file or events don't exist
-            continue
-
-        if rev_strand:
-            read_sds = read_sds[::-1]
-        base_sd_sums[r_data.start:
-                     r_data.start + len(read_sds)] += read_sds
-        base_cov[r_data.start:r_data.start + len(read_sds)] += 1
-
-    return base_sd_sums / base_cov
-
-def get_base_sds(raw_read_coverage, chrm_sizes):
-    """
-    Extract reads mena SD at genomic positions
-    """
-    # ignore divide by zero errors that occur where there is no
-    # coverage. Need to correct nan values after subtracting two sets of
-    # coverage so leave as nan for now
-    old_err_settings = np.seterr(all='ignore')
-    # take the mean over all signal overlapping each base
-    mean_base_sds = {}
-    for chrm, strand in [(c, s) for c in chrm_sizes.keys()
-                         for s in ('+', '-')]:
-        if (chrm, strand) not in raw_read_coverage: continue
-        mean_base_sds[(chrm, strand)] = get_reads_base_sds(
-            raw_read_coverage[(chrm, strand)], chrm_sizes[chrm],
-            strand == '-')
-    _ = np.seterr(**old_err_settings)
-
-    return mean_base_sds
-
-def get_reads_base_lengths(chrm_strand_reads, chrm_len, rev_strand):
-    """
-    Extract reads mean dwell lenths at genomic positions over a single chromosome/strand
-    """
-    base_length_sums = np.zeros(chrm_len)
-    base_cov = np.zeros(chrm_len, dtype=np.int_)
-    for r_data in chrm_strand_reads:
-        # extract read means data so data across all chrms is not
-        # in RAM at one time
-        try:
-            with h5py.File(r_data.fn, 'r') as read_data:
-                # note that it's more efficient to try to access the slot
-                # and except the error that check if the slot exists first
-                read_lengths = read_data['/'.join((
-                    '/Analyses', r_data.corr_group, 'Events'))].value['length']
-        except:
-            # probably truncated file or events don't exist
-            continue
-
-        if rev_strand:
-            read_lengths = read_lengths[::-1]
-        base_length_sums[
-            r_data.start:
-            r_data.start + len(read_lengths)] += read_lengths
-        base_cov[r_data.start:r_data.start + len(read_lengths)] += 1
-
-    return base_length_sums / base_cov
-
-def get_base_lengths(raw_read_coverage, chrm_sizes):
-    """
-    Extract reads mean dwell lenths at genomic positions
-    """
-    # ignore divide by zero errors that occur where there is no
-    # coverage. Need to correct nan values after subtracting two sets of
-    # coverage so leave as nan for now
-    old_err_settings = np.seterr(all='ignore')
-    # take the mean over all signal overlapping each base
-    mean_base_lengths = {}
-    for chrm, strand in [(c, s) for c in chrm_sizes.keys()
-                         for s in ('+', '-')]:
-        if (chrm, strand) not in raw_read_coverage: continue
-        mean_base_lengths[(chrm, strand)] = get_reads_base_lengths(
-            raw_read_coverage[(chrm, strand)], chrm_sizes[chrm],
-            strand == '-')
-    _ = np.seterr(**old_err_settings)
-
-    return mean_base_lengths
-
-def get_reads_events(chrm_strand_reads, rev_strand):
+def get_reads_events(cs_reads, rev_strand):
     """
     Extract read base levels split by genomic position
     """
     # note that this function assumes that all reads come from the same
     # chromosome and strand
-    chrm_strand_base_means = []
-    for r_data in chrm_strand_reads:
+    cs_base_means = []
+    cs_read_start_ends = []
+    for r_data in cs_reads:
         # extract read means data so data across all chrms is not
         # in RAM at one time
-        read_means = get_read_base_means(r_data)
+        read_means = get_single_slot_genome_centric(r_data, 'norm_mean')
         if read_means is None: continue
         assert read_means.shape[0] == r_data.end - r_data.start, (
             'Read found with mismatching mapping location and ' +
             'signal information.')
-        chrm_strand_base_means.append((
-            read_means, r_data.start, r_data.end))
+        cs_base_means.append(read_means)
+        cs_read_start_ends.append((r_data.start, r_data.end))
 
-    if len(chrm_strand_base_means) == 0: return None
+    if len(cs_base_means) == 0: return None
 
-    chrm_signal = np.concatenate(zip(*chrm_strand_base_means)[0])
-    chrm_pos = np.concatenate(
-        [np.arange(r_data[1], r_data[2])
-         for r_data in chrm_strand_base_means])
+    chrm_signal = np.concatenate(cs_base_means)
+    chrm_pos = np.concatenate([np.arange(start, end)
+                               for start, end in cs_read_start_ends])
     # get order of all bases from position array
     as_chrm_pos = np.argsort(chrm_pos)
     # then sort the signal array by genomic position and
@@ -1067,62 +1184,51 @@ def get_reads_events(chrm_strand_reads, rev_strand):
     split_poss = np.where(
         np.concatenate([[0,], np.diff(
             chrm_pos[as_chrm_pos])]) > 0)[0]
-    chrm_strand_base_events = dict(zip(
+    cs_base_events = dict(zip(
         np.unique(chrm_pos[as_chrm_pos]),
         np.split(chrm_signal[as_chrm_pos], split_poss)))
 
-    return chrm_strand_base_events
+    return cs_base_events
 
-def get_read_seq(read_data):
-    """
-    Extract read sequence
-
-    Note this is genome oriented sequence
-    """
-    with h5py.File(read_data.fn, 'r') as r_data:
-        seq = ''.join(r_data[
-            'Analyses/' + read_data.corr_group + '/Events']['base'])
-    if read_data.strand == "-":
-        seq = rev_comp(seq)
-    return seq
-
-def update_seq(read_data, reg_base_data, int_start, int_end):
+def update_seq(r_data, reg_base_data, int_start, int_end):
     """
     Update the sequence for the region based on this read
     """
-    try:
-        seq = list(get_read_seq(read_data))
-    except:
+    r_seq = ''.join(get_single_slot_read_centric(r_data, 'base'))
+    if r_seq is None:
         # probably a corrupt file so return that the region is only
         # up to the start of this read so the next valid read will be added
         # to the sequence
-        return reg_base_data, max(0, read_data.start - int_start)
+        return reg_base_data, max(0, r_data.start - int_start)
+    if r_data.strand == '-':
+        r_seq = rev_comp(r_seq)
+
     # if read starts before the interval
-    if read_data.start <= int_start:
-        r_end_overlap = read_data.end - int_start
+    if r_data.start <= int_start:
+        r_end_overlap = r_data.end - int_start
         # if read covers the whole interval
-        if read_data.end > int_end:
-            r_end_clip = read_data.end - int_end
-            reg_base_data = seq[-r_end_overlap:-r_end_clip]
+        if r_data.end > int_end:
+            r_end_clip = r_data.end - int_end
+            reg_base_data = r_seq[-r_end_overlap:-r_end_clip]
             return reg_base_data, len(reg_base_data)
         # end of read overlaps beginning of interval
-        reg_base_data[:r_end_overlap] = seq[-r_end_overlap:]
+        reg_base_data[:r_end_overlap] = r_seq[-r_end_overlap:]
         return reg_base_data, r_end_overlap
     # read doesn't cover the beginning of region
-    if read_data.end > int_end:
+    if r_data.end > int_end:
         # beginning of read covers to the end of the region
-        r_begin_overlap = int_end - read_data.start
-        reg_base_data[-r_begin_overlap:] = seq[:r_begin_overlap]
+        r_begin_overlap = int_end - r_data.start
+        reg_base_data[-r_begin_overlap:] = r_seq[:r_begin_overlap]
         return reg_base_data, len(reg_base_data)
     # first read is completely contained in the interval
-    r_len = read_data.end - read_data.start
-    r_int_start = read_data.start - int_start
-    reg_base_data[r_int_start:r_int_start + r_len] = seq
+    r_len = r_data.end - r_data.start
+    r_int_start = r_data.start - int_start
+    reg_base_data[r_int_start:r_int_start + r_len] = r_seq
     return reg_base_data, r_int_start + r_len
 
 def get_seq_from_reads(int_start, int_end, reg_reads):
     """
-    Extract the genomic sequence for an interval from a set of reads
+    Extract the forward strand genomic sequence for an interval from a set of reads
     """
     # handle case where no read overlaps whole region
     # let each read contibute its sequence and fill the rest
@@ -1210,9 +1316,8 @@ def get_region_reads(
                 int_i.reg_text,
                 get_c_s_data(int_i.chrm, int_i.strand, int_i.start, int_i.end)))
 
-    no_cov_regions = [
-        (len(reg_data.reads) == 0, str(reg_data.chrm) + ':' + str(reg_data.start))
-        for reg_data in all_reg_data]
+    if add_seq:
+        all_reg_data = add_reg_seq(all_reg_data)
     if not filter_no_cov:
         return all_reg_data
 
@@ -1220,14 +1325,14 @@ def get_region_reads(
     all_reg_data = [
         reg_data for reg_data in all_reg_data if len(reg_data.reads) > 0]
 
+    no_cov_regions = [
+        (len(reg_data.reads) == 0, str(reg_data.chrm) + ':' + str(reg_data.start))
+        for reg_data in all_reg_data]
     if any(no_cov[0] for no_cov in no_cov_regions):
         sys.stderr.write(
             '**** WARNING **** No coverage in regions: ' +
             '; '.join([reg for no_cov, reg in no_cov_regions
                        if no_cov]) + '\n')
-
-    if add_seq:
-        all_reg_data = add_reg_seq(all_reg_data)
 
     return all_reg_data
 
@@ -1249,6 +1354,11 @@ def get_region_sequences(
     all_reg_data = add_reg_seq(all_reg_data)
 
     return all_reg_data
+
+
+###################################
+###### FAST5 Write Functions ######
+###################################
 
 def prep_fast5(fast5_fn, corr_grp, overwrite, in_place, bc_grp=None):
     """
@@ -1451,6 +1561,27 @@ def filter_coverage_main(args):
     for fast5s_dir in args.fast5_basedirs:
         filter_reads_for_coverage(
             fast5s_dir, args.corrected_group, args.percent_to_filter / 100.0)
+
+    return
+
+
+##################################
+###### Annotate FAST5s Main ######
+##################################
+
+def annotate_reads_with_fastq_main(args):
+    global VERBOSE
+    VERBOSE = not args.quiet
+
+    fast5s_basedir = (
+        args.fast5_basedir if args.fast5_basedir.endswith('/') else
+        args.fast5_basedir + '/')
+    fast5s_read_ids = get_read_ids_and_prep_fastq_slot(
+        fast5s_basedir, args.basecall_group, args.basecall_subgroup,
+        args.overwrite)
+    fastq_slot = '/'.join(('/Analyses', args.basecall_group,
+                           args.basecall_subgroup))
+    annotate_with_fastqs(args.fastq_filenames, fast5s_read_ids, fastq_slot)
 
     return
 

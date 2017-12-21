@@ -20,6 +20,9 @@ For more details see the :doc:`re-squiggle documentation </resquiggle>`.
 
 .. code-block:: bash
 
+    # optionally annotate raw FAST5s with FASTQ files produced from the same reads
+    tombo annotate_raw_with_fastqs --fast5-basedir <fast5s-base-directory> --fastq-filenames reads.fastq
+
     tombo resquiggle [-h] <fast5s-base-directory> <reference-fasta> --minimap2-executable ./minimap2
 
 -----------------------

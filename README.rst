@@ -1,6 +1,9 @@
-=======
-Summary
-=======
+=============
+Tombo Summary
+=============
+
+.. image:: https://travis-ci.org/nanoporetech/tombo.svg?branch=master
+    :target: https://travis-ci.org/nanoporetech/tombo
 
 Tombo is a suite of tools primarily for the identification of modified nucleotides from nanopore sequencing data.
 
@@ -9,6 +12,14 @@ Tombo also provides tools for the analysis and visualization of raw nanopore sig
 ============
 Installation
 ============
+
+|bioconda_badge| |pypi_badge|
+
+.. |bioconda_badge| image:: https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat-square
+    :target: http://bioconda.github.io/recipes/ont-tombo/README.html
+
+.. |pypi_badge| image:: https://badge.fury.io/py/ont-tombo.svg
+    :target: https://badge.fury.io/py/ont-tombo
 
 Basic tombo installation (python2.7 support only)
 
@@ -44,16 +55,18 @@ Re-squiggle (Raw Data Alignment)
 
 ..
 
-    FAST5 files need not contain Events data, but must contain Fastq slot.
+    Only R9.4/5 data is supported at this time.
 
-    Only R9.4/5 data (DNA or RNA) is supported at this time. Processing of other samples may produce sub-optimal results.
+    DNA or RNA is automatically determined from FAST5s (set explicitly with `--dna` or `--rna`).
+
+    FAST5 files need not contain Events data, but must contain Fastq slot. See `annotate_raw_with_fastqs` for pre-processing of raw FAST5s.
 
 Identify Modified Bases
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    # comparing to an alternative 5mC model
+    # comparing to an alternative 5mC model (recommended method)
     tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ \
         --alternate-bases 5mC --statistics-file-basename sample_compare
 

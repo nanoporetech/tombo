@@ -96,7 +96,7 @@ def write_stat_wigs(all_stats, wig_base, write_pvals, write_qvals, write_frac,
 def write_length_wig(
         raw_read_coverage, chrm_sizes, wig_base, group_name):
     if VERBOSE: sys.stderr.write('Parsing events lengths.\n')
-    base_lens = th.get_base_lengths(raw_read_coverage, chrm_sizes)
+    base_lens = th.get_all_mean_lengths(raw_read_coverage, chrm_sizes)
 
     if VERBOSE: sys.stderr.write('Writing length wig.\n')
     _write_wiggle(wig_base, group_name, base_lens, 'length')
@@ -106,7 +106,7 @@ def write_length_wig(
 def write_signal_sd_wig(
         raw_read_coverage, chrm_sizes, wig_base, group_name):
     if VERBOSE: sys.stderr.write('Parsing signal SDs.\n')
-    base_sds = th.get_base_sds(raw_read_coverage, chrm_sizes)
+    base_sds = th.get_all_mean_stdev(raw_read_coverage, chrm_sizes)
 
     if VERBOSE: sys.stderr.write('Writing signal SD wig.\n')
     _write_wiggle(wig_base, group_name, base_sds, 'signalSd')
@@ -117,9 +117,9 @@ def write_signal_and_diff_wigs(
         raw_read_coverage1, raw_read_coverage2, chrm_sizes,
         wig_base, group1_name, write_sig, write_diff):
     if VERBOSE: sys.stderr.write('Parsing mean base signals.\n')
-    base_means1 = th.get_base_means(raw_read_coverage1, chrm_sizes)
+    base_means1 = th.get_all_mean_levels(raw_read_coverage1, chrm_sizes)
     if raw_read_coverage2 is not None:
-        base_means2 = th.get_base_means(raw_read_coverage2, chrm_sizes)
+        base_means2 = th.get_all_mean_levels(raw_read_coverage2, chrm_sizes)
 
         if write_diff:
             if VERBOSE: sys.stderr.write(
@@ -159,13 +159,14 @@ def write_all_wiggles(
         if VERBOSE: sys.stderr.write('Loading statistics from file.\n')
         all_stats, stat_type = ts.parse_stats(stats_fn)
 
-    raw_read_coverage1 = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    if len(raw_read_coverage1) == 0:
-        sys.stderr.write(
-            '*' * 60 + '\nERROR: No reads present in --fast5-basedirs.\n' +
-            '*' * 60 + '\n')
-        sys.exit()
+    if f5_dirs1 is not None:
+        raw_read_coverage1 = th.parse_fast5s(
+            f5_dirs1, corrected_group, basecall_subgroups)
+        if len(raw_read_coverage1) == 0:
+            sys.stderr.write(
+                '*' * 60 + '\nERROR: No reads present in --fast5-basedirs.\n' +
+                '*' * 60 + '\n')
+            sys.exit()
 
     group1_name = '' if f5_dirs2 is None else GROUP1_NAME
     if f5_dirs2 is not None:
@@ -191,7 +192,7 @@ def write_all_wiggles(
                 raw_read_coverage1, raw_read_coverage2, chrm_sizes,
                 wig_base, group1_name, 'signal' in wig_types,
                 'difference' in wig_types)
-    else:
+    elif f5_dirs1 is not None:
         chrm_sizes = th.get_chrm_sizes(raw_read_coverage1)
         if VERBOSE: sys.stderr.write('Writing wiggles.\n')
         if 'signal' in wig_types:
@@ -278,6 +279,13 @@ def wiggle_main(args):
         sys.stderr.write(
             '*' * 60 + '\nERROR: Must provide two sets of FAST5s ' + \
             'to output difference wiggle files.\n' + '*' * 60 + '\n')
+        sys.exit()
+    if (args.control_fast5_basedirs is not None and
+        args.fast5_basedirs is None):
+        sys.stderr.write(
+            '*' * 60 + '\nERROR: Cannot provide a control FAST5 set of ' +
+            'directories without a sample set of FAST5 directories.\n' +
+            '*' * 60 + '\n')
         sys.exit()
 
     write_all_wiggles(
