@@ -476,12 +476,13 @@ def annotate_with_fastqs(fastq_fns, fast5s_read_ids, fastq_slot):
                 # after the "@" record delimiter up to the first white space or
                 # underscore
                 read_id = fastq_rec[0].split()[0].split('_')[0][1:]
-                if not been_warned_ids and read_id not in fast5s_read_ids:
-                    been_warned_ids = True
-                    sys.stderr.write(
-                        '********* WARNING ********\n\tSome records from ' +
-                        fastq_fn + ' contain read identifiers not found ' +
-                        'in any FAST5 files.\n')
+                if read_id not in fast5s_read_ids:
+                    if not been_warned_ids:
+                        been_warned_ids = True
+                        sys.stderr.write(
+                            '********* WARNING ********\n\tSome records from ' +
+                            fastq_fn + ' contain read identifiers not found ' +
+                            'in any FAST5 files.\n')
                     continue
 
                 with h5py.File(fast5s_read_ids[read_id]) as fast5_data:
