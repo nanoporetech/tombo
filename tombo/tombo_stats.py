@@ -580,7 +580,7 @@ def parse_base_levels(
 
     return mixed_base_levels
 
-def write_kmer_densities_file(dens_fn):
+def write_kmer_densities_file(dens_fn, kmer_dens, dens_i):
     with open(dens_fn, 'w') as fp:
         fp.write('Kmer\tSignal\tDensity\n')
         fp.write('\n'.join('\t'.join(map(str, (kmer, x, y)))
