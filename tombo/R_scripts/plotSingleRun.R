@@ -62,5 +62,7 @@ plotSingleRun <- function(sigDat, quantDat, boxDat, eventDat,
               theme_bw() + theme(axis.text.x=element_text(hjust=0),
                                  panel.grid.major.x=element_blank(),
                                  panel.grid.minor.x=element_blank(),
-                                 panel.grid.minor.y=element_blank()))
-    }}
+                                 panel.grid.minor.y=element_blank())
+              )
+    }
+}

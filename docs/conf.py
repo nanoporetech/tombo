@@ -54,7 +54,7 @@ if subprocess.call(['sphinx-apidoc', '-o', './', "../{}".format(__pkg_name__)]) 
 #
 
 # Get the version number from __init__.py
-verstrline = open(os.path.join('..', __pkg_name__, '_version.py'), 'r').read()
+verstrline = open(os.path.join('..', __pkg_name__, '_version.py'), 'r').readlines()[-1]
 vsre = r"^TOMBO_VERSION = ['\"]([^'\"]*)['\"]"
 mo = re.search(vsre, verstrline)
 if mo:

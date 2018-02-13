@@ -18,8 +18,8 @@ plotKmerDist <- function(dat, baseDat, saveDatFn, dontPlot){
     if (is.na(baseDat)){
         print(mainP)
     } else {
-        mainL <- get_legend(mainP)
-        mainP <- mainP + theme(legend.position='none')
+        ##mainL <- get_legend(mainP)
+        ##mainP <- mainP + theme(legend.position='none')
         baseP <- ggplot(baseDat) +
             geom_tile(aes(x=Kmer, y=Position, fill=Base)) +
             scale_fill_manual(
@@ -35,9 +35,17 @@ plotKmerDist <- function(dat, baseDat, saveDatFn, dontPlot){
             mainP <- mainP + theme(axis.text.x=element_blank())
             baseP <- baseP + theme(axis.text.x=element_blank())
         }
-        print(plot_grid(plot_grid(mainP, baseP, ncol=1,
-                                  rel_heights=c(5,1), align='v'),
-                        mainL, ncol=1, rel_heights=c(10,1)))
+        pdf('/dev/null')
+        mainP <- ggplot_gtable(ggplot_build(mainP))
+        baseP <- ggplot_gtable(ggplot_build(baseP))
+        maxWidth = grid::unit.pmax(mainP$widths[2:3], baseP$widths[2:3])
+        mainP$widths[2:3] <- maxWidth
+        baseP$widths[2:3] <- maxWidth
+        foo <- dev.off()
+        grid.arrange(mainP, baseP, ncol=1, heights=c(5,1))
+        ##plot_grid(plot_grid(mainP, baseP, ncol=1,
+        ##                      rel_heights=c(5,1), align='v'),
+        ##            mainL, ncol=1, rel_heights=c(10,1)))
     }}
 
 plotKmerDistWReadPath <- function(dat, baseDat, saveDatFn, dontPlot){
@@ -69,29 +77,40 @@ plotKmerDistWReadPath <- function(dat, baseDat, saveDatFn, dontPlot){
         print(mainP)
         print(readP)
     } else {
-    mainL <- get_legend(mainP)
-    mainP <- mainP + theme(legend.position='none')
-    baseP <- ggplot(baseDat) +
-        geom_tile(aes(x=Kmer, y=Position, fill=Base)) +
-        scale_fill_manual(
-            values=c('A'='#00CC00', 'C'='#0000CC',
-                     'G'='#FFB300', 'T'='#CC0000')) +
-        theme_bw() + theme(
-            axis.text.x=element_text(angle=60, hjust=1, size=8),
-            legend.position='none')
-    mainP <- mainP + theme(axis.text.x=element_blank(),
-                           axis.title.x=element_blank())
-    readP <- readP + theme(axis.text.x=element_blank(),
-                           axis.title.x=element_blank())
-    if (nchar(as.character(dat$Kmer[1])) > 3){
-        mainP <- mainP + theme(axis.text.x=element_blank())
-        readP <- readP + theme(axis.text.x=element_blank())
-        baseP <- baseP + theme(axis.text.x=element_blank())
-    }
-    print(plot_grid(plot_grid(mainP, baseP, ncol=1,
-                              rel_heights=c(5,1), align='v'),
-          mainL, ncol=1, rel_heights=c(10,1)))
-    print(plot_grid(plot_grid(readP, baseP, ncol=1,
-                              rel_heights=c(5,1), align='v'),
-          mainL, ncol=1, rel_heights=c(10,1)))
+        #mainL <- get_legend(mainP)
+        #mainP <- mainP + theme(legend.position='none')
+        baseP <- ggplot(baseDat) +
+            geom_tile(aes(x=Kmer, y=Position, fill=Base)) +
+            scale_fill_manual(
+                values=c('A'='#00CC00', 'C'='#0000CC',
+                         'G'='#FFB300', 'T'='#CC0000')) + theme_bw() +
+           theme(axis.text.x=element_text(angle=60, hjust=1, size=8),
+                 legend.position='none')
+        mainP <- mainP + theme(axis.text.x=element_blank(),
+                               axis.title.x=element_blank())
+        readP <- readP + theme(axis.text.x=element_blank(),
+                               axis.title.x=element_blank())
+        if (nchar(as.character(dat$Kmer[1])) > 3){
+            mainP <- mainP + theme(axis.text.x=element_blank())
+            readP <- readP + theme(axis.text.x=element_blank())
+            baseP <- baseP + theme(axis.text.x=element_blank())
+        }
+        pdf('/dev/null')
+        mainP <- ggplot_gtable(ggplot_build(mainP))
+        readP <- ggplot_gtable(ggplot_build(readP))
+        baseP <- ggplot_gtable(ggplot_build(baseP))
+        maxWidth = grid::unit.pmax(mainP$widths[2:3], readP$widths[2:3],
+                                   baseP$widths[2:3])
+        mainP$widths[2:3] <- maxWidth
+        readP$widths[2:3] <- maxWidth
+        baseP$widths[2:3] <- maxWidth
+        foo <- dev.off()
+        grid.arrange(mainP, baseP, ncol=1, heights=c(5,1))
+        grid.arrange(readP, baseP, ncol=1, heights=c(5,1))
+        ##print(plot_grid(plot_grid(mainP, baseP, ncol=1,
+        ##                          rel_heights=c(5,1), align='v'),
+        ##                mainL, ncol=1, rel_heights=c(10,1)))
+        ##print(plot_grid(plot_grid(readP, baseP, ncol=1,
+        ##                          rel_heights=c(5,1), align='v'),
+        ##                mainL, ncol=1, rel_heights=c(10,1)))
 }}

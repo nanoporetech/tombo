@@ -18,14 +18,16 @@ Installation
 .. |pypi_badge| image:: https://badge.fury.io/py/ont-tombo.svg
     :target: https://badge.fury.io/py/ont-tombo
 
-Basic Tombo installation (python2.7 support only)::
+Basic tombo installation (python 2.7 and 3.4+ support)
+
+::
 
     # install via bioconda environment
     conda install -c bioconda ont-tombo
 
     # or install pip package (numpy install required before tombo for cython optimization)
     pip install numpy
-    pip install ont-tombo
+    pip install ont-tombo[full]
 
 See :doc:`examples` for common workflows.
 
@@ -49,6 +51,7 @@ Contents
    plotting
    filtering
    model_training
+   rna
 
 -------------------------
 Full API reference (beta)

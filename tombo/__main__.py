@@ -1,8 +1,9 @@
+from __future__ import unicode_literals, absolute_import
+
 import sys
 
-import _option_parsers
-
-from _version import TOMBO_VERSION
+from . import _option_parsers
+from ._version import TOMBO_VERSION
 
 def main(args=None):
     """The main routine."""
@@ -10,17 +11,17 @@ def main(args=None):
         args = sys.argv[1:]
 
     commands = [
-        ('Resquiggle (Must be run before any other commands):', [
-            ('resquiggle','Re-annotate raw signal with ' +
-             'genomic alignment from existing basecalls.',
-             _option_parsers.get_eventless_resquiggle_parser()),
-        ]),
         ('Pre-processing:', [
             ('annotate_raw_with_fastqs','Add basecalled sequence ' +
              'from FASTQs to raw FAST5s.',
              _option_parsers.get_add_fastqs_parser()),
         ]),
-        ('Statistical Testing Command:',[
+        ('Re-squiggle:', [
+            ('resquiggle','Re-annotate raw signal with ' +
+             'genomic alignment from existing basecalls.',
+             _option_parsers.get_eventless_resquiggle_parser()),
+        ]),
+        ('Modified Base Detection:',[
             ('test_significance','Test for shifts in signal ' +
              'indicative of non-canonical bases.',
              _option_parsers.get_test_signif_parser()),
@@ -58,6 +59,8 @@ def main(args=None):
              _option_parsers.get_per_read_parser()),
         ]),
         ('Other Plotting Commands:', [
+            ('plot_roc','Plot ROC curve from known motif(s).',
+             _option_parsers.get_roc_parser()),
             ('plot_kmer','Plot signal distributions acorss kmers.',
              _option_parsers.get_kmer_dist_parser()),
             ('cluster_most_significant',
@@ -111,9 +114,10 @@ def main(args=None):
     import argparse
     parser = argparse.ArgumentParser(
         prog='tombo',
-        description='Tombo is a command line python toolset ' +
-        'to analyze and visualize raw nanopore sequencing data ' +
-        'including the identification of non-standard nucleotides.',
+        description='Tombo is a suite of tools primarily for the ' +
+        'identification of modified nucleotides from nanopore sequencing ' +
+        'data. Tombo also provides tools for the analysis and ' +
+        'visualization of raw nanopore signal.',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         '-v', '--version', action='version',
@@ -133,46 +137,46 @@ def main(args=None):
     args = parser.parse_args(args)
 
     if args.subcmd == 'resquiggle':
-        import resquiggle
+        from . import resquiggle
         resquiggle.eventless_resquiggle_main(args)
     elif args.subcmd == 'event_resquiggle':
-        import _event_resquiggle
+        from . import _event_resquiggle
         _event_resquiggle.event_resquiggle_main(args)
     elif args.subcmd == 'model_resquiggle':
-        import _model_resquiggle
+        from . import _model_resquiggle
         _model_resquiggle.model_resquiggle_main(args)
     elif args.subcmd == 'test_significance':
-        import tombo_stats
+        from . import tombo_stats
         tombo_stats.test_shifts_main(args)
     elif args.subcmd == 'estimate_reference':
-        import tombo_stats
+        from . import tombo_stats
         tombo_stats.est_ref_main(args)
     elif args.subcmd == 'estimate_alt_reference':
-        import tombo_stats
+        from . import tombo_stats
         tombo_stats.est_alt_ref_main(args)
     elif args.subcmd == 'estimate_scale':
-        import tombo_stats
+        from . import tombo_stats
         tombo_stats.estimate_scale_main(args)
     elif args.subcmd == 'annotate_raw_with_fastqs':
-        import tombo_helper
+        from . import tombo_helper
         tombo_helper.annotate_reads_with_fastq_main(args)
     elif args.subcmd == 'clear_filters':
-        import tombo_helper
+        from . import tombo_helper
         tombo_helper.clear_filters_main(args)
     elif args.subcmd == 'filter_stuck':
-        import tombo_helper
+        from . import tombo_helper
         tombo_helper.filter_stuck_main(args)
     elif args.subcmd == 'filter_coverage':
-        import tombo_helper
+        from . import tombo_helper
         tombo_helper.filter_coverage_main(args)
     elif args.group == 'Text Output Commands:':
-        import text_output_commands
+        from . import text_output_commands
         if args.subcmd == 'write_wiggles':
             text_output_commands.wiggle_main(args)
         else:
             text_output_commands.write_signif_diff_main(args)
     else:
-        import plot_commands
+        from . import plot_commands
         plot_commands.plot_main(args)
 
     return

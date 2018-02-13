@@ -2,7 +2,7 @@
 Read Filtering Commands
 ***********************
 
-Read filtering commands can be useful to extract the most out out of a set of reads for modified base detection. Read filtering commands effect only the Tombo index file, and so filters can be cleared or applied iteratively without re-running any re-squiggle commands. Two filters are currently made available (``filter_stuck`` and ``filter_coverage``).
+Read filtering commands can be useful to extract the most out out of a set of reads for modified base detection. Read filtering commands effect only the Tombo index file, and so filters can be cleared or applied iteratively without re-running any re-squiggle analysis. Two filters are currently made available (``filter_stuck`` and ``filter_coverage``).
 
 ----------------
 ``filter_stuck``
@@ -16,11 +16,11 @@ This filter is based on the number of observations per genomic base along a read
 ``filter_coverage``
 -------------------
 
-The ``filter_coverage`` command aims to filter reads to achieve more even read depth across a genome. This may be useful particularly in canonical and particularly in alternative mode estimation. This filter may also help make some testing cases more comparable across the genome.
+The ``filter_coverage`` command aims to filter reads to achieve more even read depth across a genome. This may be useful particularly in canonical and particularly in alternative model estimation. This filter may also help make test statistics more comparable across the genome.
 
 This filter is applied by randomly selecting reads weighted by the approximate coverage at the mapped location of each read. The number of reads removed from downstream processing is defined by the ``--percent-to-filter`` option.
 
-This filter is likely to be more useful for PCR'ed sample where duplicate locations are more likely to accumulate and cause very large spikes in coverage.
+This filter is likely to be more useful for PCR'ed sample where duplicate locations are more likely to accumulate and cause large spikes in coverage.
 
 -----------------
 ``clear_filters``
@@ -28,4 +28,4 @@ This filter is likely to be more useful for PCR'ed sample where duplicate locati
 
 The ``clear_filters`` simply removes any applied filters to this sample (failed reads from the re-squiggle command will still not be included). New filters can then be applied to this set of reads.
 
-All Tombo commands will respect the filtered reads when they are parsed for procesing
+All Tombo sub-commands will respect the filtered reads when parsed for processing.

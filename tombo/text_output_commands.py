@@ -1,11 +1,22 @@
-import sys, os
+from __future__ import division, unicode_literals, absolute_import
+
+from builtins import int, range, dict, map, zip
+
+import io
+import sys
 
 import numpy as np
 
 from collections import defaultdict
 
-import tombo_stats as ts
-import tombo_helper as th
+if sys.version_info[0] > 2:
+    unicode = str
+
+# import tombo functions
+from . import tombo_stats as ts
+from . import tombo_helper as th
+
+from ._default_parameters import SMALLEST_PVAL
 
 VERBOSE = False
 
@@ -19,20 +30,20 @@ def _write_wiggle(wig_base, group_text, data_values, type_name,
     group_w_dot = '' if group_text == '' else '.' + group_text
     group_w_us = '' if group_text == '' else '_' + group_text
     group_w_space = '' if group_text == '' else ' ' + group_text
-    plus_wig_fp = open(
-        wig_base + '.' + type_name + group_w_dot + '.plus.wig', 'w')
-    minus_wig_fp = open(
-        wig_base + '.' + type_name + group_w_dot + '.minus.wig', 'w')
+    plus_wig_fp = io.open(
+        wig_base + '.' + type_name + group_w_dot + '.plus.wig', 'wt')
+    minus_wig_fp = io.open(
+        wig_base + '.' + type_name + group_w_dot + '.minus.wig', 'wt')
     plus_wig_fp.write(WIG_HEADER.format(
         wig_base, type_name, 'fwd_strand', group_w_us, group_w_space))
     minus_wig_fp.write(WIG_HEADER.format(
         wig_base, type_name, 'rev_strand', group_w_us, group_w_space))
-    for (chrm, strand), chrm_values in data_values.iteritems():
+    for (chrm, strand), cs_values in data_values.items():
         wig_fp = plus_wig_fp if strand == '+' else minus_wig_fp
         wig_fp.write("variableStep chrom={} span=1\n".format(chrm))
         wig_fp.write('\n'.join([
-            str(int(pos) + 1) + " " + str(round(val, 4))
-            for pos, val in enumerate(chrm_values)
+            unicode(int(pos) + 1) + " " + unicode(round(val, 4))
+            for pos, val in enumerate(cs_values)
             if not (np.isnan(val) or (
                     filter_zeros and np.equal(val, 0.0)))]) + '\n')
 
@@ -41,55 +52,49 @@ def _write_wiggle(wig_base, group_text, data_values, type_name,
 
     return
 
-def write_stat_wigs(all_stats, wig_base, write_pvals, write_qvals, write_frac,
-                    stat_type):
+def write_frac_wigs(all_stats, wig_base, do_frac, do_damp, cov_damp_counts):
     if VERBOSE: sys.stderr.write('Parsing statistics.\n')
     raw_chrm_strand_stats = defaultdict(list)
     for stat in all_stats:
-        raw_chrm_strand_stats[(stat['chrm'], stat['strand'])].append(
-            (stat['pos'], stat['stat'], stat['mt_stat'], stat['frac']))
+        raw_chrm_strand_stats[(
+            stat['chrm'].decode(), stat['strand'].decode())].append(
+                (stat['pos'], stat['frac'], stat['valid_cov']))
 
-    all_stats = {}
-    all_mt_stats = {}
-    all_frac = {}
-    for chrm_strand, stats in raw_chrm_strand_stats.iteritems():
-        cs_poss, raw_cs_stats, raw_cs_mt_stat, raw_cs_frac = map(
-            np.array, zip(*stats))
+    if do_frac:
+        all_frac = {}
+    if do_damp:
+        all_damp_frac = {}
+    for chrm_strand, stats in raw_chrm_strand_stats.items():
+        cs_poss, raw_cs_frac, raw_cs_cov = map(np.array, zip(*stats))
         max_pos = max(cs_poss)
 
-        # arrange and store p-values
-        cs_stats = np.empty(max_pos + 1)
-        cs_stats[:] = np.nan
-        np.put(cs_stats, cs_poss, raw_cs_stats)
-        if stat_type != 'model_compare':
-            # ignore errors when taking maximum over NA
-            with np.errstate(invalid='ignore'):
-                cs_stats = -np.log10(np.maximum(th.SMALLEST_PVAL, cs_stats))
-        all_stats[chrm_strand] = cs_stats
+        if do_frac:
+            cs_frac = np.empty(max_pos + 1)
+            cs_frac[:] = np.nan
+            # fraction is stored as fraction of unmodified bases, but
+            # higher values show better in a wig file, so flip the fractions
+            np.put(cs_frac, cs_poss, 1 - raw_cs_frac)
+            all_frac[chrm_strand] = cs_frac
+        if do_damp:
+            cs_damp_frac = np.empty(max_pos + 1)
+            cs_damp_frac[:] = np.nan
+            non_mod_counts = np.round(raw_cs_frac * raw_cs_cov)
+            # compute dampened fraction of modified reads by adding psuedo-counts
+            # to the modified and un-modified counts (equivalent to a beta prior
+            # on the fraction estimation as a binomial variable)
+            raw_cs_damp_frac = (non_mod_counts + cov_damp_counts[0]) / (
+                raw_cs_cov + sum(cov_damp_counts))
+            # fraction is stored as fraction of unmodified bases, but
+            # higher values show better in a wig file, so flip the fractions
+            np.put(cs_damp_frac, cs_poss, 1 - raw_cs_damp_frac)
+            all_damp_frac[chrm_strand] = cs_damp_frac
 
-        # arrange and store q-values
-        cs_mt_stat = np.empty(max_pos + 1)
-        cs_mt_stat[:] = np.nan
-        np.put(cs_mt_stat, cs_poss, raw_cs_mt_stat)
-        if stat_type != 'model_compare':
-            with np.errstate(invalid='ignore'):
-                chrm_mt_stat= -np.log10(np.maximum(th.SMALLEST_PVAL, cs_mt_stat))
-        all_mt_stats[chrm_strand] = cs_mt_stat
-
-        cs_frac = np.empty(max_pos + 1)
-        cs_frac[:] = np.nan
-        # fraction is stored as fraction of unmodified bases, but
-        # higher values show better in a wig file, so flip the fractions
-        np.put(cs_frac, cs_poss, 1 - raw_cs_frac)
-        all_frac[chrm_strand] = cs_frac
-
-    if VERBOSE: sys.stderr.write('Writing statistics wig(s).\n')
-    if write_pvals:
-        _write_wiggle(wig_base, '', all_stats, 'statistic')
-    if write_qvals:
-        _write_wiggle(wig_base, '', all_mt_stats, 'multiple_testing_statistic')
-    if write_frac:
-        _write_wiggle(wig_base, '', all_frac, 'fraction_signif_reads')
+    if VERBOSE: sys.stderr.write('Writing fraction wigs.\n')
+    if do_frac:
+        _write_wiggle(wig_base, '', all_frac, 'fraction_modified_reads')
+    if do_damp:
+        _write_wiggle(wig_base, '', all_damp_frac,
+                      'dampened_fraction_modified_reads')
 
     return
 
@@ -99,7 +104,7 @@ def write_length_wig(
     base_lens = th.get_all_mean_lengths(raw_read_coverage, chrm_sizes)
 
     if VERBOSE: sys.stderr.write('Writing length wig.\n')
-    _write_wiggle(wig_base, group_name, base_lens, 'length')
+    _write_wiggle(wig_base, group_name, base_lens, 'dwell')
 
     return
 
@@ -125,8 +130,7 @@ def write_signal_and_diff_wigs(
             if VERBOSE: sys.stderr.write(
                     'Calculating signal differences.\n')
             sig_diffs = {}
-            for chrm, strand in [(c, s) for c in chrm_sizes.keys()
-                                 for s in ('+', '-')]:
+            for chrm, strand in [(c, s) for c in chrm_sizes for s in ('+', '-')]:
                 # calculate difference and set no coverage
                 # (nan) values to zero
                 sig_diffs[(chrm, strand)] \
@@ -153,20 +157,13 @@ def write_cov_wig(raw_read_coverage, wig_base, group_text):
 
 def write_all_wiggles(
         f5_dirs1, f5_dirs2, corrected_group, basecall_subgroups,
-        stats_fn, wig_base, wig_types):
-    if any(stat_name in wig_types for stat_name in
-           ['stat', 'mt_stat', 'fraction']):
-        if VERBOSE: sys.stderr.write('Loading statistics from file.\n')
-        all_stats, stat_type = ts.parse_stats(stats_fn)
-
+        stats_fn, wig_base, wig_types, cov_damp_counts):
     if f5_dirs1 is not None:
         raw_read_coverage1 = th.parse_fast5s(
             f5_dirs1, corrected_group, basecall_subgroups)
         if len(raw_read_coverage1) == 0:
-            sys.stderr.write(
-                '*' * 60 + '\nERROR: No reads present in --fast5-basedirs.\n' +
-                '*' * 60 + '\n')
-            sys.exit()
+            th._error_message_and_exit(
+                'No reads present in --fast5-basedirs.')
 
     group1_name = '' if f5_dirs2 is None else GROUP1_NAME
     if f5_dirs2 is not None:
@@ -181,7 +178,7 @@ def write_all_wiggles(
         if 'signal_sd' in wig_types:
             write_signal_sd_wig(
                 raw_read_coverage2, chrm_sizes, wig_base, GROUP2_NAME)
-        if 'length' in wig_types:
+        if 'dwell' in wig_types:
             write_length_wig(raw_read_coverage2, chrm_sizes,
                              wig_base, GROUP2_NAME)
 
@@ -205,25 +202,25 @@ def write_all_wiggles(
     if 'signal_sd' in wig_types:
         write_signal_sd_wig(raw_read_coverage1, chrm_sizes,
                             wig_base, group1_name)
-    if 'length' in wig_types:
+    if 'dwell' in wig_types:
         write_length_wig(raw_read_coverage1, chrm_sizes,
                          wig_base, group1_name)
-    if any(stat_name in wig_types for stat_name in
-           ['stat', 'mt_stat', 'fraction']):
-        write_stat_wigs(
-            all_stats, wig_base, 'stat' in wig_types,
-            'mt_stat' in wig_types, 'fraction' in wig_types, stat_type)
+    if any(wig_type in wig_types for wig_type in (
+            'fraction', 'dampened_fraction')):
+        if VERBOSE: sys.stderr.write('Loading statistics from file.\n')
+        all_stats, stat_type = ts.parse_stats(stats_fn)
+        write_frac_wigs(all_stats, wig_base, 'fraction' in wig_types,
+                        'dampened_fraction' in wig_types, cov_damp_counts)
 
     return
 
 def write_most_signif(
-        f5_dirs, fasta_fn, num_regions, qval_thresh, corrected_group,
-        basecall_subgroups, seqs_fn, num_bases, stat_order, stats_fn):
+        f5_dirs, fasta_fn, num_regions, corrected_group,
+        basecall_subgroups, seqs_fn, num_bases, stats_fn):
     if VERBOSE: sys.stderr.write('Loading statistics from file.\n')
     all_stats, stat_type = ts.parse_stats(stats_fn)
     plot_intervals = ts.get_most_signif_regions(
-        all_stats, num_bases, num_regions, qval_thresh,
-        fraction_order=not stat_order)
+        all_stats, num_bases, num_regions)
 
     # get each regions sequence either from reads or fasta index
     if fasta_fn is None:
@@ -231,22 +228,20 @@ def write_most_signif(
             f5_dirs, corrected_group, basecall_subgroups)
         all_reg_data = th.get_region_sequences(plot_intervals, raw_read_coverage)
     else:
-        fasta_records = th.parse_fasta(fasta_fn)
+        genome_index = th.Fasta(fasta_fn)
         all_reg_data = [
-            th.intervalData(
-                int_i.reg_id, int_i.chrm, int_i.start, int_i.end, int_i.strand,
-                int_i.reg_text, int_i.reads,
-                fasta_records[int_i.chrm][int_i.start:int_i.end])
-            for int_i in plot_intervals if int_i.chrm in fasta_records]
+            int_i._replace(
+                seq=genome_index.get_seq(int_i.chrm, int_i.start, int_i.end))
+            for int_i in plot_intervals if int_i.chrm in genome_index.index]
 
     if VERBOSE: sys.stderr.write('Outputting region seqeuences.\n')
-    with open(seqs_fn, 'w') as seqs_fp:
+    with io.open(seqs_fn, 'wt') as seqs_fp:
         for int_i in all_reg_data:
             reg_seq = int_i.seq
             if int_i.strand == '-':
                 reg_seq = th.rev_comp(reg_seq)
             seqs_fp.write('>{0}:{1:d}:{2} {3}\n{4}\n'.format(
-                int_i.chrm, int(int_i.start + (num_bases / 2)),
+                int_i.chrm, int(int_i.start + (num_bases // 2)),
                 int_i.strand, int_i.reg_text, ''.join(reg_seq)))
 
     return
@@ -260,38 +255,32 @@ def wiggle_main(args):
 
     if (any(data_type in args.wiggle_types
             for data_type in ['signal', 'difference', 'coverage',
-                              'signal_sd', 'length']) and
+                              'signal_sd', 'dwell']) and
         args.fast5_basedirs is None):
-        sys.stderr.write(
-            '*' * 60 + '\nERROR: Must provide a fast5 basedir to output ' +
-            'signal, difference, coverage, signal_sd and/or length wiggle ' +
-            'files.\n' + '*' * 60 + '\n')
-        sys.exit()
-    if (any(data_type in args.wiggle_types
-            for data_type in ['stat', 'mt_stat', 'fraction']) and
+        th._error_message_and_exit(
+            'Must provide a fast5 basedir to output signal, difference, ' +
+            'coverage, signal_sd and/or length wiggle files.')
+    if (any(wig_type in args.wiggle_types for wig_type in (
+            'fraction', 'dampened_fraction')) and
         args.statistics_filename is None):
-        sys.stderr.write(
-            '*' * 60 + '\nERROR: Must provide a statistics filename to output ' +
-            'stat and/or mt_stat wiggle files.\n' + '*' * 60 + '\n')
-        sys.exit()
+        th._error_message_and_exit(
+            'Must provide a statistics filename to output ' +
+            'fraction wiggle files.')
     if ('difference' in args.wiggle_types and
         args.control_fast5_basedirs is None):
-        sys.stderr.write(
-            '*' * 60 + '\nERROR: Must provide two sets of FAST5s ' + \
-            'to output difference wiggle files.\n' + '*' * 60 + '\n')
-        sys.exit()
+        th._error_message_and_exit(
+            'Must provide two sets of FAST5s ' + \
+            'to output difference wiggle files.')
     if (args.control_fast5_basedirs is not None and
         args.fast5_basedirs is None):
-        sys.stderr.write(
-            '*' * 60 + '\nERROR: Cannot provide a control FAST5 set of ' +
-            'directories without a sample set of FAST5 directories.\n' +
-            '*' * 60 + '\n')
-        sys.exit()
+        th._error_message_and_exit(
+            'Cannot provide a control FAST5 set of directories ' +
+            'without a sample set of FAST5 directories.')
 
     write_all_wiggles(
         args.fast5_basedirs, args.control_fast5_basedirs, args.corrected_group,
         args.basecall_subgroups, args.statistics_filename, args.wiggle_basename,
-        args.wiggle_types)
+        args.wiggle_types, args.coverage_dampen_counts)
 
     return
 
@@ -302,21 +291,17 @@ def write_signif_diff_main(args):
     ts.VERBOSE = VERBOSE
 
     if args.fast5_basedirs is None and args.genome_fasta is None:
-        sys.stderr.write(
-            '*' * 60 + '\nERROR: Must provide either FAST5 ' +
-            'directory(ies) or a fasta file.\n' + '*' * 60 + '\n')
-        sys.exit()
+        th._error_message_and_exit(
+            'Must provide either FAST5 directory(ies) or a fasta file.')
 
     write_most_signif(
-        args.fast5_basedirs, args.genome_fasta,
-        args.num_regions, args.q_value_threshold,
-        args.corrected_group, args.basecall_subgroups,
-        args.sequences_filename, args.num_bases,
-        args.statistic_order, args.statistics_filename)
+        args.fast5_basedirs, args.genome_fasta, args.num_regions,
+        args.corrected_group, args.basecall_subgroups, args.sequences_filename,
+        args.num_bases, args.statistics_filename)
 
     return
 
 
 if __name__ == '__main__':
-    raise NotImplementedError, (
+    raise NotImplementedError(
         'This is a module. See commands with `tombo -h`')

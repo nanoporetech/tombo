@@ -2,7 +2,7 @@
 Plotting Commands
 *****************
 
-In order to enhance modified base detection and give users a better understanding of raw nanopore data, Tombo provides a number of plotting commands.
+In order to enhance modified base detection and give users a better grasp of raw nanopore data, Tombo provides a number of plotting commands.
 
 ------------------------
 Genome Anchored Plotting
@@ -34,9 +34,9 @@ These plotting commands produce raw signal level plots such at the example below
 Model Plotting
 ^^^^^^^^^^^^^^
 
-Plots are also enabled to visualize the different testing frameworks available in Tombo. Thses plots would additionally include a control sample, the standard model or any non-standard base model, visualizing the control sample comparison, de novo testing and log likelihood ratio tests respectively.
+Plots are also enabled to visualize the different testing frameworks available in Tombo. These plots include a control sample, the standard model or any non-standard base model, visualizing the control sample comparison, de novo and log likelihood ratio tests respectively.
 
-Control these plots with these options: ``--control-fast5-basedirs``, ``--tombo-model-filename``, ``--alternate-model-filename``, ``--plot-standard-model``, and ``--plot-alternate-model``
+Control these plots with these options: ``--control-fast5-basedirs``, ``--plot-standard-model``, ``--plot-alternate-model 5mC``, ``--tombo-model-filename``, and ``--alternate-model-filename``.
 
 ----
 
@@ -63,7 +63,7 @@ Control these plots with these options: ``--control-fast5-basedirs``, ``--tombo-
 Over-Plotting
 ^^^^^^^^^^^^^
 
-When high coverage regions are plotted the raw signal plots can become less interpretable. By default, when read coverage exceeds 50X reads are randomly downsampled (change this option with ``--overplot-threshold``). Three additional over-plotting options (boxplot, quantile and density) are available as shown below (chose which over-plotting type to use with the ``--overplot-type`` option).
+When high coverage regions are plotted the raw signal plots can become less interpretable. By default, when read coverage exceeds 50X reads are randomly downsampled to 50X coverage (change this threshold with the ``--overplot-threshold`` option). Three additional over-plotting types (boxplot, quantile and density) are available as shown below (chose which over-plotting type to use with the ``--overplot-type`` option).
 
 ----
 
@@ -90,7 +90,7 @@ When high coverage regions are plotted the raw signal plots can become less inte
 Per-read Plotting
 ^^^^^^^^^^^^^^^^^
 
-As testing is applied on a per-read setting, per-read statistics plots are also available. As per-read statistics are not stored in the current Tombo framework, test values are re-computed for this plotting command (and the control sample comparison method is not currently enabled). Create these plots with the ``plot_per_read`` command.
+All testing in the Tombo framework is applied on a per-read basis; to visualize these per-read results, per-read statistic plots are available. Per-read statistics are an optional output from the ``test_significance`` command via the ``--per-read-statistics-filename`` option, and the output file specified by this option is required in order to plot per-read statistics. Create these plots with the ``plot_per_read`` command.
 
 ----
 
@@ -144,7 +144,34 @@ In order to investigate the k-mer signal current levels of a particular set of r
 
 ----
 
+ROC Curve
+^^^^^^^^^
+
+In order to validate the performance of significance testing results at a known sequence motif, the ``plot_roc`` command is provided. This command takes a Tombo statistics file, corresponding motif descriptions and the genome FASTA file. The "area under the curve" (AUC) for each motif is printed and the precision-recall curve is also plotted for each motif on the second page of the resulting PDF. Note that only genomic positions with the canonical base of interest are included in the results from this command.
+
+Below is an example command and resulting plot for identifying the known dam and dcm methylase contexts in E. coli using all three provided testing methods.
+
+.. code-block:: bash
+
+    tombo plot_roc \
+        --statistics-filenames vs_pcr.tombo.stats de_novo.tombo.stats \
+        5mC_model.5mC.tombo.stats 6mA_model.6mA.tombo.stats \
+        --motif-descriptions CCWGG:2:"dcm 5mC Sample Comp"::GATC:2:"dam 6mA Sample Comp" \
+        CCWGG:2:"dcm 5mC De novo"::GATC:2:"dam 6mA De novo" \
+        CCWGG:2:"dcm 5mC Alt Comp" GATC:2:"dam 6mA Alt Comp"  \
+        --genome-fasta e_coli.fasta
+
+----
+
+.. figure::  _images/roc.png
+   :align: center
+   :scale: 30%
+   
+   Example ROC curve plot
+
+----
+
 Correction Plotting
 ^^^^^^^^^^^^^^^^^^^
 
-Plotting commands, ``plot_correction`` and ``plot_multi_correction``, are provided to visualize the old event-based re-squiggle process. These commands are thus only applocable on reads that have been processed with ``event_reqsuiggle``.
+Plotting commands, ``plot_correction`` and ``plot_multi_correction``, are provided to visualize the old event-based re-squiggle process. These commands are thus only applicable on reads that have been processed with ``event_reqsuiggle``. These commands may be deprecated in the future.

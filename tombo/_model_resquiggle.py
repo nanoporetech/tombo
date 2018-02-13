@@ -1,6 +1,10 @@
-import os, sys
+from __future__ import unicode_literals, absolute_import
 
-import Queue
+from builtins import range, dict, map, zip
+
+import io
+import sys
+import queue
 
 import numpy as np
 np.seterr(all='raise')
@@ -8,15 +12,19 @@ import multiprocessing as mp
 
 from time import sleep
 from itertools import repeat
+from operator import itemgetter
 from collections import defaultdict
 
-# import tombo functions
-import tombo_stats as ts
-import tombo_helper as th
+if sys.version_info[0] > 2:
+    unicode = str
 
-from c_helper import c_new_means
-from dynamic_programming import c_reg_z_scores, c_base_forward_pass, \
-    c_base_traceback
+# import tombo functions
+from . import tombo_stats as ts
+from . import tombo_helper as th
+
+from .dynamic_programming import traceback, forward_pass
+from .c_helper import c_new_means
+from .c_dynamic_programming import c_reg_z_scores, c_base_traceback
 
 VERBOSE = False
 
@@ -65,65 +73,6 @@ def write_switch(s_fp, switch_points, reg_id, iter_num=0):
                          for sig_i in sig_is) + '\n')
     return
 
-
-def forward_pass(reg_z_scores, min_obs_per_base):
-    # dynamic programming algorithm to find modeled signal to base assignment
-
-    # fill banded path with cumulative probabilties from the previous signal
-    # either in the current base or the previous base (left or diagonal left
-    # from associated plotting)
-
-    # get the first row data
-    prev_b_data, (prev_b_start, prev_b_end) = reg_z_scores[0]
-    prev_b_fwd_data = np.cumsum(prev_b_data)
-    # store number of observations since last diagonal at each position
-    # - forces forward pass to allow legal traceback paths while
-    #   enforcing the minimum observations per base threshold
-    # - should also help from optimization pushing poor fitting bases
-    #   to assign only an observation or two
-    # - will also use this data to traceback all reasonable paths
-    prev_b_last_diag = np.ones(prev_b_end - prev_b_start,
-                               dtype=np.int32) * min_obs_per_base
-    # first row is just a cumsum since there is no previous row
-    reg_fwd_scores = [(prev_b_fwd_data, prev_b_last_diag,
-                       (prev_b_start, prev_b_end))]
-
-    for b_data, (b_start, b_end) in reg_z_scores[1:]:
-        b_fwd_data, prev_b_last_diag = c_base_forward_pass(
-            b_data, b_start, b_end,
-            prev_b_data, prev_b_start, prev_b_end,
-            prev_b_fwd_data, prev_b_last_diag, min_obs_per_base)
-
-        # consider storing data to form traceback in one go at the
-        # end of this loop
-        reg_fwd_scores.append((
-            b_fwd_data, prev_b_last_diag, (b_start, b_end)))
-        prev_b_data, prev_b_fwd_data, prev_b_start, prev_b_end = (
-            b_data, b_fwd_data, b_start, b_end)
-
-    return reg_fwd_scores
-
-def traceback(reg_fwd_scores, min_obs_per_base):
-    # traceback along maximally likely path
-
-    # initilize array to store new segments
-    new_segs = np.empty(len(reg_fwd_scores) - 1, dtype=np.int32)
-    # get first two bases of data for lookups
-    curr_base_sig = 1
-    curr_b_data, _, (curr_start, curr_end) = reg_fwd_scores[-1]
-    next_b_data, _, (next_start, next_end) = reg_fwd_scores[-2]
-    new_segs[-1] = c_base_traceback(
-        curr_b_data, curr_start, next_b_data, next_start, next_end,
-        curr_end - 1, min_obs_per_base)
-    for base_pos in range(len(reg_fwd_scores) - 3, -1, -1):
-        curr_b_data, curr_start = next_b_data, next_start
-        next_b_data, _, (next_start, next_end) = reg_fwd_scores[base_pos]
-        new_segs[base_pos] = c_base_traceback(
-            curr_b_data, curr_start, next_b_data, next_start, next_end,
-            new_segs[base_pos+1] - 1, min_obs_per_base)
-
-    return new_segs
-
 def get_best_event_path(reg_z_scores, b_switch_pnts, min_obs_per_base):
     # calc cummulative sums for more efficient region sum computations
     reg_cumm_z = [(np.cumsum(np.concatenate([[0], b_data])), b_start)
@@ -170,7 +119,7 @@ def get_best_event_path(reg_z_scores, b_switch_pnts, min_obs_per_base):
             curr_max_path = prev_path
             curr_max_sum = sp_event_mean_z
 
-    return np.array(curr_max_path[1:], dtype=np.int32)
+    return np.array(curr_max_path[1:], dtype=np.int64)
 
 def traceback_until(
         reg_fwd_scores, start_base, seq_pos, b_switch_pnts,
@@ -230,7 +179,7 @@ def find_all_tb_paths(reg_z_scores, reg_fwd_scores, global_tb, min_obs_per_base,
     # unlikely with a window of 3 original bases.
     tb_b_ranges = np.concatenate([[0], global_tb, [
         reg_fwd_scores[-1][-1][-1] + 1]])
-    tb_b_ranges = zip(tb_b_ranges[:-1], tb_b_ranges[1:] - 1)
+    tb_b_ranges = list(zip(tb_b_ranges[:-1], tb_b_ranges[1:] - 1))
     for base_pos, seq_pos in req_locations:
         path_i = []
         # add this position as a switch point for this base
@@ -330,9 +279,9 @@ def get_region_model_segs(
 
         return new_segs
 
-    if (min_obs_per_base * (reg_end - reg_start - 1) >=
-        r_b_starts[reg_end - 1] - r_b_starts[reg_start]):
-        raise NotImplementedError, (
+    if ((min_obs_per_base * (reg_end - reg_start)) >=
+        (r_b_starts[reg_end] - r_b_starts[reg_start])):
+        raise NotImplementedError(
             'Not enough signal to correct poor fitting region.')
 
     reg_z_scores = c_reg_z_scores(
@@ -355,33 +304,34 @@ def filter_regions(signif_shift_regs, r_prev_new_segs, r_pp_segs):
     return filtered_regs
 
 def model_resquiggle_read(
-        r_data, kmer_ref, kmer_width, upstrm_bases, dnstrm_bases, z_trans_lag,
-        z_thresh, reg_context, base_reg_context, max_base_shift, b_max_base_shift,
-        min_obs_per_base, base_space_iters, new_corr_grp, compute_sd,
-        debug_fps=None):
+        r_data, std_ref, z_trans_lag, z_thresh, reg_context, base_reg_context,
+        max_base_shift, b_max_base_shift, min_obs_per_base, base_space_iters,
+        new_corr_grp, compute_sd, debug_fps=None):
     # should also get signal here
     all_read_data = th.get_all_read_data(r_data)
     if all_read_data is None:
-        raise NotImplementedError, ('Error parsing data from FAST5 file.')
+        raise NotImplementedError('Error parsing data from FAST5 file.')
     (r_means, r_seq, r_sig, r_b_starts, scale_vals, norm_type, outlier_thresh,
      genome_loc) = all_read_data
-    r_ref_means, r_ref_sds = zip(*[
-        kmer_ref[kmer] for kmer in [''.join(bs) for bs in zip(*[
-            r_seq[i:] for i in range(kmer_width)])]])
+    r_ref_means, r_ref_sds, _, _ = ts.get_ref_from_seq(r_seq, std_ref)
+    dnstrm_bases = std_ref.kmer_width - std_ref.central_pos - 1
+
     # add upstream NANs so all data passed to model shifts is on the same
     # coordinate system. Note that the nan values will never be accessed
     # as the shift regions don't let a region extend beyond the non-nan
     # statistic values
-    r_ref_means = np.concatenate((([np.NAN] * upstrm_bases), r_ref_means))
-    r_ref_sds = np.concatenate((([np.NAN] * upstrm_bases), r_ref_sds))
+    r_ref_means = np.concatenate((([np.NAN] * std_ref.central_pos), r_ref_means))
+    r_ref_sds = np.concatenate((([np.NAN] * std_ref.central_pos), r_ref_sds))
 
     # add NAN values so that shifted regions will line up with original
     # base regions since kmer upstream and downstream positions can't be tested
     window_z = np.concatenate((
-        [np.NAN] * upstrm_bases,
+        [np.NAN] * std_ref.central_pos,
         ts.calc_window_z_transform(
-            r_means[upstrm_bases:-dnstrm_bases], r_ref_means[upstrm_bases:],
-            r_ref_sds[upstrm_bases:], z_trans_lag), [np.NAN] * dnstrm_bases))
+            r_means[std_ref.central_pos:-dnstrm_bases],
+            r_ref_means[std_ref.central_pos:],
+            r_ref_sds[std_ref.central_pos:], z_trans_lag),
+        [np.NAN] * dnstrm_bases))
     signif_shift_regs = ts.get_read_signif_shift_regions(
         window_z, z_thresh, reg_context)
 
@@ -400,10 +350,12 @@ def model_resquiggle_read(
         # on sequence (which is un-changed)
         r_means = c_new_means(r_sig, r_prev_new_segs)
         window_z = np.concatenate((
-            [np.NAN] * upstrm_bases,
+            [np.NAN] * std_ref.central_pos,
             ts.calc_window_z_transform(
-                r_means[upstrm_bases:-dnstrm_bases], r_ref_means[upstrm_bases:],
-                r_ref_sds[upstrm_bases:], z_trans_lag), [np.NAN] * dnstrm_bases))
+                r_means[std_ref.central_pos:-dnstrm_bases],
+                r_ref_means[std_ref.central_pos:],
+                r_ref_sds[std_ref.central_pos:], z_trans_lag),
+            [np.NAN] * dnstrm_bases))
         signif_shift_regs = ts.get_read_signif_shift_regions(
             window_z, z_thresh, base_reg_context)
         # filter regions that didn't change in the last round of
@@ -437,26 +389,25 @@ def model_resquiggle_worker(
         reg_context, base_reg_context, max_base_shift, b_max_base_shift,
         min_obs_per_base, base_space_iters, new_corr_grp, compute_sd,
         overwrite, in_place, corr_group):
-    kmer_ref, upstrm_bases, _, _ = ts.parse_tombo_model(tb_model_fn)
-    kmer_width = len(next(kmer_ref.iterkeys()))
-    dnstrm_bases = kmer_width - upstrm_bases - 1
+    std_ref = ts.TomboModel(tb_model_fn)
 
     if DEBUG_SIGNAL or DEBUG_BASE:
-        sig_fp = open('debug_signal_space.signal.txt', 'w')
+        sig_fp = io.open('debug_signal_space.signal.txt', 'wt')
         sig_fp.write('SignalPos\tSignal\tRegion\tIteration\n')
-        zscore_fp = open('debug_signal_space.window_z_scores.txt', 'w')
+        zscore_fp = io.open('debug_signal_space.window_z_scores.txt', 'wt')
         zscore_fp.write('BasePos\tSignalPos\tZScore\tRegion\tIteration\n')
-        origP_fp = open('debug_signal_space.window_orig_path.txt', 'w')
+        origP_fp = io.open('debug_signal_space.window_orig_path.txt', 'wt')
         origP_fp.write('BasePos\tSignalPos\tRegion\tIteration\n')
-        tb_fp = open('debug_signal_space.window_traceback.txt', 'w')
+        tb_fp = io.open('debug_signal_space.window_traceback.txt', 'wt')
         tb_fp.write('BasePos\tSignalPos\tpathVal\tRegion\tIteration\n')
-        ld_fp = open('debug_signal_space.window_last_diag.txt', 'w')
+        ld_fp = io.open('debug_signal_space.window_last_diag.txt', 'wt')
         ld_fp.write('BasePos\tSignalPos\tLastDiagCount\tRegion\tIteration\n')
-        sigMaxP_fp = open('debug_signal_space.window_signal_max_path.txt', 'w')
+        sigMaxP_fp = io.open(
+            'debug_signal_space.window_signal_max_path.txt', 'wt')
         sigMaxP_fp.write('BasePos\tSignalPos\tRegion\tIteration\n')
-        maxP_fp = open('debug_signal_space.window_max_path.txt', 'w')
+        maxP_fp = io.open('debug_signal_space.window_max_path.txt', 'wt')
         maxP_fp.write('BasePos\tSignalPos\tRegion\tIteration\n')
-        spP_fp = open('debug_signal_space.window_switch_points.txt', 'w')
+        spP_fp = io.open('debug_signal_space.window_switch_points.txt', 'wt')
         spP_fp.write('BasePos\tSignalPos\tRegion\tIteration\n')
         debug_fps = (sig_fp, zscore_fp, origP_fp, tb_fp, ld_fp, sigMaxP_fp,
                      maxP_fp, spP_fp)
@@ -467,7 +418,7 @@ def model_resquiggle_worker(
     while True:
         try:
             fn_reads = reads_q.get(block=False)
-        except Queue.Empty:
+        except queue.Empty:
             break
 
         num_processed += 1
@@ -489,20 +440,21 @@ def model_resquiggle_worker(
         for r_data in fn_reads:
             try:
                 model_resquiggle_read(
-                    r_data, kmer_ref, kmer_width, upstrm_bases, dnstrm_bases,
-                    z_trans_lag, z_thresh, reg_context, base_reg_context,
-                    max_base_shift, b_max_base_shift, min_obs_per_base,
-                    base_space_iters, new_corr_grp, compute_sd, debug_fps)
+                    r_data, std_ref, z_trans_lag, z_thresh, reg_context,
+                    base_reg_context, max_base_shift, b_max_base_shift,
+                    min_obs_per_base, base_space_iters, new_corr_grp,
+                    compute_sd, debug_fps)
             except Exception as e:
                 # uncomment to identify mysterious errors
                 #raise
                 try:
                     subgrp = r_data.corr_group.split('/')[1]
-                    th.write_error_status(r_data.fn, corr_group, subgrp, str(e))
+                    th.write_error_status(
+                        r_data.fn, corr_group, subgrp, unicode(e))
                 except:
                     pass
                 failed_reads_q.put((
-                    str(e), r_data.corr_group + th.FASTA_NAME_JOINER + r_data.fn))
+                    unicode(e), r_data.corr_group + ':::' + r_data.fn))
 
     return
 
@@ -536,11 +488,11 @@ def model_resquiggle(
 
     # group reads by filename so slot is not deleted in 2D reads
     fn_grouped_reads = defaultdict(list)
-    for cs_reads in raw_read_coverage.itervalues():
+    for cs_reads in raw_read_coverage.values():
         for r_data in cs_reads:
             fn_grouped_reads[r_data.fn].append(r_data)
     num_reads = 0
-    for fn_reads in fn_grouped_reads.itervalues():
+    for fn_reads in fn_grouped_reads.values():
         reads_q.put(fn_reads)
         num_reads += 1
 
@@ -550,22 +502,22 @@ def model_resquiggle(
         min_obs_per_base, base_space_iters, new_corr_grp, compute_sd,
         overwrite, in_place, corr_group)
     mod_rsqgl_ps = []
-    for p_id in xrange(num_processes):
+    for p_id in range(num_processes):
         p = mp.Process(target=model_resquiggle_worker, args=mod_rsqgl_args)
         p.start()
         mod_rsqgl_ps.append(p)
 
     if VERBOSE: sys.stderr.write(
-            'Correcting ' + str(num_reads) + ' files with ' +
-            str(len(bc_subgrps)) + ' subgroup(s)/read(s) ' +
-            'each (Will print a dot for each ' + str(PROGRESS_INTERVAL) +
+            'Correcting ' + unicode(num_reads) + ' files with ' +
+            unicode(len(bc_subgrps)) + ' subgroup(s)/read(s) ' +
+            'each (Will print a dot for each ' + unicode(PROGRESS_INTERVAL) +
             ' reads completed).\n')
     failed_reads = defaultdict(list)
     while any(p.is_alive() for p in mod_rsqgl_ps):
         try:
             errorType, fn = failed_reads_q.get(block=False)
             failed_reads[errorType].append(fn)
-        except Queue.Empty:
+        except queue.Empty:
             sleep(1)
             continue
     while not failed_reads_q.empty():
@@ -597,15 +549,15 @@ def model_resquiggle_main(args):
 
     fail_summary = [(err, len(fns)) for err, fns in failed_reads.items()]
     if len(fail_summary) > 0:
-        total_num_failed = sum(zip(*fail_summary)[1])
-        sys.stderr.write('Failed reads summary (' + str(total_num_failed) +
+        total_num_failed = sum(map(itemgetter(1), fail_summary))
+        sys.stderr.write('Failed reads summary (' + unicode(total_num_failed) +
                          ' total failed):\n' + '\n'.join(
-                             "\t" + err + " :\t" + str(n_fns)
+                             "\t" + err + " :\t" + unicode(n_fns)
                              for err, n_fns in sorted(fail_summary)) + '\n')
     else:
         sys.stderr.write('All reads successfully re-squiggled!\n')
     if args.failed_reads_filename is not None:
-        with open(args.failed_reads_filename, 'w') as fp:
+        with io.open(args.failed_reads_filename, 'wt') as fp:
             fp.write('\n'.join((
                 err + '\t' + ', '.join(fns)
                 for err, fns in failed_reads.items())) + '\n')
@@ -614,5 +566,5 @@ def model_resquiggle_main(args):
 
 
 if __name__ == '__main__':
-    raise NotImplementedError, (
+    raise NotImplementedError(
         'This is a module. See commands with `tombo -h`')

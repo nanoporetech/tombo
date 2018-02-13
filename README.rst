@@ -2,7 +2,9 @@
 Tombo Summary
 =============
 
-.. image:: https://travis-ci.org/nanoporetech/tombo.svg?branch=master
+|travis_badge|
+
+.. |travis_badge| image:: https://travis-ci.org/nanoporetech/tombo.svg?branch=master
     :target: https://travis-ci.org/nanoporetech/tombo
 
 Tombo is a suite of tools primarily for the identification of modified nucleotides from nanopore sequencing data.
@@ -19,9 +21,9 @@ Installation
     :target: http://bioconda.github.io/recipes/ont-tombo/README.html
 
 .. |pypi_badge| image:: https://badge.fury.io/py/ont-tombo.svg
-    :target: https://badge.fury.io/py/ont-tombo
+    :target: https://pypi.org/project/ont-tombo/
 
-Basic tombo installation (python2.7 support only)
+Basic tombo installation (python 2.7 and 3.4+ support)
 
 ::
 
@@ -30,7 +32,7 @@ Basic tombo installation (python2.7 support only)
 
     # or install pip package (numpy install required before tombo for cython optimization)
     pip install numpy
-    pip install ont-tombo
+    pip install ont-tombo[full]
 
 ..
 
@@ -51,32 +53,32 @@ Re-squiggle (Raw Data Alignment)
 
 ::
 
-    tombo resquiggle path/to/amplified/dna/fast5s/ genome.fasta --minimap2-executable ./minimap2 --processes 4
+    tombo resquiggle path/to/amplified/dna/fast5s/ genome.fasta --processes 4
 
 ..
 
     Only R9.4/5 data is supported at this time.
 
-    DNA or RNA is automatically determined from FAST5s (set explicitly with `--dna` or `--rna`).
+    DNA or RNA is automatically determined from FAST5s (set explicitly with ``--dna`` or ``--rna``).
 
-    FAST5 files need not contain Events data, but must contain Fastq slot. See `annotate_raw_with_fastqs` for pre-processing of raw FAST5s.
+    FAST5 files need not contain Events data, but must contain Fastq slot. See ``annotate_raw_with_fastqs`` for pre-processing of raw FAST5s.
 
 Identify Modified Bases
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    # comparing to an alternative 5mC model (recommended method)
+    # comparing to an alternative 5mC and 6mA model (recommended method)
     tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ \
-        --alternate-bases 5mC --statistics-file-basename sample_compare
+        --alternate-bases 5mC 6mA --statistics-file-basename sample
 
     # comparing to a control sample (e.g. PCR)
     tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ \
-        --control-fast5-basedirs path/to/amplified/dna/fast5s/  --statistics-file-basename sample_compare
+        --control-fast5-basedirs path/to/amplified/dna/fast5s/ --statistics-file-basename sample_compare
 
     # compare to the canonical base model
     tombo test_significance --fast5-basedirs path/to/native/dna/fast5s/ \
-        --statistics-file-basename sample --processes 4
+        --statistics-file-basename sample_de_novo --processes 4
 
 ..
 
@@ -100,7 +102,7 @@ Extract Sequences Surrounding Modified Positions
 
 ::
 
-    tombo write_most_significant_fasta --statistics-filename sample_compare.5mC.tombo.stats \
+    tombo write_most_significant_fasta --statistics-filename sample.6mA.tombo.stats \
         --genome-fasta genome.fasta
 
 Plotting Examples
@@ -117,11 +119,11 @@ Plotting Examples
     
     # plot raw signal at genome locations with the most significantly/consistently modified bases
     tombo plot_most_significant --fast5-basedirs path/to/native/rna/fast5s/ \
-        --statistics-filename sample_compare.5mC.tombo.stats --plot-alternate-model 5mC
+        --statistics-filename sample.5mC.tombo.stats --plot-alternate-model 5mC
     
-    # plot per-read test statistics using the 5mC alternative model testing method
+    # plot per-read test statistics using the 6mA alternative model testing method
     tombo plot_per_read --fast5-basedirs path/to/native/rna/fast5s/ \
-        --genome-locations chromosome:1000 chromosome:2000:- --plot-alternate-model 5mC
+        --genome-locations chromosome:1000 chromosome:2000:- --plot-alternate-model 6mA
 
 ===============
 Common Commands
@@ -190,7 +192,7 @@ Read Filtering:
 Note on Tombo Models
 ====================
 
-Tombo is currently provided with two standard models (DNA and RNA) and one alternative model (DNA::5mC). These models are applicable only to R9.4/5 flowcells with 1D or 1D^2 kits (not 2D).
+Tombo is currently provided with two standard models (DNA and RNA) and two alternative models (DNA::5mC, DNA::6mA). These models are applicable only to R9.4/5 flowcells with 1D or 1D^2 kits (not 2D).
 
 These models are used by default for the re-squiggle and testing commands. The correct model is automatically selected for DNA or RNA based on the contents of each FAST5 file and processed accordingly. Additional models will be added in future releases.
 
@@ -198,58 +200,39 @@ These models are used by default for the re-squiggle and testing commands. The c
 Requirements
 ============
 
-At least one supported mapper:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python Requirements (handled by conda or pip):
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
--  minimap2 (https://github.com/lh3/minimap2)
--  BWA-MEM (http://bio-bwa.sourceforge.net/)
--  graphmap (https://github.com/isovic/graphmap)
-
--  HDF5 (http://micro.stanford.edu/wiki/Install_HDF5#Install)
-
-python Requirements (handled by pip):
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
--  numpy (must be installed before installing tombo)
+-  numpy
 -  scipy
 -  h5py
 -  cython
+-  mappy
 
-Optional packages for plotting (install R packages with ``install.packages([package_name])`` from an R prompt):
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Optional packages (handled by conda, but not pip):
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
--  rpy2 (along with an R installation)
--  ggplot2 (required for any plotting subcommands)
--  cowplot (required for plot_motif_with_stats subcommand)
+-  Plotting Packages
+   
+   +  R
+   +  rpy2
+   +  ggplot2
+   +  gridExtra (required for ``plot_motif_with_stats`` and ``plot_kmer`` subcommands)
 
-Optional packages for alternative model estimation:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
--  sklearn
+-  On-disk Random Fasta Access
+   
+   +  pyfaidx
 
 Advanced Installation Instructions
 ----------------------------------
 
-Install tombo with all optional dependencies (for plotting and model estimation)
+Minimal tombo installation without optional dependencies (enables re-squiggle, all modified base testing methods and text output)
 
 ::
 
-    pip install ont-tombo[full]
+    pip install ont-tombo
 
-Install tombo with plotting dependencies (requires separate installation
-of R packages ggplot2 and cowplot)
-
-::
-
-    pip install ont-tombo[plot]
-
-Install tombo with alternative model estimation dependencies
-
-::
-
-    pip install ont-tombo[alt_est]
-
-Install github version of tombo (most versions on pypi should be up-to-date)
+Install github version of tombo (versions on conda/pypi should be up-to-date)
 
 ::
 
@@ -267,4 +250,10 @@ http://biorxiv.org/content/early/2017/04/10/094672
 Gotchas
 =======
 
--  If plotting commands fail referencing rpy2 images, shared object files, etc., this may be an issue with the version of libraries installed by conda. In order to resolve this issue, remove the conda-forge channel and re-install ont-tombo.
+-  The Tombo conda environment (especially with python 2.7) may have installation issues.
+   
+   + The first troubleshooting step would be to install in a python 3.4+ environment.
+   + The R ``cowplot`` package was also causing several installation issues. As of Tombo version 1.2 the ``cowplot`` dependency has been replaced by the ``gridExtra`` package which should resolve this inter-dependency issue.
+   + If python2 is a requirement, un-installing and re-installing the offending package may help.
+   + Moving ``conda-forge`` to the end of the conda channel list (or removing it altogether) may help ``conda config --append channels conda-forge``.
+   + In python 2.7 there is an issue with the conda scipy.stats package. Down-grading to version 0.17 fixes this issue.

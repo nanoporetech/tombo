@@ -2,32 +2,43 @@
 Text Outputs
 ************
 
-Two main text outputs are available from Tombo:
+Two text outputs are available from Tombo:
 
-1. Wiggle - genome browser statistics
+1. Wiggle - Genome browser compatible run per-base statistics
 2. Fasta - Sequence output surrounding most modified sites
 
 ``write_wiggles``
 -----------------
 
-The ``write_wiggles`` command takes in a set of reads (``--fast5-basedirs``) and potentially a control set of reads (``--control-fast5-basedirs``) or a pre-computed statistics file (``--statistics-filename``). Output wiggle files (`variableStep format <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_) will be produced for each requested statistic (both plus and minus strands).
+The ``write_wiggles`` command takes in a set of reads (``--fast5-basedirs``) and/or a pre-computed statistics file (``--statistics-filename``). A control set of reads can also be provided (``--control-fast5-basedirs``). Output wiggle files (`variableStep format <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_) will be produced for each requested statistic (both plus and minus strands).
 
 Several statistics are available for output:
 
 * ``coverage`` - The coverage level for mapped and validly re-squiggled reads
-* ``fraction`` - The fraction of significantly modified reads
+* ``dampened_fraction`` - The estimated fraction of significantly modified reads
+  
+  - This estimate includes pseudo-counts added to the un-modified and modified read counts (as specified by the ``--coverage-dampen-counts`` option)
+  - This is equivalent to using a beta prior when estimating the fraction of reads modified at this position
+  - Test the effect of different dampen counts using the ``scripts/test_beta_priors.R`` (the default values are shown below)
+* ``fraction`` - The raw fraction of significantly modified reads
 * ``signal`` - The mean signal level across all reads mapped to this location
 * ``signal_sd`` - The mean signal standard deviation across all reads mapped to this location (not available unless ``--include-event-stdev`` was provided in resquiggle call)
+* ``dwell`` - The mean number of raw observations observed assigned to this location
 * ``difference`` - The difference in normalized signal level between a sample and control set of reads
 
-..
+----
 
-    Note that ``signal``, ``signal_sd`` and ``difference`` require each reads event level data to be queried and thus may be quite slow. ``coverage`` and ``fraction`` can be extracted simply from the tombo statistics file, which is much faster.
+.. figure::  _images/dampened_fraction.png
+   :align: center
+   :scale: 30%
+   
+   Heatmap showing the resulting dampened farction of modified reads given the default ``--coverage-dampen-counts`` values over range of coverage and number of un-modified reads.
 
-Potentially deprecated options:
+----
 
-* ``stat`` - Per base statistical testing -log10(p-values). Test values are quite dependent on read depth and thus this option may be deprecated at some point
-* ``mt_stat`` - Multiple testing corrected statistical test values
+.. note::
+   
+   ``signal``, ``signal_sd``, ``dwell`` and ``difference`` require each reads event level data to be queried and thus may be quite slow. ``coverage``, ``dampened_fraction``, and ``fraction`` can be extracted simply from the tombo statistics file, which is much faster.
 
 Files will be output to individual wiggle files (two per statistic for plus and minus genomic strand) in the following format ``[wiggle-basename].[wiggle-type].[sample|control]?.[plus|minus].wig``
 
@@ -41,11 +52,8 @@ To run ``write_most_significant_fasta``, a ``--statistics-filename`` is required
 * ``--num-regions`` - Defines the number of unique locations to be output
 * ``--num-bases`` - Defines the number of bases to be output surrounding the significant locations
 
-Potentially deprecated options:
+The output of this command could be used to determine sequence contexts consistently modified within a sample. Example `meme <http://meme-suite.org/doc/meme.html>`_ command line modified base motif detection command.
 
-* ``--statistic-order`` - Order regions by per-genomic base statistical testing values instead of fraction of reads with significant modified base results
-* ``--q-value-threshold`` - Select the number of regions to output based on a q-value threhsold instead of a set number (This may produce very large files if not set carefully and so this option may be deprecated)
+.. code-block:: bash
 
-..
-
-    Note that fraction of reads with a significant result at this location can produce non-optimal results with the alternative base comparison log likelihood ratio test. This may be replaced by an estimated fraction based on testing results instead of the current thresholding criterion.
+   ./meme -oc motif_output.meme -dna -mod zoops tombo_results.significant_regions.fasta

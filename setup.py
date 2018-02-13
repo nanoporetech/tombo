@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 import os
 import sys
 
@@ -7,13 +9,13 @@ from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext as _build_ext
 
 # Get the version number from _version.py, and exe_path
-verstrline = open(os.path.join('tombo', '_version.py'), 'r').read()
+verstrline = open(os.path.join('tombo', '_version.py'), 'r').readlines()[-1]
 vsre = r"^TOMBO_VERSION = ['\"]([^'\"]*)['\"]"
 mo = re.search(vsre, verstrline)
 if mo:
     __version__ = mo.group(1)
 else:
-    raise RuntimeError('Unable to find version string in "tombo/_version.py".'.format(__pkg_name__))
+    raise RuntimeError('Unable to find version string in "tombo/_version.py".')
 
 def readme():
     with open('README.rst') as f:
@@ -29,18 +31,21 @@ except:
         '\tThis is required in order to get maximum efficincy from ' +
         'cython code optimizations.\nTo install run:\n$ pip install numpy\n' +
         '*' * 60 + '\n')
-    sys.exit(1)
+    sys.exit()
 
-if not sys.version_info[0] == 2:
-    sys.exit("Sorry, Python 3 is not supported (yet)")
+extras_require = ['pyfaidx']
+if sys.version_info[0] < 3:
+    extras_require.append('rpy2<=2.8.6')
+else:
+    extras_require.append('rpy2')
 
 ext_modules = [
-    Extension("tombo.dynamic_programming",
-              ["tombo/dynamic_programming.pyx"],
+    Extension(str("tombo.c_dynamic_programming"),
+              [str("tombo/c_dynamic_programming.pyx")],
               include_dirs=include_dirs,
               language="c++"),
-    Extension("tombo.c_helper",
-              ["tombo/c_helper.pyx"],
+    Extension(str("tombo.c_helper"),
+              [str("tombo/c_helper.pyx")],
               include_dirs=include_dirs,
               language="c++")
 ]
@@ -52,10 +57,9 @@ setup(
     name = "ont-tombo",
     version = __version__,
     packages = ["tombo"],
-    python_requires = '<3',
-    install_requires = ['h5py', 'numpy', 'scipy', 'cython', 'setuptools >= 18.0'],
-    extras_require={'plot':['rpy2<=2.8.6'], 'alt_est':['scikit-learn'],
-                    'full':['rpy2<=2.8.6', 'scikit-learn']},
+    install_requires = ['h5py', 'numpy', 'scipy', 'cython',
+                        'setuptools >= 18.0', 'mappy', 'future'],
+    extras_require={'full':extras_require},
 
     author = "Marcus Stoiber",
     author_email = "marcus.stoiber@nanoporetech.com",
@@ -74,4 +78,15 @@ setup(
     ext_modules=ext_modules,
     test_suite='nose2.collector.collector',
     tests_require=['nose2'],
+    classifiers=[
+        'Development Status :: 5 - Production/Stable',
+        'Intended Audience :: Science/Research',
+        'Natural Language :: English',
+        'License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)',
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
+        'Topic :: Scientific/Engineering :: Bio-Informatics',
+    ]
 )

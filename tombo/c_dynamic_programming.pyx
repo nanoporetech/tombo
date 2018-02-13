@@ -1,17 +1,22 @@
-from numpy cimport ndarray
+cimport cython
 
 import numpy as np
 cimport numpy as np
+
 DTYPE = np.float64
 ctypedef np.float64_t DTYPE_t
+
+DTYPE_INT = np.int64
+ctypedef np.int64_t DTYPE_INT_t
+
 from libcpp cimport bool
 
-def c_base_z_scores(ndarray[DTYPE_t] b_sig not None,
-                    float ref_mean, float ref_sd):
-    cdef int n_sig = b_sig.shape[0]
-    cdef ndarray[DTYPE_t] b_z_scores = np.empty(n_sig, dtype=DTYPE)
+def c_base_z_scores(np.ndarray[DTYPE_t] b_sig not None,
+                    DTYPE_t ref_mean, DTYPE_t ref_sd):
+    cdef DTYPE_INT_t n_sig = b_sig.shape[0]
+    b_z_scores = np.empty(n_sig, dtype=DTYPE)
     cdef DTYPE_t b_pos_z_score
-    cdef int idx
+    cdef DTYPE_INT_t idx
     for idx in range(n_sig):
         b_pos_z_score = (b_sig[idx] - ref_mean) / ref_sd
         if b_pos_z_score > 0:
@@ -21,14 +26,19 @@ def c_base_z_scores(ndarray[DTYPE_t] b_sig not None,
     return b_z_scores
 
 def c_reg_z_scores(
-        ndarray[DTYPE_t] r_sig not None, ndarray[DTYPE_t] r_ref_means not None,
-        ndarray[DTYPE_t] r_ref_sds not None, ndarray[int] r_b_starts not None,
-        int reg_start, int reg_end, int max_base_shift, int min_obs_per_base):
-    cdef int base_i, b_sig_start, b_sig_end, prev_sig_start, prev_sig_end, idx
-    cdef int reg_len = reg_end - reg_start
-    cdef ndarray[int] sig_starts = np.empty(reg_len, dtype=np.int32)
+        np.ndarray[DTYPE_t] r_sig not None,
+        np.ndarray[DTYPE_t] r_ref_means not None,
+        np.ndarray[DTYPE_t] r_ref_sds not None,
+        np.ndarray[DTYPE_INT_t] r_b_starts not None,
+        DTYPE_INT_t reg_start, DTYPE_INT_t reg_end,
+        DTYPE_INT_t max_base_shift, DTYPE_INT_t min_obs_per_base):
+    cdef DTYPE_INT_t base_i, b_sig_start, b_sig_end, prev_sig_start, \
+        prev_sig_end, idx
+    cdef DTYPE_INT_t reg_len = reg_end - reg_start
+    cdef np.ndarray[DTYPE_INT_t] sig_starts = np.empty(reg_len, dtype=DTYPE_INT)
     prev_start_set = False
-    cdef ndarray[int] base_range = np.arange(reg_start, reg_end, dtype=np.int32)
+    cdef np.ndarray[DTYPE_INT_t] base_range = np.arange(
+        reg_start, reg_end, dtype=DTYPE_INT)
     for idx in range(reg_len):
         base_i = base_range[idx]
         b_sig_start = r_b_starts[max(reg_start, base_i - max_base_shift)]
@@ -41,12 +51,12 @@ def c_reg_z_scores(
         sig_starts[idx] = b_sig_start
         prev_sig_start = b_sig_start
 
-    cdef ndarray[int] sig_ends = np.empty(reg_len, dtype=np.int32)
+    cdef np.ndarray[DTYPE_INT_t] sig_ends = np.empty(reg_len, dtype=DTYPE_INT)
     prev_end_set = False
     # clip positions from the end of each base
     for idx in range(reg_len):
         base_i = base_range[reg_len - idx - 1]
-        b_sig_end = r_b_starts[min(reg_end, base_i + max_base_shift + 1)]
+        b_sig_end = r_b_starts[min(reg_end - 1, base_i + max_base_shift + 1)]
         # clip observations from the end of a base if there is no
         # possible traceback path through that location
         if (prev_end_set and
@@ -57,40 +67,42 @@ def c_reg_z_scores(
         prev_sig_end = b_sig_end
 
     reg_scores = []
-    cdef ndarray[DTYPE_t] b_z_scores
     for idx in range(reg_len):
         base_i = base_range[idx]
         b_sig_start = sig_starts[idx]
         b_sig_end = sig_ends[idx]
         # z-score computation is far more efficient than p-values and
         # produces *very* similar results
-        b_z_scores = c_base_z_scores(r_sig[b_sig_start:b_sig_end],
-                                     r_ref_means[base_i], r_ref_sds[base_i])
-
-        reg_scores.append((b_z_scores, (
-            b_sig_start-r_b_starts[reg_start],
-            b_sig_end-r_b_starts[reg_start])))
+        reg_scores.append((
+            c_base_z_scores(r_sig[b_sig_start:b_sig_end],
+                            r_ref_means[base_i], r_ref_sds[base_i]), (
+                                b_sig_start-r_b_starts[reg_start],
+                                b_sig_end-r_b_starts[reg_start])))
 
     return reg_scores
 
 def c_base_forward_pass(
-        ndarray[DTYPE_t] b_data not None, int b_start, int b_end,
-        ndarray[DTYPE_t] prev_b_data not None, int prev_b_start, int prev_b_end,
-        ndarray[DTYPE_t] prev_b_fwd_data not None,
-        ndarray[int] prev_b_last_diag not None, int min_obs_per_base):
-    cdef int b_len = b_end - b_start
+        np.ndarray[DTYPE_t] b_data not None,
+        DTYPE_INT_t b_start, DTYPE_INT_t b_end,
+        np.ndarray[DTYPE_t] prev_b_data not None,
+        DTYPE_INT_t prev_b_start, DTYPE_INT_t prev_b_end,
+        np.ndarray[DTYPE_t] prev_b_fwd_data not None,
+        np.ndarray[DTYPE_INT_t] prev_b_last_diag not None,
+        DTYPE_INT_t min_obs_per_base):
+    cdef DTYPE_INT_t b_len = b_end - b_start
     # forward pass cumulative z-scores for this base
-    cdef ndarray[DTYPE_t] b_fwd_data = np.empty(b_len, dtype=DTYPE)
+    cdef np.ndarray[DTYPE_t] b_fwd_data = np.empty(b_len, dtype=DTYPE)
     # store last diagonal move to pass on to next base
-    cdef ndarray[int] b_last_diag = np.empty(b_len, dtype=np.int32)
+    cdef np.ndarray[DTYPE_INT_t] b_last_diag = np.empty(b_len, dtype=DTYPE_INT)
     # use cumsum as it is much more efficient than sums
-    cdef ndarray[DTYPE_t] prev_b_data_cumsum = np.cumsum(prev_b_data)
-    cdef int pos, last_valid_diag_lag, pos_diag_val
-    cdef DTYPE_t diag_score, stay_base_score, pos_score
+    cdef np.ndarray[DTYPE_t] prev_b_data_cumsum = np.cumsum(prev_b_data)
+    cdef DTYPE_INT_t pos, last_valid_diag_lag, pos_diag_val
+    cdef DTYPE_t diag_score, stay_base_score, pos_score, fwd_value
 
     # add the diagonally below position value for the first possible
     # position in each base
-    b_fwd_data[0] = b_data[0] + prev_b_fwd_data[b_start - prev_b_start - 1]
+    fwd_value = b_data[0] + prev_b_fwd_data[b_start - prev_b_start - 1]
+    b_fwd_data[0] = fwd_value
     b_last_diag[0] = 1
 
     # some bases end at the same position (could change this by trimming earlier)
@@ -116,31 +128,32 @@ def c_base_forward_pass(
             # stayed in this base, so add one to the last stayed in base count
             pos_score, pos_diag_val = (
                 stay_base_score, b_last_diag[pos - b_start - 1] + 1)
-        b_fwd_data[pos - b_start] = b_data[pos - b_start] + pos_score
+        fwd_value = b_data[pos - b_start] + pos_score
+        b_fwd_data[pos - b_start] = fwd_value
         b_last_diag[pos - b_start] = pos_diag_val
 
-    cdef DTYPE_t curr_fwd_score
-    cdef int idx, curr_last_diag, reg_left_len
+    cdef DTYPE_INT_t idx, curr_last_diag, reg_left_len
     if b_end > prev_b_end + 1:
         # perform C cumsum until the end of the base
         # note no possible allowed diagonal moves here
-        curr_fwd_score = b_fwd_data[prev_b_end - b_start]
+        fwd_value = b_fwd_data[prev_b_end - b_start]
         curr_last_diag = b_last_diag[prev_b_end - b_start]
         reg_left_len = b_end - prev_b_end - 1
         for idx in range(reg_left_len):
-            curr_fwd_score += b_data[idx + prev_b_end - b_start + 1]
+            fwd_value += b_data[idx + prev_b_end - b_start + 1]
             curr_last_diag += 1
-            b_fwd_data[idx + prev_b_end - b_start + 1] = curr_fwd_score
+            b_fwd_data[idx + prev_b_end - b_start + 1] = fwd_value
             b_last_diag[idx + prev_b_end - b_start + 1] = curr_last_diag
 
     return b_fwd_data, b_last_diag
 
 def c_base_traceback(
-        ndarray[DTYPE_t] curr_b_data not None, int curr_start,
-        ndarray[DTYPE_t] next_b_data not None, int next_start, int next_end,
-        int sig_start, int min_obs_per_base):
-    cdef int curr_base_sig = 1
-    cdef int sig_pos
+        np.ndarray[DTYPE_t] curr_b_data not None, DTYPE_INT_t curr_start,
+        np.ndarray[DTYPE_t] next_b_data not None,
+        DTYPE_INT_t next_start, DTYPE_INT_t next_end,
+        DTYPE_INT_t sig_start, DTYPE_INT_t min_obs_per_base):
+    cdef DTYPE_INT_t curr_base_sig = 1
+    cdef DTYPE_INT_t sig_pos
     for sig_pos in range(sig_start, -1, -1):
         curr_base_sig += 1
         # if there is not enough signal in the current base or the next base
@@ -155,68 +168,59 @@ def c_base_traceback(
 
 
 # Eventless re-squiggle dynamic programming algorithm
+@cython.wraparound(False)
+@cython.boundscheck(False)
 def c_banded_forward_pass(
-        ndarray[DTYPE_t, ndim=2] shifted_z_scores not None,
-        ndarray[int, ndim=1] event_starts not None,
-        float skip_pen, float stay_pen):
-    cdef int n_bases = shifted_z_scores.shape[0]
-    cdef int bandwidth = shifted_z_scores.shape[1]
-    cdef ndarray[DTYPE_t, ndim=2] fwd_pass = np.empty((n_bases + 1, bandwidth))
-    cdef ndarray[int, ndim=2] fwd_pass_tb = np.empty(
-        (n_bases + 1, bandwidth), dtype=np.int32)
+        np.ndarray[DTYPE_t, ndim=2] shifted_z_scores not None,
+        np.ndarray[DTYPE_INT_t, ndim=1] event_starts not None,
+        DTYPE_t skip_pen, DTYPE_t stay_pen):
+    cdef DTYPE_INT_t n_bases = shifted_z_scores.shape[0]
+    cdef DTYPE_INT_t bandwidth = shifted_z_scores.shape[1]
+    cdef np.ndarray[DTYPE_t, ndim=2] fwd_pass = np.empty((
+        n_bases + 1, bandwidth))
+    cdef np.ndarray[DTYPE_INT_t, ndim=2] fwd_pass_tb = np.empty(
+        (n_bases + 1, bandwidth), dtype=DTYPE_INT)
     # zero starts let the read start anywhere along the beginning
     # (for finding the read start)
-    cdef int idx
+    cdef DTYPE_INT_t idx
     for idx in range(bandwidth):
-        fwd_pass[0,idx] = 0.0
+        fwd_pass[0, idx] = 0.0
 
-    cdef int max_from, event_pos, band_pos, seq_pos, prev_b_pos
-    cdef float max_score, pos_z_score, skip_score, diag_score
-    # set min score to total sequence times the skip penalty (times 100 for
-    # good measure) should not be able to obtain a worse score without
-    # really bad z-score fits (probably from wrong normalization if this occurs
-    cdef float min_score = -skip_pen * n_bases * 100
+    cdef DTYPE_INT_t max_from, band_pos, seq_pos, prev_b_pos
+    cdef DTYPE_t max_score, pos_z_score, skip_score, diag_score
 
     for seq_pos in range(n_bases):
-        for band_pos in range(bandwidth):
-            event_pos = band_pos + event_starts[seq_pos]
-            pos_z_score = shifted_z_scores[seq_pos,band_pos]
-            prev_b_pos = (event_pos - event_starts[seq_pos-1]
+        # set first band position to skip score if the bands have the same start
+        if seq_pos == 0 or event_starts[seq_pos] == event_starts[seq_pos-1]:
+            fwd_pass[seq_pos + 1, 0] = fwd_pass[seq_pos, 0] - skip_pen
+            fwd_pass_tb[seq_pos + 1, 0] = 1
+        # else use the match score
+        else:
+            fwd_pass[seq_pos + 1, 0] = (
+                fwd_pass[seq_pos, event_starts[seq_pos] -
+                         event_starts[seq_pos-1] - 1] +
+                shifted_z_scores[seq_pos, 0])
+            fwd_pass_tb[seq_pos + 1, 0] = 2
+
+        for band_pos in range(1, bandwidth):
+            pos_z_score = shifted_z_scores[seq_pos, band_pos]
+            prev_b_pos = (band_pos + event_starts[seq_pos] -
+                          event_starts[seq_pos-1]
                           if seq_pos > 0 else band_pos)
 
-            # stay score
-            max_score = (fwd_pass[seq_pos+1, band_pos-1] - stay_pen + pos_z_score
-                         if band_pos > 0 else min_score)
-            max_from = 0 if band_pos > 0 else -1
-            # then check skip score
-            if 0 <= prev_b_pos < bandwidth:
-                skip_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                if skip_score > max_score:
-                    max_score = skip_score
-                    max_from = 1
-            # finally check diagonal score
-            if 0 <= prev_b_pos - 1 < bandwidth:
+            # first set to stay state
+            max_score = fwd_pass[seq_pos+1, band_pos-1] - stay_pen + pos_z_score
+            max_from = 0
+            # then check diagonal score
+            if prev_b_pos - 1 < bandwidth:
                 diag_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
                 if diag_score > max_score:
                     max_score = diag_score
                     max_from = 2
-
-            # invalid max_from indicates that the min_score was too high
-            # so just compute skip and diag scores
-            if max_from == -1:
-                if prev_b_pos == 0:
-                    max_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                    max_from = 1
-                elif prev_b_pos == bandwidth:
-                    max_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
-                    max_from = 2
-                else:
+                # finally check skip score (note nested check to save some ops)
+                if prev_b_pos < bandwidth:
                     skip_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                    diag_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
-                    if diag_score > skip_score:
-                        max_score = diag_score
-                        max_from = 2
-                    else:
+                    if skip_score > max_score:
                         max_score = skip_score
                         max_from = 1
 
@@ -225,18 +229,20 @@ def c_banded_forward_pass(
 
     return fwd_pass, fwd_pass_tb
 
-def c_banded_traceback(ndarray[int, ndim=2] fwd_pass_tb not None,
-                       ndarray[int] event_starts not None, int band_pos,
-                       int band_boundary_thresh=-1):
+def c_banded_traceback(
+        np.ndarray[DTYPE_INT_t, ndim=2] fwd_pass_tb not None,
+        np.ndarray[DTYPE_INT_t] event_starts not None, DTYPE_INT_t band_pos,
+        DTYPE_INT_t band_boundary_thresh=-1):
     # first row in fwd pass is a pseudo-row and does not represent a base
-    cdef int n_bases = fwd_pass_tb.shape[0] - 1
-    cdef int bandwidth = fwd_pass_tb.shape[1]
-    cdef ndarray[int] seq_poss = np.empty(n_bases + 1, dtype=np.int32)
-    cdef int curr_event_pos = band_pos + event_starts[n_bases - 1]
+    cdef DTYPE_INT_t n_bases = fwd_pass_tb.shape[0] - 1
+    cdef DTYPE_INT_t bandwidth = fwd_pass_tb.shape[1]
+    cdef np.ndarray[DTYPE_INT_t] seq_poss = np.empty(
+        n_bases + 1, dtype=DTYPE_INT)
+    cdef DTYPE_INT_t curr_event_pos = band_pos + event_starts[n_bases - 1]
     # last position is the end of the current looking window which is the
     # passed value
     seq_poss[n_bases] = curr_event_pos + 1
-    cdef int curr_seq_pos
+    cdef DTYPE_INT_t curr_seq_pos
     for curr_seq_pos in range(n_bases, 0, -1):
         band_pos = curr_event_pos - event_starts[curr_seq_pos-1]
         # 0 indicates stay in the current base
@@ -254,39 +260,54 @@ def c_banded_traceback(ndarray[int, ndim=2] fwd_pass_tb not None,
 
     return seq_poss
 
+@cython.wraparound(False)
+@cython.boundscheck(False)
+def c_argmax(np.ndarray[DTYPE_t] vals):
+    cdef DTYPE_t val
+    cdef DTYPE_t max_val = vals[0]
+    cdef DTYPE_INT_t pos
+    cdef DTYPE_INT_t max_pos = 0
+
+    for pos in range(1, vals.shape[0]):
+        val = vals[pos]
+        if val > max_val:
+            max_val = val
+            max_pos = pos
+    return max_pos
+
+@cython.wraparound(False)
+@cython.boundscheck(False)
 def c_adaptive_banded_forward_pass(
-        ndarray[DTYPE_t, ndim=2] fwd_pass not None,
-        ndarray[int, ndim=2] fwd_pass_tb not None,
-        ndarray[int] event_starts not None,
-        ndarray[DTYPE_t] event_means not None,
-        ndarray[DTYPE_t] r_ref_means not None,
-        ndarray[DTYPE_t] r_ref_sds not None,
-        float z_shift, float skip_pen, float stay_pen,
-        int start_seq_pos, bool return_z_scores=False):
-    cdef int n_bases = fwd_pass.shape[0] - 1
-    cdef int bandwidth = fwd_pass.shape[1]
-    cdef int half_bandwidth = bandwidth / 2
-    cdef int n_events = event_means.shape[0]
+        np.ndarray[DTYPE_t, ndim=2] fwd_pass not None,
+        np.ndarray[DTYPE_INT_t, ndim=2] fwd_pass_tb not None,
+        np.ndarray[DTYPE_INT_t] event_starts not None,
+        np.ndarray[DTYPE_t] event_means not None,
+        np.ndarray[DTYPE_t] r_ref_means not None,
+        np.ndarray[DTYPE_t] r_ref_sds not None,
+        DTYPE_t z_shift, DTYPE_t skip_pen, DTYPE_t stay_pen,
+        DTYPE_INT_t start_seq_pos, DTYPE_t mask_fill_z_score,
+        bool return_z_scores=False):
+    cdef DTYPE_INT_t n_bases = fwd_pass.shape[0] - 1
+    cdef DTYPE_INT_t bandwidth = fwd_pass.shape[1]
+    cdef DTYPE_INT_t half_bandwidth = bandwidth / 2
+    cdef DTYPE_INT_t n_events = event_means.shape[0]
 
-    cdef int max_from, event_pos, band_pos, seq_pos, prev_b_pos, \
-        prev_band_start, curr_band_start
-    cdef float max_score, pos_z_score, skip_score, diag_score, ref_mean, ref_sd
-    # set min score to total sequence times the skip penalty (times 100 for
-    # good measure) should not be able to obtain a worse score without
-    # really bad z-score fits (probably from wrong normalization if this occurs
-    cdef float min_score = -skip_pen * n_bases * 100
+    cdef DTYPE_INT_t event_pos, seq_pos, prev_band_start, curr_band_start, \
+        band_pos, prev_b_pos, max_from
+    cdef DTYPE_t pos_z_score, ref_mean, ref_sd, max_score, skip_score, diag_score
 
-    cdef ndarray[DTYPE_t] shifted_z_scores = np.empty(bandwidth)
-    cdef ndarray[DTYPE_t, ndim=2] all_shifted_z_scores
+    cdef np.ndarray[DTYPE_t] shifted_z_scores = np.empty(bandwidth, dtype=DTYPE)
+    cdef np.ndarray[DTYPE_t, ndim=2] all_shifted_z_scores
     if return_z_scores:
-        all_shifted_z_scores = np.empty((n_bases - start_seq_pos, bandwidth))
+        all_shifted_z_scores = np.empty((n_bases - start_seq_pos, bandwidth),
+                                        dtype=DTYPE)
     for seq_pos in range(start_seq_pos, n_bases):
         # determine adaptive location for this sequence position
         prev_band_start = event_starts[seq_pos - 1]
-        curr_band_start = (prev_band_start + np.argmax(fwd_pass[seq_pos,:]) -
-                           half_bandwidth + 1)
+        curr_band_start = prev_band_start + c_argmax(fwd_pass[seq_pos]) \
+                          - half_bandwidth + 1
         if curr_band_start < prev_band_start:
-            curr_band_start = event_starts[seq_pos - 1]
+            curr_band_start = prev_band_start
         if curr_band_start >= n_events:
             # if this isn't within one of the last sequence position
             # the read is forced to skip to the end and will likely
@@ -319,50 +340,42 @@ def c_adaptive_banded_forward_pass(
                 shifted_z_scores[
                     event_pos - curr_band_start] = z_shift - pos_z_score
             for event_pos in range(n_events - curr_band_start, bandwidth):
-                shifted_z_scores[event_pos] = -20.0
+                shifted_z_scores[event_pos] = mask_fill_z_score
         if return_z_scores:
             all_shifted_z_scores[seq_pos - start_seq_pos,:] = shifted_z_scores
 
         # now perform dynamic programming fill for this seq position
-        for band_pos in range(bandwidth):
-            pos_z_score = shifted_z_scores[band_pos]
-            event_pos = band_pos + curr_band_start
-            prev_b_pos = (event_pos - prev_band_start
-                          if seq_pos > 0 else band_pos)
 
-            # stay score
-            max_score = (fwd_pass[seq_pos+1, band_pos-1] - stay_pen + pos_z_score
-                         if band_pos > 0 else min_score)
-            max_from = 0 if band_pos > 0 else -1
-            # then check skip score
-            if 0 <= prev_b_pos < bandwidth:
-                skip_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                if skip_score > max_score:
-                    max_score = skip_score
-                    max_from = 1
-            # finally check diagonal score
-            if 0 <= prev_b_pos - 1 < bandwidth:
+        # set first band position to skip score if the bands have the same start
+        if curr_band_start == prev_band_start:
+            fwd_pass[seq_pos + 1, 0] = fwd_pass[seq_pos, 0] - skip_pen
+            fwd_pass_tb[seq_pos + 1, 0] = 1
+        # else use the match score
+        else:
+            fwd_pass[seq_pos + 1, 0] = fwd_pass[
+                seq_pos, curr_band_start - prev_band_start - 1] + \
+                shifted_z_scores[0]
+            fwd_pass_tb[seq_pos + 1, 0] = 2
+
+        # profiling shows that >60% of the time is spent here. Not
+        # functionalized now due to function call overheads
+        for band_pos in range(1, bandwidth):
+            pos_z_score = shifted_z_scores[band_pos]
+            prev_b_pos = band_pos + curr_band_start - prev_band_start
+
+            # first set to stay state
+            max_score = fwd_pass[seq_pos+1, band_pos-1] - stay_pen + pos_z_score
+            max_from = 0
+            # then check diagonal score
+            if prev_b_pos - 1 < bandwidth:
                 diag_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
                 if diag_score > max_score:
                     max_score = diag_score
                     max_from = 2
-
-            # invalid max_from indicates that the min_score was too high
-            # so just compute skip and diag scores
-            if max_from == -1:
-                if prev_b_pos == 0:
-                    max_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                    max_from = 1
-                elif prev_b_pos == bandwidth:
-                    max_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
-                    max_from = 2
-                else:
+                # finally check skip score (note nested check to save some ops)
+                if prev_b_pos < bandwidth:
                     skip_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                    diag_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
-                    if diag_score > skip_score:
-                        max_score = diag_score
-                        max_from = 2
-                    else:
+                    if skip_score > max_score:
                         max_score = skip_score
                         max_from = 1
 
@@ -371,4 +384,5 @@ def c_adaptive_banded_forward_pass(
 
     if return_z_scores:
         return all_shifted_z_scores
+
     return
