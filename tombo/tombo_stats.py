@@ -1284,7 +1284,8 @@ class PerReadStats(object):
         if num_reads is not None and num_reads < len(read_ids):
             int_plot_reads = set(random.sample(read_ids, num_reads))
             all_int_stats = all_int_stats[
-                all_int_stats['read_id'] in int_plot_reads]
+                read_id in int_plot_reads
+                for read_id in all_int_stats['read_id']]
 
         return all_int_stats
 
