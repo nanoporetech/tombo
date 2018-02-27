@@ -1776,8 +1776,14 @@ def test_significance(
     chrm_sizes = th.get_chrm_sizes(raw_read_coverage, ctrl_read_coverage)
     num_regions = 0
     for chrm, chrm_len in chrm_sizes.items():
-        plus_covered = (chrm, '+') in raw_read_coverage
-        minus_covered = (chrm, '-') in raw_read_coverage
+        # only process regions covered by both samples if control
+        # reads are provided
+        plus_covered = (
+            (chrm, '+') in raw_read_coverage and
+            (ctrl_read_coverage is None or (chrm, '+') in ctrl_read_coverage))
+        minus_covered = (
+            (chrm, '-') in raw_read_coverage and
+            (ctrl_read_coverage is None or (chrm, '-') in ctrl_read_coverage))
         for reg_start in range(0, chrm_len, region_size):
             if plus_covered:
                 region_q.put((chrm, '+', reg_start))
