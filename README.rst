@@ -38,18 +38,20 @@ Basic tombo installation (python 2.7 and 3.4+ support)
 
     Additional installation instructions options below
 
-==================
-Full Documentation
-==================
+=============
+Documentation
+=============
 
-Detailed documentation can be found at https://nanoporetech.github.io/tombo/
+Run ``tombo -h`` to see all Tombo sub-commands and run ``tombo [sub-command] -h`` to see the options for any Tombo sub-command.
+
+Detailed documentation for all Tombo algorithms and commands can be found at https://nanoporetech.github.io/tombo/
 
 ==============
 Tombo Examples
 ==============
 
-Re-squiggle (Raw Data Alignment)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Re-squiggle (Raw Data to Genome Alignment)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
@@ -57,7 +59,7 @@ Re-squiggle (Raw Data Alignment)
 
 ..
 
-    Only R9.4/5 data is supported at this time.
+    Only R9.4/5 data (including R9.[4/5].1) is supported at this time.
 
     DNA or RNA is automatically determined from FAST5s (set explicitly with ``--dna`` or ``--rna``).
 
@@ -83,8 +85,8 @@ Identify Modified Bases
 ..
 
     Must run ``resquiggle`` on reads before testing for modified bases.
-   
-    ``test_significance`` produces a binary file. See ``write_wiggles`` for several text outputs or ``plot_most_significant`` to use for genome region selection.
+
+    ``test_significance`` produces a binary file. See ``write_wiggles`` or ``plot_most_significant`` Tombo sub-commands for text output or genome region selection.
 
 Text Output (Wiggle file format)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -128,13 +130,6 @@ Plotting Examples
 ===============
 Common Commands
 ===============
-
-::
-
-   # get tombo help
-   tombo -h
-   # run tombo sub-commands
-   tombo [command] [options]
 
 Re-squiggle (Raw Data Alignment):
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -212,7 +207,7 @@ python Requirements (handled by conda or pip):
 Optional packages (handled by conda, but not pip):
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
--  Plotting Packages
+-  Plotting Packages (R and rpy2 must be linked during installation)
    
    +  R
    +  rpy2
@@ -252,8 +247,10 @@ Gotchas
 
 -  The Tombo conda environment (especially with python 2.7) may have installation issues.
    
-   + The first troubleshooting step would be to install in a python 3.4+ environment.
-   + The R ``cowplot`` package was also causing several installation issues. As of Tombo version 1.2 the ``cowplot`` dependency has been replaced by the ``gridExtra`` package which should resolve this inter-dependency issue.
-   + If python2 is a requirement, un-installing and re-installing the offending package may help.
-   + Moving ``conda-forge`` to the end of the conda channel list (or removing it altogether) may help ``conda config --append channels conda-forge``.
+   + Tombo works best in python 3.4+, so many problems can be solved by upgrading python.
+   + If installed using conda:
+
+      - Ensure the most recent version of conda is installed (``conda update conda``).
+      - It is recommended to set conda channels as described for `bioconda <https://bioconda.github.io>`_.
+      - Run ``conda update --all``.
    + In python 2.7 there is an issue with the conda scipy.stats package. Down-grading to version 0.17 fixes this issue.

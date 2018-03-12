@@ -25,6 +25,11 @@ WIG_HEADER='track type=wiggle_0 name="{0}_{1}_{2}{3}" ' + \
 GROUP1_NAME='sample'
 GROUP2_NAME='control'
 
+
+########################
+###### WIG Output ######
+########################
+
 def _write_wiggle(wig_base, group_text, data_values, type_name,
                  filter_zeros=False):
     group_w_dot = '' if group_text == '' else '.' + group_text
@@ -52,42 +57,56 @@ def _write_wiggle(wig_base, group_text, data_values, type_name,
 
     return
 
-def write_frac_wigs(all_stats, wig_base, do_frac, do_damp, cov_damp_counts):
+def write_frac_wigs(all_stats, wig_base, do_frac, do_damp):
     if VERBOSE: sys.stderr.write('Parsing statistics.\n')
-    raw_chrm_strand_stats = defaultdict(list)
-    for stat in all_stats:
-        raw_chrm_strand_stats[(
-            stat['chrm'].decode(), stat['strand'].decode())].append(
-                (stat['pos'], stat['frac'], stat['valid_cov']))
-
     if do_frac:
         all_frac = {}
     if do_damp:
         all_damp_frac = {}
-    for chrm_strand, stats in raw_chrm_strand_stats.items():
-        cs_poss, raw_cs_frac, raw_cs_cov = map(np.array, zip(*stats))
-        max_pos = max(cs_poss)
 
+    curr_chrm, curr_strand, curr_poss, curr_fracs, curr_damp_fracs = (
+        None, None, [], [], [])
+    for chrm, strand, pos, frac, damp_frac in all_stats.iter_fracs():
+        if chrm != curr_chrm or strand != curr_strand:
+            if len(curr_poss) > 0:
+                cs_max_pos = max(curr_poss)
+                # store current data
+                if do_frac:
+                    cs_fracs = np.empty(cs_max_pos + 1)
+                    cs_fracs[:] = np.nan
+                    np.put(cs_fracs, curr_poss, curr_fracs)
+                    all_frac[(curr_chrm, curr_strand)] = cs_fracs
+                if do_damp:
+                    cs_damps = np.empty(cs_max_pos + 1)
+                    cs_damps[:] = np.nan
+                    np.put(cs_damps, curr_poss, curr_damp_fracs)
+                    all_damp_frac[(curr_chrm, curr_strand)] = cs_damps
+
+            # set new chrm and strand and empty lists
+            curr_chrm, curr_strand = chrm, strand
+            curr_poss, curr_fracs, curr_damp_frac = [], [], []
+
+        # store position statistics
+        curr_poss.append(pos)
         if do_frac:
-            cs_frac = np.empty(max_pos + 1)
-            cs_frac[:] = np.nan
-            # fraction is stored as fraction of unmodified bases, but
-            # higher values show better in a wig file, so flip the fractions
-            np.put(cs_frac, cs_poss, 1 - raw_cs_frac)
-            all_frac[chrm_strand] = cs_frac
+            curr_fracs.append(1 - frac)
         if do_damp:
-            cs_damp_frac = np.empty(max_pos + 1)
-            cs_damp_frac[:] = np.nan
-            non_mod_counts = np.round(raw_cs_frac * raw_cs_cov)
-            # compute dampened fraction of modified reads by adding psuedo-counts
-            # to the modified and un-modified counts (equivalent to a beta prior
-            # on the fraction estimation as a binomial variable)
-            raw_cs_damp_frac = (non_mod_counts + cov_damp_counts[0]) / (
-                raw_cs_cov + sum(cov_damp_counts))
-            # fraction is stored as fraction of unmodified bases, but
-            # higher values show better in a wig file, so flip the fractions
-            np.put(cs_damp_frac, cs_poss, 1 - raw_cs_damp_frac)
-            all_damp_frac[chrm_strand] = cs_damp_frac
+            curr_damp_fracs.append(1 - damp_frac)
+
+    # tabulate and store last chrm and strand
+    if len(curr_poss) > 0:
+        cs_max_pos = max(curr_poss)
+        # store current data
+        if do_frac:
+            cs_fracs = np.empty(cs_max_pos + 1)
+            cs_fracs[:] = np.nan
+            np.put(cs_fracs, curr_poss, curr_fracs)
+            all_frac[(curr_chrm, curr_strand)] = cs_fracs
+        if do_damp:
+            cs_damps = np.empty(cs_max_pos + 1)
+            cs_damps[:] = np.nan
+            np.put(cs_damps, curr_poss, curr_damp_fracs)
+            all_damp_frac[(curr_chrm, curr_strand)] = cs_damps
 
     if VERBOSE: sys.stderr.write('Writing fraction wigs.\n')
     if do_frac:
@@ -130,12 +149,12 @@ def write_signal_and_diff_wigs(
             if VERBOSE: sys.stderr.write(
                     'Calculating signal differences.\n')
             sig_diffs = {}
-            for chrm, strand in [(c, s) for c in chrm_sizes for s in ('+', '-')]:
+            for chrm, strand in [(c, s) for c in chrm_sizes
+                                 for s in ('+', '-')]:
                 # calculate difference and set no coverage
                 # (nan) values to zero
-                sig_diffs[(chrm, strand)] \
-                    = base_means1[(chrm, strand)] - \
-                    base_means2[(chrm, strand)]
+                sig_diffs[(chrm, strand)] = (base_means1[(chrm, strand)] -
+                                             base_means2[(chrm, strand)])
             if VERBOSE: sys.stderr.write('Writing differnce wig.\n')
             _write_wiggle(wig_base, '', sig_diffs, 'difference')
         if write_sig:
@@ -156,11 +175,11 @@ def write_cov_wig(raw_read_coverage, wig_base, group_text):
     return
 
 def write_all_wiggles(
-        f5_dirs1, f5_dirs2, corrected_group, basecall_subgroups,
+        f5_dirs1, f5_dirs2, corr_grp, bc_subgrps,
         stats_fn, wig_base, wig_types, cov_damp_counts):
     if f5_dirs1 is not None:
         raw_read_coverage1 = th.parse_fast5s(
-            f5_dirs1, corrected_group, basecall_subgroups)
+            f5_dirs1, corr_grp, bc_subgrps)
         if len(raw_read_coverage1) == 0:
             th._error_message_and_exit(
                 'No reads present in --fast5-basedirs.')
@@ -168,7 +187,7 @@ def write_all_wiggles(
     group1_name = '' if f5_dirs2 is None else GROUP1_NAME
     if f5_dirs2 is not None:
         raw_read_coverage2 = th.parse_fast5s(
-            f5_dirs2, corrected_group, basecall_subgroups)
+            f5_dirs2, corr_grp, bc_subgrps)
         chrm_sizes = th.get_chrm_sizes(
             raw_read_coverage1, raw_read_coverage2)
 
@@ -200,39 +219,46 @@ def write_all_wiggles(
     if 'coverage' in wig_types:
         write_cov_wig(raw_read_coverage1, wig_base, group1_name)
     if 'signal_sd' in wig_types:
-        write_signal_sd_wig(raw_read_coverage1, chrm_sizes,
-                            wig_base, group1_name)
+        write_signal_sd_wig(
+            raw_read_coverage1, chrm_sizes, wig_base, group1_name)
     if 'dwell' in wig_types:
-        write_length_wig(raw_read_coverage1, chrm_sizes,
-                         wig_base, group1_name)
+        write_length_wig(raw_read_coverage1, chrm_sizes, wig_base, group1_name)
     if any(wig_type in wig_types for wig_type in (
             'fraction', 'dampened_fraction')):
         if VERBOSE: sys.stderr.write('Loading statistics from file.\n')
-        all_stats, stat_type = ts.parse_stats(stats_fn)
+        all_stats = ts.TomboStats(stats_fn)
+        if 'dampened_fraction' in wig_types:
+            all_stats.calc_damp_fraction(cov_damp_counts)
+        all_stats.order_by_pos()
         write_frac_wigs(all_stats, wig_base, 'fraction' in wig_types,
-                        'dampened_fraction' in wig_types, cov_damp_counts)
+                        'dampened_fraction' in wig_types)
 
     return
 
+
+##########################
+###### FASTA Output ######
+##########################
+
 def write_most_signif(
-        f5_dirs, fasta_fn, num_regions, corrected_group,
-        basecall_subgroups, seqs_fn, num_bases, stats_fn):
+        f5_dirs, fasta_fn, num_regions, corr_grp, bc_subgrps, seqs_fn,
+        num_bases, stats_fn, cov_damp_counts):
     if VERBOSE: sys.stderr.write('Loading statistics from file.\n')
-    all_stats, stat_type = ts.parse_stats(stats_fn)
-    plot_intervals = ts.get_most_signif_regions(
-        all_stats, num_bases, num_regions)
+    plot_intervals = ts.TomboStats(stats_fn).get_most_signif_regions(
+        num_bases, num_regions, cov_damp_counts=cov_damp_counts)
 
     # get each regions sequence either from reads or fasta index
     if fasta_fn is None:
-        raw_read_coverage = th.parse_fast5s(
-            f5_dirs, corrected_group, basecall_subgroups)
-        all_reg_data = th.get_region_sequences(plot_intervals, raw_read_coverage)
+        raw_read_coverage = th.parse_fast5s(f5_dirs, corr_grp, bc_subgrps)
+        all_reg_data = th.get_region_sequences(
+            plot_intervals, raw_read_coverage)
     else:
         genome_index = th.Fasta(fasta_fn)
         all_reg_data = [
             int_i._replace(
                 seq=genome_index.get_seq(int_i.chrm, int_i.start, int_i.end))
-            for int_i in plot_intervals if int_i.chrm in genome_index.index]
+            for int_i in plot_intervals
+            if int_i.chrm in genome_index.index.index]
 
     if VERBOSE: sys.stderr.write('Outputting region seqeuences.\n')
     with io.open(seqs_fn, 'wt') as seqs_fp:
@@ -246,6 +272,10 @@ def write_most_signif(
 
     return
 
+
+############################
+###### Main functions ######
+############################
 
 def wiggle_main(args):
     global VERBOSE
@@ -276,6 +306,11 @@ def wiggle_main(args):
         th._error_message_and_exit(
             'Cannot provide a control FAST5 set of directories ' +
             'without a sample set of FAST5 directories.')
+    if (args.coverage_dampen_counts is None and
+        'dampened_fraction' in args.wiggle_types):
+        th._error_message_and_exit(
+            'Cannot compute dampened fractions without ' +
+            '--coverage-dampened-counts values.')
 
     write_all_wiggles(
         args.fast5_basedirs, args.control_fast5_basedirs, args.corrected_group,
@@ -297,7 +332,7 @@ def write_signif_diff_main(args):
     write_most_signif(
         args.fast5_basedirs, args.genome_fasta, args.num_regions,
         args.corrected_group, args.basecall_subgroups, args.sequences_filename,
-        args.num_bases, args.statistics_filename)
+        args.num_bases, args.statistics_filename, args.coverage_dampen_counts)
 
     return
 

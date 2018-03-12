@@ -211,7 +211,7 @@ class Fasta(object):
             if force_in_mem: raise ImportError
             import pyfaidx
             self.has_pyfaidx = True
-            self.index = pyfaidx.Fasta(fasta_fn)
+            self.index = pyfaidx.Faidx(fasta_fn)
         except:
             self.has_pyfaidx = False
             if not dry_run:
@@ -220,14 +220,18 @@ class Fasta(object):
     def get_seq(self, chrm, start=None, end=None):
         if self.has_pyfaidx:
             if not (start or end):
-                return self.index[chrm][:].seq
-            return self.index[chrm][start:end].seq
-        return self.index[chrm][start:end]
+                return self.index.fetch(
+                    chrm, 1, self.index.index[chrm].rlen).seq.upper()
+            if start < 0 or end > self.index.index[chrm].rlen:
+                raise NotImplementedError(
+                    'Encountered invalid genome sequence request.')
+            return self.index.fetch(chrm, start + 1, end).seq.upper()
+        return self.index[chrm][start:end].upper()
 
     def iter_chrms(self):
         if self.has_pyfaidx:
-            for chrm in self.index:
-                yield unicode(chrm.name)
+            for chrm in self.index.index:
+                yield unicode(chrm)
         else:
             for chrm in self.index:
                 yield chrm
@@ -298,9 +302,9 @@ def is_rna_from_files(fast5_fns, n_reads=10):
     proc_reads = 0
     for fast5_fn in fast5_fns:
         try:
-            fast5_data = h5py.File(fast5_fn, 'r')
-            if not is_read_rna(fast5_data):
-                return False
+            with h5py.File(fast5_fn, 'r') as fast5_data:
+                if not is_read_rna(fast5_data):
+                    return False
             proc_reads += 1
         except:
             continue
@@ -317,14 +321,35 @@ def get_index_fn(fast5s_dir, corr_grp):
     """
     Get the filename for the requested directory and corrected group
     """
-    # dirname should come in with a trailing slash
-    split_dir = os.path.split(fast5s_dir[:-1])
+    # if directory comes with trailing slash, remove for processing
+    if fast5s_dir.endswith('/'):
+        fast5s_dir = fast5s_dir[:-1]
+    split_dir = os.path.split(fast5s_dir)
     return os.path.join(split_dir[0], "." + split_dir[1] +
                         "." + corr_grp + '.tombo.index')
 
+def get_lock_fn(fast5s_dir):
+    """
+    Get filename for the lock file to indicate that this directory
+    is currently being processed. This file should be saved to be deleted later.
+    """
+    # if directory comes with trailing slash, remove for processing
+    if fast5s_dir.endswith('/'):
+        fast5s_dir = fast5s_dir[:-1]
+    split_dir = os.path.split(fast5s_dir)
+    return os.path.join(split_dir[0], "." + split_dir[1] + '.tombo.lock')
+
+def _is_lock_file(lock_fn):
+    lock_bn = os.path.split(lock_fn)[1]
+    if (len(lock_bn) == 0 or
+        not lock_bn.startswith('.') or
+        not lock_bn.endswith('.tombo.lock')):
+        return False
+    return True
+
 def prep_index_data(
         fast5_fn, genome_loc, read_start_rel_to_raw, segs,
-        corrected_group, subgroup, rna, obs_filter):
+        corr_grp, subgroup, rna, obs_filter):
     """
     Prepare data for storage in the index file
     """
@@ -338,7 +363,7 @@ def prep_index_data(
 
     return ((genome_loc.Chrom, genome_loc.Strand), (
         fast5_fn, genome_loc.Start, mapped_end, read_start_rel_to_raw,
-        corrected_group, subgroup, is_filtered, rna))
+        corr_grp, subgroup, is_filtered, rna))
 
 def write_index_file(all_index_data, index_fn, basedir):
     """
@@ -419,11 +444,11 @@ def filter_reads(fast5s_dir, corr_grp, obs_filter):
     """
     def read_is_stuck(fast5_fn, s_grp):
         try:
-            fast5_data = h5py.File(fast5_fn, 'r')
-            base_lens = fast5_data['/Analyses/' + corr_grp + '/' + s_grp +
-                                   '/Events']['length']
-            return any(np.percentile(base_lens, pctl) > thresh
-                       for pctl, thresh in obs_filter)
+            with h5py.File(fast5_fn, 'r') as fast5_data:
+                base_lens = fast5_data['/Analyses/' + corr_grp + '/' + s_grp +
+                                       '/Events']['length']
+                return any(np.percentile(base_lens, pctl) > thresh
+                           for pctl, thresh in obs_filter)
         except:
             return True
 
@@ -593,7 +618,7 @@ def reads_contain_basecalls(fast5_fns, bc_grp, num_reads):
 
 def get_files_list(fast5s_dir):
     """
-    Get all fast5 files recursively listed below the directory
+    Get all fast5 files recursively below this directory
     """
     all_fast5s = []
     # walk through directory structure searching for fast5 files
@@ -602,6 +627,57 @@ def get_files_list(fast5s_dir):
             all_fast5s.append(os.path.join(root, fn))
 
     return all_fast5s
+
+def clear_tombo_locks(lock_fns):
+    """
+    Clear all lock files
+    """
+    for lock_fn in lock_fns:
+        # safegaurd against incorrect file passed to this function
+        if not _is_lock_file(lock_fn):
+            continue
+        # try to remove lock files so that is some have been corrupted or
+        # otherwise cause an error at least all those accessible will be cleared
+        try:
+            os.remove(lock_fn)
+        except:
+            pass
+
+    return
+
+def get_files_list_and_lock_dirs(fast5s_dir, ignore_locks):
+    """
+    Get all fast5 files recursively below this directory and add a Tombo lock
+    file to indicate that this directory is currently being re-squiggled
+    """
+    all_fast5s = []
+    lock_fns = []
+    # walk through directory structure searching for fast5 files
+    for root, _, fns in os.walk(fast5s_dir):
+        lock_fn = get_lock_fn(root)
+        if not ignore_locks and os.path.exists(lock_fn):
+            clear_tombo_locks(lock_fns)
+            _error_message_and_exit(
+                'This set of reads is currently being processed by another ' +
+                'resquiggle command. Multiple resquiggle commands cannot be ' +
+                'run concurrently on a set of reads to avoid corrupting ' +
+                'read files. If you are sure this set of reads is not being ' +
+                'processed by another command (usually caused by previous ' +
+                'unexpected exit) set the --ignore-read-locks flag.')
+        lock_fns.append(lock_fn)
+        try:
+            # create empty file indicating this directory is locked
+            open(lock_fn, 'w').close()
+        except:
+            clear_tombo_locks(lock_fns)
+            _error_message_and_exit(
+                'Could not write tombo lock file. Check that you have write ' +
+                'permission within the specified [fast5_basedir].')
+
+        for fn in fnmatch.filter(fns, '*.fast5'):
+            all_fast5s.append(os.path.join(root, fn))
+
+    return all_fast5s, lock_fns
 
 def get_raw_read_slot(fast5_data):
     try:
@@ -689,49 +765,43 @@ def get_read_ids_and_prep_fastq_slot(
 
     return fast5s_read_ids
 
-def parse_fast5s_wo_index(
-        fast5_basedirs, corrected_group, basecall_subgroups, rna):
+def parse_fast5s_wo_index(fast5_basedirs, corr_grp, bc_subgrps, rna):
     """
     Parse re-squiggled reads data from a list of fast5 directories
     """
+    def get_read_data(read_fn, fast5_data, bc_subgrp):
+        corr_data = fast5_data['/'.join(('/Analyses', corr_grp, bc_subgrp))]
+
+        align_data = dict(corr_data['Alignment'].attrs.items())
+        read_start_rel_to_raw = corr_data['Events'].attrs[
+            'read_start_rel_to_raw']
+        chrm = align_data['mapped_chrom']
+        strand = align_data['mapped_strand']
+        try:
+            chrm = chrm.decode()
+            strand = strand.decode()
+        except:
+            pass
+
+        return chrm, strand, readData(
+            align_data['mapped_start'], align_data['mapped_end'],
+            False, read_start_rel_to_raw, strand, read_fn,
+            corr_grp + '/' + bc_subgrp, rna)
+
+
     files = [fn for fast5_basedir in fast5_basedirs
              for fn in get_files_list(fast5_basedir)]
     raw_read_coverage = defaultdict(list)
     for read_fn in files:
         try:
-            read_data = h5py.File(read_fn, 'r')
-        except IOError:
-            # probably truncated file
+            with h5py.File(read_fn, 'r') as fast5_data:
+                for bc_subgrp in bc_subgrps:
+                    chrm, strand, r_data = get_read_data(
+                        read_fn, fast5_data, bc_subgrp)
+                    raw_read_coverage[(chrm, strand)].append(r_data)
+        except:
+            # ignore errors and process all reads that don't error
             continue
-        for basecall_subgroup in basecall_subgroups:
-            try:
-                corr_data = read_data['/'.join((
-                    '/Analyses', corrected_group, basecall_subgroup))]
-            except:
-                continue
-
-            try:
-                align_data = dict(corr_data['Alignment'].attrs.items())
-                read_start_rel_to_raw = corr_data['Events'].attrs[
-                    'read_start_rel_to_raw']
-            except:
-                # don't warn here since errored out reads will have get here, but
-                # not have alignment and events stored, so just skip these reads
-                continue
-            chrm = align_data['mapped_chrom']
-            strand = align_data['mapped_strand']
-            try:
-                chrm = chrm.decode()
-                strand = strand.decode()
-            except:
-                pass
-            raw_read_coverage[(chrm, strand)].append(
-                readData(
-                    align_data['mapped_start'], align_data['mapped_end'],
-                    False, read_start_rel_to_raw, strand, read_fn,
-                    corrected_group + '/' + basecall_subgroup, rna))
-
-        read_data.close()
 
     return dict(raw_read_coverage)
 
@@ -1124,12 +1194,12 @@ def get_all_mean_lengths(raw_read_coverage, chrm_sizes):
 ###### Special Data Access Functions ######
 ###########################################
 
-def get_channel_info(read_data):
+def get_channel_info(fast5_data):
     """
     Get channel information for a read
     """
     try:
-        fast5_info = read_data['UniqueGlobalKey/channel_id'].attrs
+        fast5_info = fast5_data['UniqueGlobalKey/channel_id'].attrs
     except:
         raise NotImplementedError("No channel_id group in HDF5 file. " +
                                   "Probably mux scan HDF5 file.")
@@ -1421,6 +1491,7 @@ def get_region_reads(
     def get_c_s_data(chrm, strand, start, end):
         # get all reads intersecting the interval
         if (chrm, strand) in raw_read_coverage:
+            r_data = raw_read_coverage[(chrm, strand)][0]
             return [
                 r_data for r_data in raw_read_coverage[(chrm, strand)]
                 if not (r_data.start >= end or r_data.end <= start)]
@@ -1557,15 +1628,15 @@ def write_error_status(
     """
     Write error message for a read into the FAST5 file
     """
-    fast5_data = h5py.File(filename, 'r+')
-    analysis_grp = fast5_data['/Analyses']
-    corr_grp = analysis_grp[corrected_group]
-    if basecall_subgroup is not None:
-        # add subgroup matching subgroup from original basecalls
-        corr_subgrp = corr_grp.create_group(basecall_subgroup)
-        corr_subgrp.attrs['status'] = error_text
-    else:
-        corr_grp.attrs['status'] = error_text
+    with h5py.File(filename, 'r+') as fast5_data:
+        analysis_grp = fast5_data['/Analyses']
+        corr_grp = analysis_grp[corrected_group]
+        if basecall_subgroup is not None:
+            # add subgroup matching subgroup from original basecalls
+            corr_subgrp = corr_grp.create_group(basecall_subgroup)
+            corr_subgrp.attrs['status'] = error_text
+        else:
+            corr_grp.attrs['status'] = error_text
 
     return
 
@@ -1604,9 +1675,11 @@ def write_new_fast5_group(
     except:
         raise NotImplementedError('Error computing new events')
 
+    do_close = False
     if not isinstance(fast5_data, h5py.File):
         try:
             fast5_data = h5py.File(fast5_data, 'r+')
+            do_close = True
         except:
             raise NotImplementedError(
                 'Error opening file for new group writing. This should ' +
@@ -1663,11 +1736,12 @@ def write_new_fast5_group(
         raise NotImplementedError(
             'Error writing resquiggle information back into fast5 file.')
 
-    try:
-        fast5_data.close()
-    except:
-        raise NotImplementedError(
-            'Error closing fast5 file after writing resquiggle information.')
+    if do_close:
+        try:
+            fast5_data.close()
+        except:
+            raise NotImplementedError(
+                'Error closing fast5 file after writing resquiggle information.')
 
     return
 

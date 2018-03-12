@@ -10,18 +10,20 @@ Re-squiggle (Raw Signal Genomic Alignment)
 
 The re-squiggle algorithm aligns raw signal (electric current nanopore measurements) to genomic sequence based on a genomic mapping.
 
-This command will add infomation including the mapped genomic location and the raw signal to sequence assignment to the read files (in FAST5 format) provided, as well as producing an index file for more efficient file access in downstream commands.
+The ``resquiggle`` command will add infomation (the mapped genomic location and the raw signal to sequence assignment) to the read files provided (in FAST5 format), as well as producing an index file for more efficient file access in downstream commands.
 
-The ``resquiggle`` command must be run before any further processing by Tombo commands.
+.. important::
+   
+   The ``resquiggle`` command must be run before any further processing by Tombo commands.
 
-**Important note**: Currently, only models for R9.4/5 (1D or 1D^2) DNA or RNA sequencing are included with Tombo. Analysis of other nanopore data types is not supported at this time. If DNA or RNA sample type is not explicitly specified (via ``--dna`` or ``--rna`` options) the sample type will be detected automatically for the set of reads.
+**Note**: Currently, only models for R9.4/5 (1D or 1D^2) DNA or RNA sequencing are included with Tombo. Analysis of other nanopore data types is not supported at this time. If DNA or RNA sample type is not explicitly specified (via ``--dna`` or ``--rna`` options) the sample type will be detected automatically for the set of reads.
 
 For more details see the :doc:`re-squiggle documentation </resquiggle>`.
 
 .. code-block:: bash
 
     # optionally annotate raw FAST5s with FASTQ files produced from the same reads
-    tombo annotate_raw_with_fastqs --fast5-basedir <fast5s-base-directory> --fastq-filenames reads.fastq
+    tombo annotate_raw_with_fastqs --fast5-basedir <fast5s-base-directory> --fastq-filenames <reads.fastq>
 
     tombo resquiggle <fast5s-base-directory> <reference-fasta> --processes 4
 
@@ -31,14 +33,27 @@ Modified Base Detection
 
 Tombo provides three methods for the investigation of modified bases. Each method has different advantages and requirements.
 
-* The specific alternative base method is preferred. Alternative DNA models are currently available for 5-methylcytosine (5mA) and N6-methyladenosine (6mA) in all sequence contexts.
-  
-  - More modifications will continue to be added.
-* The canonical (control) sample comparison method requires the production of a second set of reads containing only the 4 canonical bases (e.g PCR).
-* The de novo method compares signal to the included canonical bases model.
+1. Specific alternative base detection
 
-  - This method is recommended only as a research tool and may produce high false positive rates.
-* Both the control sample comparison and the de novo methods may not identify the exact modified base location and give no information as to the identity of a modified base.
+  - Specify the ``--alternate-bases`` option to execute this method.
+  - This method produces a likelihood ratio using the canonical and alternative model specified.
+  - Alternative DNA models are currently available for 5-methylcytosine (5mA) and N6-methyladenosine (6mA) in all sequence contexts.
+  - More modifications will continue to be added.
+
+2. Canonical (control) sample comparison
+
+  - Specify the ``--control-fast5-basedirs`` option to execute this method.
+  - This method performs a hypothesis test against the distribution estimated from the control sample at each base.
+  - This method requires the production of a second set of reads containing only the 4 canonical bases (e.g PCR).
+
+3. *De novo* canonical model comparison
+
+   - No additional options (aside from a set of reads) are needed to execute this method.
+   - This method compares re-squiggled signal to the default canonical model.
+
+..
+
+    Both the control sample comparison and the *de novo* methods may not identify the exact modified base location and gives no information as to the identity of a modified base.
 
 ----
 
@@ -59,7 +74,7 @@ Specific Alternative Base Method
 
 In order to specifically detect 5mC and 6mA, use the ``test_significance`` command with the ``--alternate-bases 5mC 6mA`` option.
 
-This will perform a log likelihood ratio test using the default canonical model and the 5mC and 6mA alternative models provided with Tombo.
+This will compute a log likelihood ratio using the default canonical model and the 5mC and 6mA alternative DNA models provided with Tombo.
 
 New alternative base models will be added as they are trained. This is the perferred method for modified base detection if a model is available for your biological modification of interest as it identifies the exact location of the modified base and reduces false positives for spurious shifts in signal.
 
@@ -71,7 +86,7 @@ New alternative base models will be added as they are trained. This is the perfe
 Canonical Sample Comparison Method
 ==================================
 
-In order to perform canonical-sample-comparison modified base detection, use the ``test_significance`` command with a second set of reads from the same biological sample containing only canonical bases (e.g. PCR) using the ``--control-fast5-basedirs`` option.
+In order to execute the canonical sample comparison method, use the ``test_significance`` command providing a second set of reads from the same biological sample containing only canonical bases (e.g. PCR) using the ``--control-fast5-basedirs`` option.
 
 This will perform a hypothesis test against the signal level observed from the control sample at each genomic position. In some cases this method provides the highest accuracy, but does not always identify the exact modified base position.
 
@@ -81,10 +96,10 @@ This will perform a hypothesis test against the signal level observed from the c
         --control-fast5-basedirs <control-fast5s-base-directory>  \
         --statistics-file-basename sample_canonical_compare
 
-De novo Non-canonical Base Method
-=================================
+*De novo* Non-canonical Base Method
+===================================
 
-In order to perform de novo non-canonical base detection, use the ``test_significance`` command without any other options (aside from the set of reads to test).
+In order to perform *de novo* non-canonical base detection, use the ``test_significance`` command without any other options (aside from the set of reads to test).
 
 This will perform a hypothesis test against the default canonical base model provided with Tombo. Note that this method is quite error prone and may result in a high false positive rate, but may be of use in a research and development setting. This method also has the lowest requirement of only a set of reads and a genome.
 

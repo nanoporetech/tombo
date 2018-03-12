@@ -11,7 +11,7 @@ Genome Anchored Plotting
 Plot Region Selection
 ^^^^^^^^^^^^^^^^^^^^^
 
-Most Tombo plotting functions are genome anchored. These commands create plots analogous to a genome browser, but with all raw signal within a region. The available commands each differ in their mode of genome region selection. This allows users to plot regions of interest for many research contexts.
+Most Tombo plotting functions are genome-anchored. These commands create plots analogous to a genome browser, but with all raw signal within a region. The available commands each differ in their mode of genome region selection. This allows users to plot regions of interest for many research contexts.
 
 * ``plot_max_coverage`` - Select regions with maximal coverage
 * ``plot_genome_location`` - Select specified genomic locations
@@ -20,6 +20,10 @@ Most Tombo plotting functions are genome anchored. These commands create plots a
 * ``plot_most_significant`` - Select most consistently/significantly mofidied locations
 
 These plotting commands produce raw signal level plots such at the example below. Options are available for each of these plots to logically select genomic regions based on the given criterion.
+
+.. note::
+
+   All genome-anchored plots use 1-based coordinate systems (similar to the majority of genome browsers).
 
 ----
 
@@ -90,7 +94,7 @@ When high coverage regions are plotted the raw signal plots can become less inte
 Per-read Plotting
 ^^^^^^^^^^^^^^^^^
 
-All testing in the Tombo framework is applied on a per-read basis; to visualize these per-read results, per-read statistic plots are available. Per-read statistics are an optional output from the ``test_significance`` command via the ``--per-read-statistics-filename`` option, and the output file specified by this option is required in order to plot per-read statistics. Create these plots with the ``plot_per_read`` command.
+All testing in the Tombo framework is applied first on a per-read basis; to visualize these per-read results, per-read statistic plots are available. Per-read statistics are an optional output from the ``test_significance`` command via the ``--per-read-statistics-filename`` option, and the output file specified by this option is required in order to the plot per-read statistics command. Create these plots with the ``plot_per_read`` command.
 
 ----
 
@@ -144,8 +148,8 @@ In order to investigate the k-mer signal current levels of a particular set of r
 
 ----
 
-ROC Curve
-^^^^^^^^^
+ROC Curves
+^^^^^^^^^^
 
 In order to validate the performance of significance testing results at a known sequence motif, the ``plot_roc`` command is provided. This command takes a Tombo statistics file, corresponding motif descriptions and the genome FASTA file. The "area under the curve" (AUC) for each motif is printed and the precision-recall curve is also plotted for each motif on the second page of the resulting PDF. Note that only genomic positions with the canonical base of interest are included in the results from this command.
 
@@ -171,7 +175,24 @@ Below is an example command and resulting plot for identifying the known dam and
 
 ----
 
-Correction Plotting
-^^^^^^^^^^^^^^^^^^^
+It is also possible to compute and plot validation results on a per-read basis from a Tombo per-read statistics file. Along with ROC and precision-recall curves, this command also plots a distribution of test statistics for true and false ground truth sites (see figure below) for each motif provided. These plots can be very useful in picking a ``--single-read-threshold`` for use in either the ``test_significance`` or ``aggregate_per_read_stats`` sub-commands.
 
-Plotting commands, ``plot_correction`` and ``plot_multi_correction``, are provided to visualize the old event-based re-squiggle process. These commands are thus only applicable on reads that have been processed with ``event_reqsuiggle``. These commands may be deprecated in the future.
+.. code-block:: bash
+
+    tombo plot_roc \
+        --statistics-filenames vs_pcr.tombo.per_read_stats de_novo.tombo.per_read_stats \
+        5mC_model.5mC.tombo.per_read_stats 6mA_model.6mA.tombo.per_read_stats \
+        --motif-descriptions CCWGG:2:"dcm 5mC Sample Comp"::GATC:2:"dam 6mA Sample Comp" \
+        CCWGG:2:"dcm 5mC De novo"::GATC:2:"dam 6mA De novo" \
+        CCWGG:2:"dcm 5mC Alt Comp" GATC:2:"dam 6mA Alt Comp"  \
+        --genome-fasta e_coli.fasta
+
+----
+
+.. figure::  _images/per_read_stat_dist.png
+   :align: center
+   :scale: 30%
+   
+   Example per-read statistic distribution
+
+----

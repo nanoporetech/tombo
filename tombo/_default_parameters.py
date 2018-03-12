@@ -60,8 +60,9 @@ MIN_EVENT_TO_SEQ_RATIO = 1.1
 ##### Testing Defaults #####
 ############################
 
-LLR_THRESH = 0.5
-HYPO_THRESH = 0.01
+LLR_THRESH = 0.0
+SAMP_COMP_THRESH = 0.1
+DE_NOVO_THRESH = 0.5
 
 
 #####################################

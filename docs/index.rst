@@ -31,6 +31,14 @@ Basic tombo installation (python 2.7 and 3.4+ support)
 
 See :doc:`examples` for common workflows.
 
+-------------
+Documentation
+-------------
+
+Run ``tombo -h`` to see all Tombo sub-commands and run ``tombo [sub-command] -h`` to see the options for any Tombo sub-command.
+
+Detailed documentation for all Tombo algorithms and sub-commands can be found through the links here.
+
 ------
 Naming
 ------

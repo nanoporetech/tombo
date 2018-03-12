@@ -9,7 +9,7 @@ if sys.version_info[0] > 2:
     unicode = str
 
 from ._default_parameters import SEG_PARAMS_TABLE, ALGN_PARAMS_TABLE, \
-    LLR_THRESH, HYPO_THRESH, ALTERNATE_MODELS
+    LLR_THRESH, SAMP_COMP_THRESH, DE_NOVO_THRESH, ALTERNATE_MODELS
 
 ALT_BASES = tuple(set(alt_name.split('_')[1] for alt_name in ALTERNATE_MODELS))
 
@@ -22,8 +22,14 @@ basedir_opt=('fast5_basedir', {
     'type':unicode,
     'help':'Directory containing fast5 files. All files ending in "fast5" ' +
     'found recursively within this base directory will be processed.'})
-fasta_pos_opt=(
-    'genome_fasta', {'type':unicode, 'help':'Path to fasta file for mapping.'})
+# to be enabled when mappy genome sequence acces bug is fixed
+#fasta_pos_opt=(
+#    'reference_fasta', {
+#        'type':unicode, 'help':'Reference genome FASTA file or minimap2 index ' +
+#        '(with "map-ont" preset) for mapping.'})
+fasta_event_opt=(
+    'genome_fasta', {
+        'type':unicode, 'help':'Reference genome FASTA file for mapping.'})
 
 
 ############################
@@ -85,18 +91,15 @@ corrgrp_opt=('--corrected-group', {
 correvntgrp_opt=('--corrected-group', {
     'type':unicode, 'default':'RawGenomeCorrected_000',
     'help':'FAST5 group created by resquiggle command. Default: %(default)s'})
-newcorrgrp_opt=('--new-corrected-group', {
-    'type':unicode, 'default':'RawModelCorrected_000',
-    'help':'FAST5 group created by resquiggle command. Default: %(default)s'})
 bcgrp_opt=('--basecall-group', {
     'type':unicode, 'default':'Basecall_1D_000',
     'help':'FAST5 group obtain original basecalls (under Analyses group). ' +
     'Default: %(default)s'})
 bcsubgrps_opt=('--basecall-subgroups', {
     'type':unicode, 'default':['BaseCalled_template',], 'nargs':'+',
-    'help':'FAST5 subgroup(s) (under /Analyses/[--basecall-group]/) containing ' +
-    'basecalls and created within [--corrected-group] containing re-squiggle ' +
-    'results. Default: %(default)s'})
+    'help':'FAST5 subgroup(s) (under /Analyses/[--basecall-group]/) ' +
+    'containing basecalls and created within [--corrected-group] ' +
+    'containing re-squiggle results. Default: %(default)s'})
 bcsubgrp_opt=('--basecall-subgroup', {
     'type':unicode, 'default':'BaseCalled_template',
     'help':'FAST5 subgroup (under /Analyses/[--basecall-group]/) under which ' +
@@ -136,7 +139,7 @@ wigfn_opt=('--wiggle-basename', {
 pdf_opt=('--pdf-filename', {
     'type':unicode, 'help':'PDF filename to store plot(s). Default: %(default)s'})
 statfn_opt=('--statistics-filename', {
-    'type':unicode, 'help':"File to save/load base by base statistics."})
+    'type':unicode, 'help':"File to save/load genomic base anchored statistics."})
 statbsnm_opt=('--statistics-file-basename', {
     'type':unicode,
     'help':"File base name to save base by base statistics from testing. " +
@@ -171,6 +174,10 @@ prstat_opt=('--per-read-statistics-filename', {
     'type':unicode,
     'help':'Binary file containing per-read statistics from ' +
     'statistical testing.'})
+prstats_opt=('--per-read-statistics-filenames', {
+    'type':unicode, 'nargs':'+',
+    'help':'Binary files containing per-read statistics from ' +
+    'statistical testing.'})
 
 statfns_opt=('--statistics-filenames', {
     'type':unicode, 'nargs':'+',
@@ -192,6 +199,12 @@ motifdesc_opt=('--motif-descriptions', {
 
 proc_opt=('--processes', {
     'type':int, 'help':'Number of processes. Default: %(default)d'})
+thrpp_opt=('--threads-per-process', {
+    'type':int,
+    'help':'Number of file input/output and mapping threads per compute ' +
+    'process [--processes]. This should likely be left at 1, but may ' +
+    'improve performance on some systems. Default: %(default)d'})
+
 alignproc_opt=('--align-processes', {
     'type':int, 'default':1,
     'help':'Number of processes to use for parsing and aligning ' +
@@ -230,22 +243,10 @@ kmerthresh_opt=('--num-kmer-threshold', {
     'help':'Observations of each k-mer required to include a read in ' +
     'read level averages. Default: %(default)d'})
 
-minobs_opt=('--min-obs-per-base', {
-    'type':int,
-    'help':'Minimum raw observations to assign to a genomic base. ' +
-    'Default: %(default)d'})
 covthresh_opt=('--coverage-threshold', {
     'type':int,
     'help':'Maximum mean coverage per region when estimating k-mer model ' +
     '(limits compute time for deep samples). Default: %(default)d'})
-maxbase_opt=('--max-bases-shift', {
-    'type':int, 'default':3,
-    'help':'Maximum bases to shift raw signal from event_resquiggle ' +
-    'assignment. Default: %(default)d'})
-bmaxbase_opt=('--base-score-max-bases-shift', {
-    'type':int, 'default':4,
-    'help':'Maximum bases to shift raw signal from first round of ' +\
-    'model re-squiggle. Default: %(default)d'})
 minkmer_opt=('--minimum-kmer-observations', {
     'type':int,
     'help':'Number of each k-mer observations required in order to produce ' +
@@ -257,9 +258,6 @@ numbases_opt=('--num-bases', {
     'help':'Number of bases to plot/output. Default: %(default)d'})
 numreads_opt=('--num-reads', {
     'type':int, 'help':'Number of reads to plot. Default: %(default)d'})
-numobs_opt=('--num-obs', {
-    'type':int, 'default':500,
-    'help':'Number of observations to plot. Default: %(default)d'})
 numreg_opt=('--num-regions', {
     'type':int, 'help':'Number of regions to plot. Default: %(default)d'})
 
@@ -284,28 +282,19 @@ fmo_opt=('--fishers-method-context', {
     'help':'Number of context bases up and downstream over which to compute ' +
     "Fisher's method combined p-values. Note: Not applicable " +
     "for alternative model likelihood ratio tests. Default: %(default)d."})
-szo_opt=('--stouffer-z-context', {
-    'type':int, 'default':1,
-    'help':'Number of context bases up and downstream over which to compute ' +
-    "Stouffer's Z combined z-scores. Default: %(default)d."})
-regcntxt_opt=('--region-context', {
-    'type':int, 'default':2,
-    'help':'Number of context bases up and downstream of poorly fit ' +
-    'regions to perform model re-squiggle. Default: %(default)d.'})
-brcntxt_opt=('--base-score-region-context', {
-    'type':int, 'default':4,
-    'help':'Number of context bases up and downstream of poorly fit regions ' +
-    'to perform iterative base-score model ' +
-    're-squiggle. Default: %(default)d.'})
-bsiters_opt=('--base-score-iterations', {
-    'type':int, 'default':2,
-    'help':'Number of iterations through each read to perform ' +
-    '(computationally expensive) base space model re-squiggle algorithm. ' +
-    'Default: %(default)d.'})
 minreads_opt=('--minimum-test-reads', {
     'type':int,
     'help':'Number of reads required at a position to perform significance ' +
     'testing or contribute to model estimation. Default: %(default)d'})
+
+spb_opt=('--statistics-per-block', {
+    'type':int, 'default':100000,
+    'help':'Number of randomly selected per-read, per-base statistics to ' +
+    'extract from each genomic block for plotting. Default: %(default)d'})
+tsl_opt=('--total-statistics-limit', {
+    'type':int, 'default':5000000,
+    'help':'Total per-read statistics to be extracted for plotting. ' +
+    'Avoids memory overflow for large runs. Default: %(default)d'})
 
 segpars_opt=('--segmentation-parameters', {
     'type':int, 'nargs':3,
@@ -337,6 +326,10 @@ ovrwrt_opt=('--overwrite', {
     'default':False, 'action':'store_true',
     'help':'Overwrite previous corrected group in FAST5 files. Note: ' +
     'only effects --corrected-group or --new-corrected-group.'})
+ignrlock_opt=('--ignore-read-locks', {
+    'default':False, 'action':'store_true',
+    'help':'Ignore Tombo locks, used to ensure that reads are only accessed ' +
+    'from a single resquiggle processes avoiding potential file corruption.'})
 
 estmean_opt=('--estimate-mean', {
     'default':False, 'action':'store_true',
@@ -367,9 +360,6 @@ deepcov_opt=('--deepest-coverage', {
 noplot_opt=('--dont-plot', {
     'default':False, 'action':'store_true',
     'help':"Don't plot result. Useful to produce only R data file."})
-origbcs_opt=('--include-original-basecalls', {
-    'default':False, 'action':'store_true',
-    'help':"Include original basecalls in plots."})
 pstdmod_opt=('--plot-standard-model', {
     'default':False, 'action':'store_true',
     'help':"Add default standard model distribution to the plot."})
@@ -387,15 +377,12 @@ otlthresh_opt=('--outlier-threshold', {
     'default':5, 'type':float,
     'help':'Windosrize the signal at this number of scale values. ' +
     'Negative value disables outlier clipping. Default: %(default)f'})
-pvalthrsh_opt=('--p-value-threshold', {
-    'default':0.1, 'type':float,
-    'help':'P-value threshold to identify regions to apply model ' +
-    're-squiggle algorithm. Default: %(default)f'})
 snglrdthrsh_opt=('--single-read-threshold', {
     'type':float,
     'help':'P-value or log likelihood ratio threshold when computing ' +
     'fraction of significant reads at each genomic position. Default: ' +
-    'p-value:{0:.2g}; likelihood ratio:{1:.2g}'.format(HYPO_THRESH, LLR_THRESH)})
+    'sample comparison:{0:.2g}; de novo:{1:.2g}; likelihood ratio:{2:.2g}'.format(
+        SAMP_COMP_THRESH, DE_NOVO_THRESH, LLR_THRESH)})
 altfrac_opt=('--alt-fraction-percentile', {
     'default':1, 'type':float,
     'help':'When esitmating the alternative base incorporation rate, this ' +
@@ -416,10 +403,11 @@ fxdscl_opt=('--fixed-scale', {
     'type':float,
     'help':'Fixed scaling parameter to use for raw signal normalization.'})
 cvgdmp_opt=('--coverage-dampen-counts', {
-    'type':float, 'nargs':2, 'default':[2,0.5],
+    'type':float, 'nargs':2, 'default':[2, 0.5],
     'help':'Dampen fraction modified estimates for low coverage sites. Two ' +
-    'parameters are psuedo unmodified and modified read counts. This is ' +
-    'equivalent to a beta prior on the fraction estimate. Default: %(default)s'})
+    'parameters are unmodified and modified psuedo read counts. This is ' +
+    'equivalent to a beta prior on the fraction estimate. Set to "0 0" to ' +
+    'disable dampened fraction estimation. Default: %(default)s'})
 
 sigapars_opt=('--signal-align-parameters', {
     'type':float, 'nargs':4,
@@ -458,9 +446,6 @@ modbs_opt=('--alternate-bases', {
 paltmod_opt=('--plot-alternate-model', {
     'type':unicode, 'choices':ALT_BASES,
     'help':'Add alternative model distribution to the plot.'})
-regtype_opt=('--region-type', {
-    'type':unicode, 'default':'random', 'choices':['random', 'start', 'end'],
-    'help':'Region to plot within each read. Default: random'})
 ovplttype_opt=('--overplot-type', {
     'type':unicode, 'default':'Downsample',
     'choices':['Downsample', 'Boxplot', 'Quantile', 'Density'],
@@ -527,14 +512,14 @@ def add_comp_dist_args(parser):
 ###### Main re-squiggle parser ######
 #####################################
 
-def get_eventless_resquiggle_parser():
+def get_resquiggle_parser():
     parser = argparse.ArgumentParser(
         description='Re-segment raw nanopore signal to match with mapped ' +
         'portion of a known genomic sequence guided by a k-mer model.',
         add_help=False)
     req_args = parser.add_argument_group('Required Arguments')
     req_args.add_argument(basedir_opt[0], **basedir_opt[1])
-    req_args.add_argument(fasta_pos_opt[0], **fasta_pos_opt[1])
+    req_args.add_argument(fasta_event_opt[0], **fasta_event_opt[1])
 
     mod_args = parser.add_argument_group('Model Parameters')
     mod_args.add_argument(dna_opt[0], **dna_opt[1])
@@ -556,12 +541,14 @@ def get_eventless_resquiggle_parser():
     io_args.add_argument(skpidx_opt[0], **skpidx_opt[1])
     io_args.add_argument(failed_opt[0], **failed_opt[1])
     io_args.add_argument(incldsd_opt[0], **incldsd_opt[1])
+    io_args.add_argument(ignrlock_opt[0], **ignrlock_opt[1])
 
     filt_args = parser.add_argument_group('Read Filtering Argument')
     filt_args.add_argument(obsfilt_opt[0], **obsfilt_opt[1])
 
     multi_args = parser.add_argument_group('Multiprocessing Arguments')
     multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
+    multi_args.add_argument(thrpp_opt[0], default=1, **thrpp_opt[1])
 
     fast5_args = parser.add_argument_group('FAST5 Data Arguments')
     fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
@@ -585,7 +572,7 @@ def get_event_resquiggle_parser():
         'from basecaller.', add_help=False)
     req_args = parser.add_argument_group('Required Arguments')
     req_args.add_argument(basedir_opt[0], **basedir_opt[1])
-    req_args.add_argument(fasta_pos_opt[0], **fasta_pos_opt[1])
+    req_args.add_argument(fasta_event_opt[0], **fasta_event_opt[1])
 
     mapper_args = parser.add_argument_group(
         'Mapper Arguments (One mapper is required)')
@@ -627,47 +614,6 @@ def get_event_resquiggle_parser():
 
     return parser
 
-def get_model_resquiggle_parser():
-    parser = argparse.ArgumentParser(
-        description='Re-segment raw nanopore signal at local regions that do ' +
-        'not match a tombo model.', add_help=False)
-    req_args = parser.add_argument_group('Required Argument')
-    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
-
-    reg_args = parser.add_argument_group('Region Selection Arguments')
-    reg_args.add_argument(szo_opt[0], **szo_opt[1])
-    reg_args.add_argument(regcntxt_opt[0], **regcntxt_opt[1])
-    reg_args.add_argument(pvalthrsh_opt[0], **pvalthrsh_opt[1])
-
-    modr_args = parser.add_argument_group('Model Re-squiggle Arguments')
-    modr_args.add_argument(dna_opt[0], **dna_opt[1])
-    modr_args.add_argument(rna_opt[0], **rna_opt[1])
-    modr_args.add_argument(maxbase_opt[0], **maxbase_opt[1])
-    modr_args.add_argument(minobs_opt[0], default=3, **minobs_opt[1])
-    modr_args.add_argument(hidden_tbmod_opt[0], **hidden_tbmod_opt[1])
-
-    brsqgl_args = parser.add_argument_group('Base Scoring Arguments')
-    brsqgl_args.add_argument(bsiters_opt[0], **bsiters_opt[1])
-    brsqgl_args.add_argument(brcntxt_opt[0], **brcntxt_opt[1])
-    brsqgl_args.add_argument(bmaxbase_opt[0], **bmaxbase_opt[1])
-
-    fast5_args = parser.add_argument_group('FAST5 Data Arguments')
-    fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
-    fast5_args.add_argument(newcorrgrp_opt[0], **newcorrgrp_opt[1])
-    fast5_args.add_argument(bcsubgrps_opt[0], **bcsubgrps_opt[1])
-
-    out_args = parser.add_argument_group('Output Arguments')
-    out_args.add_argument(ovrwrt_opt[0], **ovrwrt_opt[1])
-    out_args.add_argument(failed_opt[0], **failed_opt[1])
-    out_args.add_argument(incldsd_opt[0], **incldsd_opt[1])
-
-    multi_args = parser.add_argument_group('Multiprocessing Argument')
-    multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
-
-    misc_args, parser = add_misc_args(parser)
-
-    return parser
-
 
 ###################################
 ###### Pre-processing parser ######
@@ -698,7 +644,8 @@ def get_add_fastqs_parser():
 def get_est_ref_parser():
     parser = argparse.ArgumentParser(
         description='Estimate standard tombo model for use in re-squiggle ' +
-        'and  testing without an amplified (un-modified) sample.', add_help=False)
+        'and  testing without an amplified (un-modified) sample.',
+        add_help=False)
     req_args = parser.add_argument_group('Required Arguments')
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(tbmod_w_opt[0], required=True, **tbmod_w_opt[1])
@@ -811,6 +758,22 @@ def get_test_signif_parser():
     multi_args = parser.add_argument_group('Multiprocessing Arguments')
     multi_args.add_argument(mpreg_opt[0], **mpreg_opt[1])
     multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
+
+    fast5_args, misc_args, parser = add_default_args(parser)
+
+    return parser
+
+def get_aggregate_per_read_parser():
+    parser = argparse.ArgumentParser(
+        description='Aggregate per-read statistics to produce a standard ' +
+        '(genomic base) statistics file.', add_help=False)
+    req_args = parser.add_argument_group('Required Argument')
+    req_args.add_argument(prstat_opt[0], required=True, **prstat_opt[1])
+    req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
+    req_args.add_argument(snglrdthrsh_opt[0], required=True, **snglrdthrsh_opt[1])
+
+    test_args = parser.add_argument_group('Significance Test Arguments')
+    test_args.add_argument(minreads_opt[0], default=1, **minreads_opt[1])
 
     fast5_args, misc_args, parser = add_default_args(parser)
 
@@ -946,7 +909,8 @@ def get_motif_loc_parser():
     reg_args.add_argument(deepcov_opt[0], **deepcov_opt[1])
 
     out_args = parser.add_argument_group('Output Argument')
-    out_args.add_argument(pdf_opt[0], default=OUTPUT_BASE + '.motif_centered.pdf',
+    out_args.add_argument(pdf_opt[0],
+                          default=OUTPUT_BASE + '.motif_centered.pdf',
                           **pdf_opt[1])
 
     fast5_args, misc_args, parser = add_default_args(parser)
@@ -997,6 +961,9 @@ def get_signif_diff_parser():
     reg_args.add_argument(numreg_opt[0], default=10, **numreg_opt[1])
     reg_args.add_argument(numbases_opt[0], default=21, **numbases_opt[1])
 
+    stat_args = parser.add_argument_group('Statistical Argument')
+    stat_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
+
     out_args = parser.add_argument_group('Output Arguments')
     out_args.add_argument(pdf_opt[0],
                           default=OUTPUT_BASE + '.significant_difference.pdf',
@@ -1016,6 +983,7 @@ def get_signif_motif_parser():
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(motif_opt[0], required=True, **motif_opt[1])
     req_args.add_argument(statfn_opt[0], required=True, **statfn_opt[1])
+    req_args.add_argument(fasta_opt[0], required=True,  **fasta_opt[1])
 
     alt_args, parser = add_comp_dist_args(parser)
 
@@ -1027,9 +995,8 @@ def get_signif_motif_parser():
     reg_args.add_argument(cntxt_opt[0], **cntxt_opt[1])
     reg_args.add_argument(numstat_opt[0], **numstat_opt[1])
 
-    seq_args = parser.add_argument_group(
-        'Sequence Argument (for faster sequence access)')
-    seq_args.add_argument(fasta_opt[0], **fasta_opt[1])
+    stat_args = parser.add_argument_group('Statistical Argument')
+    stat_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
 
     out_args = parser.add_argument_group('Output Argument')
     out_args.add_argument(pdf_opt[0],
@@ -1070,52 +1037,6 @@ def get_per_read_parser():
 ####################################
 ###### Other plotting parsers ######
 ####################################
-
-def get_correction_parser():
-    parser = argparse.ArgumentParser(
-        description='Plot segments before and after event-based re-resquiggle.',
-        add_help=False)
-    req_args = parser.add_argument_group('Required Argument')
-    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
-
-    type_args = parser.add_argument_group('Region Type Argument')
-    type_args.add_argument(regtype_opt[0], **regtype_opt[1])
-
-    reg_args = parser.add_argument_group('Plotting Region Arguments')
-    reg_args.add_argument(numreads_opt[0], default=10, **numreads_opt[1])
-    reg_args.add_argument(numobs_opt[0], **numobs_opt[1])
-
-    out_args = parser.add_argument_group('Output Argument')
-    out_args.add_argument(pdf_opt[0], default=OUTPUT_BASE + '.corrected.pdf',
-                          **pdf_opt[1])
-
-    fast5_args, misc_args, parser = add_default_args(parser)
-
-    return parser
-
-def get_multi_correction_parser():
-    parser = argparse.ArgumentParser(
-        description='Plot segments before and after event-based ' +
-        're-squiggle for multiple reads anchored at a genomic location.',
-        add_help=False)
-    req_args = parser.add_argument_group('Required Argument')
-    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
-
-    reg_args = parser.add_argument_group('Plotting Region Arguments')
-    reg_args.add_argument(gnmloc_opt[0], **gnmloc_opt[1])
-    reg_args.add_argument(numreg_opt[0], default=10, **numreg_opt[1])
-    reg_args.add_argument(numreads_opt[0], default=5, **numreads_opt[1])
-    reg_args.add_argument(numobs_opt[0], **numobs_opt[1])
-
-    out_args = parser.add_argument_group('Output Arguments')
-    out_args.add_argument(pdf_opt[0],
-                          default=OUTPUT_BASE + '.multi_corrected.pdf',
-                          **pdf_opt[1])
-    out_args.add_argument(origbcs_opt[0], **origbcs_opt[1])
-
-    fast5_args, misc_args, parser = add_default_args(parser)
-
-    return parser
 
 def get_kmer_dist_parser():
     parser = argparse.ArgumentParser(
@@ -1160,6 +1081,31 @@ def get_roc_parser():
 
     filt_args = parser.add_argument_group('Filtering Arguments')
     filt_args.add_argument(minreads_opt[0], default=1, **minreads_opt[1])
+
+    stat_args = parser.add_argument_group('Statistical Argument')
+    stat_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
+
+    misc_args, parser = add_misc_args(parser)
+
+    return parser
+
+def get_per_read_roc_parser():
+    parser = argparse.ArgumentParser(
+        description='Plot per-read ROC curve given known motif(s).',
+        add_help=False)
+    req_args = parser.add_argument_group('Required Argument')
+    req_args.add_argument(prstats_opt[0], required=True, **prstats_opt[1])
+    req_args.add_argument(motifdesc_opt[0], required=True, **motifdesc_opt[1])
+    req_args.add_argument(fasta_opt[0], required=True, **fasta_opt[1])
+
+    limit_args = parser.add_argument_group('Down-sampling Arguments')
+    limit_args.add_argument(spb_opt[0], **spb_opt[1])
+    limit_args.add_argument(tsl_opt[0], **tsl_opt[1])
+
+    out_args = parser.add_argument_group('Output Arguments')
+    out_args.add_argument(pdf_opt[0],
+                         default=OUTPUT_BASE + '.per_reads_roc.pdf',
+                         **pdf_opt[1])
 
     misc_args, parser = add_misc_args(parser)
 
@@ -1243,6 +1189,9 @@ def get_write_signif_diff_parser():
     out_args.add_argument(
         seqs_opt[0], default=OUTPUT_BASE + '.significant_regions.fasta',
         **seqs_opt[1])
+
+    stat_args = parser.add_argument_group('Statistical Argument')
+    stat_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
 
     fast5_args, misc_args, parser = add_default_args(parser)
 

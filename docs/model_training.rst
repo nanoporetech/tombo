@@ -112,9 +112,6 @@ Note that this method does make alternative signal normalization methods availab
 
 ----
 
-``model_resquiggle``
-The ``model_resquiggle`` command is provided simply as a research tool with minimal documentation. At a high level, the ``model_resquiggle`` command attempts to locally re-assign signal in poorly fit regions from an event_resquiggle signal assignment using information from a Tombo model. This command is considered an advanced user tool and is not well supported.
-
 ==================
 ``estimate_scale``
 ==================

@@ -16,7 +16,7 @@ Tombo enables three methods for detecting shifts in current signal level, indica
 
 All three methods are accessed by the ``test_significance`` Tombo sub-command as described below.
 
-TL;DR:
+**TL;DR**:
 
 * To identify 5-methylcytosine (5mC) and N6-methyladenosine (6mA), run ``test_significance`` with the ``--alternate-bases 5mC 6mA`` option
 * For more experimental de novo modified base detection simply run ``test_significance`` with just a set of reads
@@ -37,11 +37,11 @@ Statistical Testing
 
 For all statistical testing methods, the result is a binary Tombo statistics file. This file contains statistics associated with each validly tested genomic base. This file is not intended for use outside of the Tombo framework. Several Tombo commands (e.g. ``write_wiggles``, ``write_most_significant_fasta`` and ``plot_most_significant``) take the statistics file as an input, accommodating many user pipelines downstream of modified base detection.
 
-Of particular interest, the statistics file contains the fraction of reads at each genomic position passing a set threshold (``--single-read-threshold``). This value is set to a default of 1% p-value for hypothesis testing methods (de novo and control sample comparison) and a log likelihood ratio of 0.5 for the alternative model testing method. Note that for likelihood ratio test fractions, some reads will fall between the +/- threshold values. The number of reads falling outside of the threshold values is saved under the ``valid_cov`` column in the statistics file.
+Of particular interest, the statistics file contains the fraction of reads at each genomic position passing a set threshold (``--single-read-threshold``). This value is set to a default of 0.1 FDR-corrected p-value for the control sample comparison method, 0.5 FDR-corrected p-value and a log likelihood ratio of 0.0 for the alternative model likelihood ratio method. Note that for likelihood ratio test fractions, some reads may fall between the +/- threshold values. The number of reads falling outside of the threshold values is saved under the ``valid_cov`` column in the statistics file.
 
-For the de novo and alternative model testing approaches a default canonical model is used (included with Tombo code base). Users may also train their own canonical Tombo model (possibly for an older chemistry version) and test against this model using the hidden ``--tombo-model-filename`` option. See more in the :doc:`model_training` section.
+For the de novo and alternative model testing approaches a default canonical model is used (included with Tombo). Users may also train their own canonical Tombo model (possibly for an older chemistry version) and test against this model using the hidden ``--tombo-model-filename`` option. See more in the :doc:`model_training` section.
 
-Also available from the ``test_significance`` sub-command is a per-read binary (HDF5) statistics file (via ``--per-read-statistics-basename`` option). This file is currently made available for research on per-read modified base detection including plotting via the ``plot_per_read`` command. For advanced research, the per-read statistics data can be accessed (including random access to particular regions of the genome) using the ``tombo.tombo_stats.PerReadStats`` class from the Tombo python API.
+Another available output from the ``test_significance`` sub-command is a per-read (and per-base) binary (HDF5) statistics file (via ``--per-read-statistics-basename`` option). This file is currently made available for research on per-read modified base detection including plotting via the ``plot_per_read`` sub-command and further computing via the ``aggregate_per_read_stats`` sub-command. For advanced researchers, the per-read statistics data can be accessed (including random access to particular regions of the genome) using the ``tombo.tombo_stats.PerReadStats`` class from the Tombo python API.
 
 Alternative Model Method
 ========================
@@ -128,9 +128,9 @@ The per-base statistics are stored in a dataset, ``stats``, containing one recor
 Per-read Statistics File Format
 -------------------------------
 
-Per-read statistics can be stored by setting the ``--per-read-statistics-basename`` option to the ``test_significance`` command. This output file can then be used in downstream Tombo sub-commands (currently only via the ``plot_per_read`` command).
+Per-read statistics can be stored by setting the ``--per-read-statistics-basename`` option to the ``test_significance`` command. This output file can then be used in downstream Tombo sub-commands (e.g. the ``plot_per_read`` and ``aggregate_per_read_stats`` commands).
 
-For advanced users the Tombo per-read statsitics file can be accessed via the Tombo python API using the ``tombo.tombo_stats.PerReadStats`` class. This class provides initialization, simply taking the per-read statsitics filename. The ``PerReadStats`` class supports the ``get_region_stats`` function which takes a ``tombo.tombo_helper.intervalData`` object specifying the interval of interest. This will return a numpy array containing a record for each read (specified by the ``read_id`` field) and each tested genomic position (``pos`` field) along with the test statistic (``stat`` field) at that location.
+For advanced users the Tombo per-read statsitics file can be accessed via the Tombo python API using the ``tombo.tombo_stats.PerReadStats`` class. This class provides initialization, simply taking the per-read statsitics filename. The ``PerReadStats`` class supports the ``get_region_stats`` function which takes a ``tombo.tombo_helper.intervalData`` object specifying an interval of interest. This will return a numpy array containing a record for each read (specified by the ``read_id`` field) and each tested genomic position (``pos`` field) along with the test statistic (``stat`` field) at that location.
 
 .. important::
    
@@ -139,3 +139,9 @@ For advanced users the Tombo per-read statsitics file can be accessed via the To
 The per-read statistics file is in the HDF5 format. All blocks are stored within the ``Statistic_Blocks`` slot. The size of the blocks is stored in the ``block_size`` attribute (defined by the ``--multiprocess-region-size`` option) and the type of statistical test applied is stored in the ``stat_type`` attribute.
 
 Each genomic block is stored in a different ``Block_[##]`` slot. These slots do not have any particular order. Within each block the ``chrm``, ``strand`` and ``start`` of the block are stored. The block statistics are stored in the ``block_stats`` slot. Per-read statistics contain a record for each tested location within each read. Each record contains the genomic position (``pos``), the test statistic (``stat``; hypothesis test p-value or log likelihood ratio as indicated by the statistic type), and the ``read_id``. A single read spanning multiple blocks will contain statistics in more than one block. An individual read's statistics can be reconstructed using the ``read_id`` field.
+
+-----------------------------
+Aggregate Per-read Statistics
+-----------------------------
+
+In order to facilitate research on the per-genomic base aggregation, Tombo provides the ``aggregate_per_read_stats`` sub-command. The primary utility for this sub-command is to test alternative per-read threshold values. It is not possible to change other testing parameters from this sub-command (e.g. ``--fishers-method-context`` or ``--tombo-model-filename``).

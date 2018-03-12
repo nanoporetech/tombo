@@ -1,6 +1,6 @@
 from __future__ import division, unicode_literals, absolute_import
 
-from builtins import int, range, dict, map, zip
+from builtins import int, range, dict, map, zip, object
 
 import os
 import io
@@ -21,9 +21,11 @@ import multiprocessing as mp
 
 from time import sleep
 from scipy import stats
+from operator import itemgetter
 from collections import defaultdict
-from itertools import repeat, product
 from scipy.spatial.distance import pdist
+from itertools import repeat, product, count
+from numpy.lib.recfunctions import append_fields
 from scipy.cluster.hierarchy import single, leaves_list
 
 if sys.version_info[0] > 2:
@@ -35,7 +37,8 @@ from . import tombo_helper as th
 from .c_helper import c_mean_std, c_calc_llh_ratio
 from ._default_parameters import SMALLEST_PVAL, MIN_POSITION_SD, \
     STANDARD_MODELS, ALTERNATE_MODELS, MIN_KMER_OBS_TO_EST, ALT_EST_BATCH, \
-    MAX_KMER_OBS, NUM_DENS_POINTS, LLR_THRESH, HYPO_THRESH, KERNEL_DENSITY_RANGE
+    MAX_KMER_OBS, NUM_DENS_POINTS, LLR_THRESH, SAMP_COMP_THRESH, \
+    DE_NOVO_THRESH, KERNEL_DENSITY_RANGE, ROC_PLOT_POINTS
 
 VERBOSE = False
 
@@ -46,6 +49,8 @@ _PROFILE_ALT_EST = False
 _DEBUG_EST_STD = False
 _DEBUG_EST_BW = 0.05
 _DEBUG_EST_NUM_KMER_SAVE = 500
+
+PER_READ_BLOCKS_QUEUE_LIMIT = 5
 
 DNA_BASES = ['A','C','G','T']
 
@@ -66,6 +71,8 @@ def order_reads(log_r_pvals):
     """
     Compute order of reads based on log p-values
     """
+    if log_r_pvals.shape[0] == 1:
+        return [0]
     # get pairwise distances between reads
     # will get some empty slice means warnings, so suppress those
     #   (no seterr for this specific warning)
@@ -119,43 +126,6 @@ def get_pairwise_dists(reg_sig_diffs, index_q, dists_q, slide_span=None):
         dists_q.put((index, row_dists))
 
     return
-
-
-########################################
-##### Significant Region Selection #####
-########################################
-
-def get_most_signif_regions(all_stats, num_bases, num_regions, unique_pos=True):
-    """
-    Select the most significant genome locations based on some criteria
-    """
-    all_stats.sort(order=str('frac'))
-    plot_intervals = []
-    used_intervals = defaultdict(set)
-    for i, stat in enumerate(all_stats):
-        int_start = max(0, stat['pos'] - int(num_bases / 2.0))
-        chrm = stat['chrm'].decode()
-        strand = stat['strand'].decode()
-        if not unique_pos or stat['pos'] not in used_intervals[(chrm, strand)]:
-            used_intervals[(chrm, strand)].update(
-                range(int_start, int_start + num_bases))
-            plot_intervals.append(th.intervalData(
-                '{:03d}'.format(i), chrm, int_start,
-                int_start + num_bases, strand,
-                'Frac. Alternate: {0:.2g}  Coverage: {1}'.format(
-                    1 - stat[str('frac')], stat[str('cov')])))
-            if len(plot_intervals) >= num_regions: break
-
-    if len(plot_intervals) == 0:
-        th._error_message_and_exit(
-            'No locations identified. Most likely an empty statistics file.')
-    if len(plot_intervals) < num_regions:
-        th._warning_message(
-            'Fewer unique significant locations more than [--num-bases]/2 ' +
-            'apart were identified. Continuing with ' +
-            str(len(plot_intervals)) + ' unique locations.')
-
-    return plot_intervals
 
 
 #############################
@@ -485,9 +455,8 @@ def estimate_kmer_model(
         f5_dirs, corrected_group, basecall_subgroups)
     chrm_sizes = th.get_chrm_sizes(raw_read_coverage)
 
-    manager = mp.Manager()
-    region_q = manager.Queue()
-    kmer_level_q = manager.Queue()
+    region_q = mp.Queue()
+    kmer_level_q = mp.Queue()
     num_regions = 0
     for chrm, chrm_len in chrm_sizes.items():
         plus_covered = (chrm, '+') in raw_read_coverage
@@ -597,7 +566,7 @@ def _parse_base_levels_worker(
         except queue.Empty:
             break
 
-        with h5py.File(r_fn) as fast5_data:
+        with h5py.File(r_fn, 'r') as fast5_data:
             r_means, r_seq = th.get_multiple_slots_read_centric(
                 fast5_data, ['norm_mean', 'base'], corr_slot)
         if r_means is None: continue
@@ -652,9 +621,8 @@ def parse_base_levels(
     """
     Parse base levels and store grouped by k-mer
     """
-    manager = mp.Manager()
-    reads_q = manager.Queue()
-    kmer_level_q = manager.Queue()
+    reads_q = mp.Queue()
+    kmer_level_q = mp.Queue()
 
     all_kmer_levels = dict(
         (''.join(kmer), [])
@@ -1059,6 +1027,42 @@ def calc_mann_whitney_z_score(samp1, samp2):
 
     return z
 
+def compute_accuracy_rates(stat_has_mod, num_plot_points=ROC_PLOT_POINTS):
+    """
+    Given a list or numpy array of true/false values, function returns
+    num_plot_point evenly spaced values along the true positive, false
+    positive and presicion arrays
+    """
+    tp_cumsum = np.cumsum(stat_has_mod)
+    tp_rate = tp_cumsum / tp_cumsum[-1]
+    fp_cumsum = np.cumsum(np.logical_not(stat_has_mod))
+    fp_rate = fp_cumsum / fp_cumsum[-1]
+
+    precision = tp_cumsum / np.arange(1, len(stat_has_mod) + 1, dtype=float)
+
+    # trim to number of requested points
+    tp_rate = tp_rate[np.linspace(0, tp_rate.shape[0] - 1,
+                                  num_plot_points).astype(np.int64)]
+    fp_rate = fp_rate[np.linspace(0, fp_rate.shape[0] - 1,
+                                  num_plot_points).astype(np.int64)]
+    precision = precision[np.linspace(0, precision.shape[0] - 1,
+                                      num_plot_points + 1).astype(np.int64)][1:]
+
+    return tp_rate, fp_rate, precision
+
+def get_motif_stats(motif, stats, genome_index):
+    stat_has_mod = []
+    for stat_seq in stats.iter_stat_seqs(
+            genome_index, motif.mod_pos - 1,
+            motif.motif_len - motif.mod_pos):
+        if motif.motif_pat.match(stat_seq) is not None:
+            stat_has_mod.append(True)
+        # don't include sites that aren't at the base of interest
+        elif stat_seq[motif.mod_pos - 1] == motif.mod_base:
+            stat_has_mod.append(False)
+
+    return compute_accuracy_rates(stat_has_mod)
+
 
 #########################################
 ##### Local Model-based Re-squiggle #####
@@ -1134,51 +1138,275 @@ def get_read_signif_shift_regions(
 ##### Statistics I/O #####
 ##########################
 
-def parse_stats(stats_fn):
-    """
-    Parse a tombo statistics file
-    """
-    if stats_fn is None or not os.path.isfile(stats_fn):
-            th._error_message_and_exit(
-                'Statistics file not provided or provided file does not exist.')
-
-    try:
-        with h5py.File(stats_fn, 'r') as stats_fp:
-            all_stats = stats_fp['stats'].value
-            try:
-                stat_type = stats_fp.attrs['stat_type']
-            except:
-                # if this is the old stats file assume sample compare
-                stat_type = SAMP_COMP_TXT
-    except:
-        th._error_message_and_exit(
-            'Attempt to load statistics file failed. May be an old ' +
-            'version of statistics file. Try deleting statistics ' +
-            'file and recalculating using current tombo version.')
-
-    return all_stats, stat_type
-
-def write_stats(all_stats, stats_bsnm, stat_type):
+def write_stats(
+        all_reg_stats, stats_bsnm, stat_type, min_test_vals, alt_name=None):
     """
     Write a tombo statistics file
     """
     if VERBOSE: sys.stderr.write(
             'Saving signal shift significance testing results.\n')
-    if stat_type == ALT_MODEL_TXT:
-        # for alternative model testing, write one stats file per
-        # alternative model
-        for alt_name, alt_stats in all_stats:
-            with h5py.File(stats_bsnm + '.' + alt_name +
-                           '.tombo.stats', 'w') as stats_fp:
-                stats_fp.create_dataset(
-                    'stats', data=alt_stats, compression="gzip")
-                stats_fp.attrs['stat_type'] = stat_type
-    else:
-        with h5py.File(stats_bsnm + '.tombo.stats', 'w') as stats_fp:
-            stats_fp.create_dataset('stats', data=all_stats, compression="gzip")
-            stats_fp.attrs['stat_type'] = stat_type
+    def convert_reg_stats(reg_stats):
+        # get all unique fasta record names to store in HDF5 attributes and
+        # encode as integers in the stats numpy table
+        chrms_lookup = dict(zip(
+            sorted(set(map(itemgetter(2), reg_stats))), count()))
+
+        np_stats = []
+        for (reg_frac_standard_base, reg_poss, chrm, strand,
+             reg_cov, ctrl_cov, valid_cov) in reg_stats:
+            np_stats.append(np.array(
+                [pos_stats for pos_stats in zip(
+                    reg_frac_standard_base, reg_poss,
+                    repeat(chrms_lookup[chrm]), repeat(strand),
+                    reg_cov, ctrl_cov, valid_cov)
+                 if not np.isnan(pos_stats[0])],
+                dtype=[
+                    (str('frac'), 'f8'), (str('pos'), 'u4'), (str('chrm'), 'u4'),
+                    (str('strand'), 'S1'), (str('cov'), 'u4'),
+                    (str('control_cov'), 'u4'), (str('valid_cov'), 'u4')]))
+
+        np_stats = np.concatenate(np_stats)
+
+        np_stats = np_stats[np.greater_equal(
+            np_stats['valid_cov'], min_test_vals)]
+
+        return np_stats, chrms_lookup
+
+    def write_stats_data(stats_fp, stats, stat_type, chrms_lookup):
+        stats_fp.create_dataset('stats', data=stats, compression="gzip")
+        stats_fp.attrs['stat_type'] = stat_type
+
+        chrms_subgrp = stats_fp.create_group('chromosome_values')
+        for chrm, chrm_val in chrms_lookup.items():
+            chrms_subgrp.attrs[chrm] = chrm_val
+
+        return
+
+    stats_fn = stats_bsnm + '.tombo.stats' if alt_name is None else \
+               stats_bsnm + '.' + alt_name + '.tombo.stats'
+    all_reg_stats, chrms_lookup = convert_reg_stats(all_reg_stats)
+    with h5py.File(stats_fn, 'w') as stats_fp:
+        write_stats_data(stats_fp, all_reg_stats, stat_type, chrms_lookup)
 
     return
+
+class TomboStats(object):
+    """
+    Parse and retrieve relevant information from a standard (not per-read) Tombo
+    statistics file.
+    """
+    def _parse_stats(self):
+        if self.stats_fn is None or not os.path.isfile(self.stats_fn):
+            th._error_message_and_exit(
+                'Statistics file not provided or provided file does not exist.')
+
+        try:
+            with h5py.File(self.stats_fn, 'r') as stats_fp:
+                self.stats = stats_fp['stats'].value
+                self.stat_type = stats_fp.attrs['stat_type']
+                try:
+                    self.chrms_lookup = dict(
+                        (chrm_val, chrm_name) for chrm_name, chrm_val in
+                        stats_fp['chromosome_values'].attrs.items())
+                    self.has_chrm_lookup = True
+                except:
+                    self.has_chrm_lookup = False
+                    th._warning_message(
+                        'Old version of Tombo used to create statistics ' +
+                        'file. Upgrading to the current version suggested ' +
+                        'for best results.')
+        except:
+            th._error_message_and_exit(
+                'Attempt to load statistics file failed. May be an old ' +
+                'version of statistics file. Try deleting statistics ' +
+                'file and re-calculating using current tombo version.')
+
+        return
+
+    def __init__(self, stats_fn):
+        """
+        Parse a standard Tombo statistics file.
+        """
+        self.stats_fn = stats_fn
+        self.has_damp_frac = False
+        self.cov_damp_counts = None
+        self.has_stat_dict = False
+        self.stat_dict = None
+        self._parse_stats()
+
+        return
+
+    def filter_coverage(self, min_reads):
+        """
+        Filter statistics at locations with less than `min_reads` coverage.
+        """
+        self.stats = self.stats[np.logical_and(
+            self.stats['valid_cov'] >= min_reads,
+            np.logical_or(self.stat_type != SAMP_COMP_TXT,
+                          self.stats['control_cov'] >= min_reads))]
+
+        return
+
+    def is_empty(self):
+        """
+        Is the statistics table empty?
+        """
+        return self.stats.shape[0] == 0
+
+    def calc_damp_fraction(self, cov_damp_counts):
+        """
+        Compute dampened fraction of unmodified reads using provided
+        un-modified and modified pseudo-counts from cov_damp_counts
+        """
+        self.has_damp_frac = True
+        self.cov_damp_counts = cov_damp_counts
+        damp_frac = np.empty(self.stats.shape[0])
+        damp_frac[:] = np.nan
+        non_mod_counts = np.round(self.stats['frac'] * self.stats['valid_cov'])
+        # compute dampened fraction of modified reads by adding psuedo-counts
+        # to the modified and un-modified counts (equivalent to a beta prior
+        # on the fraction estimation as a binomial variable)
+        damp_frac = (non_mod_counts + cov_damp_counts[0]) / (
+            self.stats['valid_cov'] + sum(cov_damp_counts))
+        self.stats = append_fields(self.stats, 'damp_frac', damp_frac)
+
+        return
+
+    def order_by_frac(self, cov_damp_counts=None):
+        """
+        Order statistics table via fraction of unmodified reads
+
+        If cov_damp_counts is provided or has been previously provided
+        fractions will be dampened accordingly
+        """
+        if cov_damp_counts is None and not self.has_damp_frac:
+            self.stats.sort(order=str('frac'))
+        else:
+            self.calc_damp_fraction(cov_damp_counts)
+            self.stats.sort(order=str('damp_frac'))
+
+        return
+
+    def order_by_pos(self):
+        """
+        Order statistics table by chrmomosome, then strand and then position
+        """
+        self.stats.sort(order=['chrm', 'strand', 'pos'])
+        return
+
+    def _get_chrm_name(self, pos_stat):
+        if self.has_chrm_lookup:
+            return self.chrms_lookup[pos_stat['chrm']]
+        return pos_stat['chrm'].decode()
+
+    def iter_stat_seqs(self, genome_index, before_bases, after_bases,
+                       include_pos=False):
+        """
+        Iterate through statistics table in current order returning the genomic
+        sequence surrounding each position.
+
+        `include_position` option will yeild (pos_seq, chrm, strand, start, end)
+        for each record.
+        """
+        for pos_stat in self.stats:
+            chrm, strand, pos = (self._get_chrm_name(pos_stat),
+                                 pos_stat['strand'].decode(),
+                                 pos_stat['pos'])
+            if strand == '+':
+                start, end = pos - before_bases, pos + after_bases + 1
+                if start < 0: continue
+                stat_seq = genome_index.get_seq(chrm, start, end)
+            else:
+                start, end = pos - after_bases, pos + before_bases + 1
+                if start < 0: continue
+                stat_seq = th.rev_comp(genome_index.get_seq(chrm, start, end))
+            if include_pos:
+                yield stat_seq, chrm, strand, start, end
+            else:
+                yield stat_seq
+
+        return
+
+    def iter_fracs(self):
+        """
+        Iterate through statistics table yeilding
+        (chrm, strand, pos, frac, damp_frac).
+        """
+        for pos_stat in self.stats:
+            yield (
+                self._get_chrm_name(pos_stat), pos_stat['strand'].decode(),
+                pos_stat['pos'], pos_stat['frac'],
+                pos_stat['damp_frac'] if self.has_damp_frac else None)
+
+        return
+
+    def get_most_signif_regions(self, num_bases, num_regions, unique_pos=True,
+                                cov_damp_counts=None):
+        """
+        Select regions centered on locations with the largest fraction
+        of modified bases
+        """
+        self.order_by_frac(cov_damp_counts)
+        selected_regs = []
+        used_intervals = defaultdict(set)
+        for i, pos_stat in enumerate(self.stats):
+            int_start = max(0, pos_stat['pos'] - int(num_bases / 2.0))
+            chrm = self._get_chrm_name(pos_stat)
+            strand = pos_stat['strand'].decode()
+            if (not unique_pos or
+                pos_stat['pos'] not in used_intervals[(chrm, strand)]):
+                used_intervals[(chrm, strand)].update(
+                    range(int_start, int_start + num_bases))
+                int_text = 'Est. Frac. Alternate: {0:.2g}  Coverage: {1}'.format(
+                    1 - pos_stat[str('damp_frac')], pos_stat[str('valid_cov')]) \
+                    if self.has_damp_frac else \
+                       'Frac. Alternate: {0:.2g}  Coverage: {1}'.format(
+                           1 - pos_stat[str('frac')], pos_stat[str('valid_cov')])
+                selected_regs.append(th.intervalData(
+                    '{:03d}'.format(i), chrm, int_start,
+                    int_start + num_bases, strand, int_text))
+                if len(selected_regs) >= num_regions: break
+
+        if len(selected_regs) == 0:
+            th._error_message_and_exit(
+                'No locations identified. Most likely an empty statistics file.')
+        if len(selected_regs) < num_regions:
+            th._warning_message(
+                'Fewer unique significant locations more than [--num-bases]/2 ' +
+                'apart were identified. Continuing with ' +
+                str(len(selected_regs)) + ' unique locations.')
+
+        return selected_regs
+
+    def create_stat_dict(self):
+        """
+        Create random access to fraction modified values by position
+
+        Fraction will be dampened if cov_damp_counts was previously provided
+        Access dictionary will be stored in the stat_dict slot
+        """
+        self.has_stat_dict = True
+        self.stat_dict = dict(
+            ((self._get_chrm_name(pos_stat), pos_stat[str('strand')].decode(),
+              pos_stat[str('pos')]), 1 - (
+                  pos_stat[str('frac')] if self.has_damp_frac else
+                  pos_stat[str('damp_frac')])) for pos_stat in self.stats)
+
+        return
+
+    def get_pos_frac(self, chrm, strand, pos, missing_value=None):
+        """
+        Obtain statistic value from the requested genomic position
+        """
+        if not self.has_stat_dict:
+            self.create_stat_dict()
+        try:
+            pos_frac = self.stat_dict[(chrm, strand, pos)]
+        except KeyError:
+            pos_frac = missing_value
+
+        return pos_frac
+
 
 class PerReadStats(object):
     def __init__(self, per_read_stats_fn, stat_type=None, region_size=None):
@@ -1192,10 +1420,10 @@ class PerReadStats(object):
         if stat_type is None or region_size is None:
             # open file for reading
             try:
-                self.fp = h5py.File(per_read_stats_fn, 'r')
-                self.stat_type = self.fp.attrs['stat_type']
-                self.region_size = self.fp.attrs['block_size']
-                self.per_read_blocks = self.fp['Statistic_Blocks']
+                self._fp = h5py.File(per_read_stats_fn, 'r')
+                self.stat_type = self._fp.attrs['stat_type']
+                self.region_size = self._fp.attrs['block_size']
+                self.per_read_blocks = self._fp['Statistic_Blocks']
                 blocks_index = defaultdict(list)
                 for block_name, block_data in self.per_read_blocks.items():
                     blocks_index[
@@ -1205,6 +1433,10 @@ class PerReadStats(object):
                              block_data.attrs['start'] + self.region_size,
                              block_name))
                 self.blocks_index = dict(blocks_index)
+                self.iter_all_cs = iter(list(self.blocks_index))
+                self.iter_curr_cs = next(self.iter_all_cs)
+                self.iter_curr_cs_blocks = iter(
+                    self.blocks_index[self.iter_curr_cs])
             except:
                 th._error_message_and_exit(
                     'Non-existent or invalid per-read statistics file provided.')
@@ -1220,18 +1452,19 @@ class PerReadStats(object):
             except:
                 pass
             # open file for writing
-            self.fp = h5py.File(per_read_stats_fn, 'w')
+            self._fp = h5py.File(per_read_stats_fn, 'w')
 
             # save attributes to file and open stats blocks group
-            self.fp.attrs['stat_type'] = stat_type
-            self.fp.attrs['block_size'] = region_size
-            self.per_read_blocks = self.fp.create_group('Statistic_Blocks')
+            self._fp.attrs['stat_type'] = stat_type
+            self._fp.attrs['block_size'] = region_size
+            self.per_read_blocks = self._fp.create_group('Statistic_Blocks')
 
         self.are_pvals = self.stat_type != ALT_MODEL_TXT
 
         return
 
-    def write_per_read_block(self, per_read_block, chrm, strand, start):
+    def write_per_read_block(
+            self, per_read_block, read_id_lookup, chrm, strand, start):
         """
         Write region statistics block to file.
         """
@@ -1249,10 +1482,17 @@ class PerReadStats(object):
         block_data.attrs['start'] = start
         block_data.create_dataset(
             'block_stats', data=per_read_block, compression="gzip")
+        # add lookup dict for read_id slot stored in table to save space and
+        # avoid memory leak due to vlen slots in h5py datasets
+        read_id_grp = block_data.create_group('read_ids')
+        for read_id, read_id_val in read_id_lookup.items():
+            read_id_grp.attrs[read_id] = read_id_val
+
+        self._fp.flush()
 
         return
 
-    def get_region_stats(self, interval_data, num_reads=None):
+    def get_region_per_read_stats(self, interval_data, num_reads=None):
         """
         Get per-read statistics from the specifed interval for a random selection
         of num_reads.
@@ -1263,11 +1503,26 @@ class PerReadStats(object):
         except KeyError:
             return
 
-        int_block_stats = [
-            self.per_read_blocks[block_data[2]]['block_stats'].value
-            for block_data in cs_blocks
-            if not(interval_data.end < block_data[0] or
-                   interval_data.start > block_data[1])]
+        int_block_stats = []
+        for block_data in cs_blocks:
+            if (interval_data.end < block_data[0] or
+                interval_data.start > block_data[1]): continue
+            block_stats = self.per_read_blocks[
+                block_data[2]]['block_stats'].value
+            reg_poss = block_stats['pos']
+            reg_read_stats = block_stats['stat']
+            # convert read_ids back into strings
+            block_read_id_lookup = dict([
+                (read_id_val, read_id) for read_id, read_id_val in
+                self.per_read_blocks[block_data[2]][
+                    'block_stats/read_ids'].attrs.items()])
+            reg_read_ids = [
+                block_read_id_lookup[r_id] for r_id in block_stats['read_id']]
+            int_block_stats.appen(np.array(
+                list(zip(reg_poss, reg_read_stats, conv_reg_ids)),
+                dtype=[(str('pos'), 'u4'), (str('stat'), 'f8'),
+                       (str('read_id'), object)]))
+
         if len(int_block_stats) == 0:
             return
 
@@ -1289,14 +1544,85 @@ class PerReadStats(object):
 
         return all_int_stats
 
+    def __iter__(self):
+        """
+        Iterator over all statistics blocks, yeilding chrm, strand,
+        start, end, block_stats
+        """
+        self.iter_all_cs = iter(list(self.blocks_index))
+        self.iter_curr_cs = next(self.iter_all_cs)
+        self.iter_curr_cs_blocks = iter(
+            self.blocks_index[self.iter_curr_cs])
+        return self
+
+    def __next__(self):
+        try:
+            next_start, next_end, next_block_name = next(
+                self.iter_curr_cs_blocks)
+        except StopIteration:
+            # move to next chromosome and strand
+            # this will raise a second StopIteration
+            # when the end of the blocks is hit
+            self.iter_curr_cs = next(self.iter_all_cs)
+            self.iter_curr_cs_blocks = iter(
+                self.blocks_index[self.iter_curr_cs])
+            next_start, next_end, next_block_name = next(
+                self.iter_curr_cs_blocks)
+
+        chrm, strand = self.iter_curr_cs
+        next_block_stats = self.per_read_blocks[
+            next_block_name]['block_stats'].value
+        return chrm, strand, next_start, next_end, next_block_stats
+
     def close(self):
-        self.fp.close()
+        self._fp.close()
         return
 
 
 ################################
 ##### Base-by-base Testing #####
 ################################
+
+def apply_per_read_thresh(pr_stats_fn, single_read_thresh, min_test_vals):
+    if VERBOSE: sys.stderr.write(
+            'Loading and aggregating per-read statistics.\n')
+    all_reg_stats = []
+    pr_stats = PerReadStats(pr_stats_fn)
+    for chrm, strand, start, end, block_stats in pr_stats:
+        block_stats.sort(order=str('pos'))
+        reg_base_stats = np.split(
+            block_stats['stat'], np.where(np.concatenate(
+                [[0,], np.diff(block_stats['pos'])]) > 0)[0])
+        reg_poss = np.unique(block_stats['pos'])
+
+        reg_cov = [base_stats.shape[0] for base_stats in reg_base_stats]
+        if pr_stats.stat_type == ALT_MODEL_TXT:
+            # filter base statistics that fall between the upper and lower
+            # stat threshold for the log likelihood statistic
+            reg_base_stats = [
+                base_stats[np.abs(base_stats) >= single_read_thresh]
+                for base_stats in reg_base_stats]
+            valid_cov = [base_stats.shape[0] for base_stats in reg_base_stats]
+        else:
+            valid_cov = reg_cov
+
+        ctrl_cov = repeat(0)
+
+        reg_frac_standard_base = np.array([
+            np.greater_equal(
+                base_stats, single_read_thresh).sum() / base_stats.shape[0]
+            if base_stats.shape[0] > 0 else np.NAN
+            for base_stats in reg_base_stats])
+
+        reg_stats = (reg_frac_standard_base, reg_poss, chrm, strand,
+                     reg_cov, ctrl_cov, valid_cov)
+        all_reg_stats.append(reg_stats)
+
+    if len(all_reg_stats) == 0:
+        th._error_message_and_exit(
+            'No genomic positions contain --minimum-test-reads.')
+
+    return all_reg_stats, pr_stats.stat_type
 
 def get_reads_ref(ctrl_reg_reads, reg_start, region_size,
                   min_test_vals, fm_offset):
@@ -1626,8 +1952,9 @@ def compute_read_stats(
 
     if per_read_q is not None:
         # compile read_ids vector for per-read output
-        reg_ids = np.concatenate([list(repeat(r_id, r_poss.shape[0]))
-                                  for r_id, r_poss, in zip(reg_ids, reg_poss)])
+        reg_ids = [(r_id, r_poss.shape[0])
+                   for r_id, r_poss, in zip(reg_ids, reg_poss)]
+
     reg_read_stats = np.concatenate(reg_read_stats)
     reg_poss = np.concatenate(reg_poss)
     # remove nans possibly introduced by fisher's method calculcations
@@ -1638,13 +1965,22 @@ def compute_read_stats(
         reg_poss.shape[0], reg_read_stats.shape[0])))
 
     if per_read_q is not None:
-        reg_ids = reg_ids[valid_poss]
-        assert reg_ids.shape[0] == reg_poss.shape[0]
+        valid_reg_ids = [
+            rep_r_id for rep_r_id, is_valid in zip(
+                [rep_r_id for r_id, r_len in reg_ids
+                 for rep_r_id in repeat(r_id, r_len)], valid_poss) if is_valid]
+        read_id_lookup = dict((
+            (read_id, read_id_val)
+            for read_id_val, read_id in enumerate(set(valid_reg_ids))))
+        conv_reg_ids = np.array([
+            read_id_lookup[r_id] for r_id in valid_reg_ids])
+        assert conv_reg_ids.shape[0] == reg_poss.shape[0]
         per_read_block = np.array(
-            list(zip(reg_poss, reg_read_stats, reg_ids)),
+            list(zip(reg_poss, reg_read_stats, conv_reg_ids)),
             dtype=[(str('pos'), 'u4'), (str('stat'), 'f8'),
-                   (str('read_id'), h5py.special_dtype(vlen=str))])
-        per_read_q.put((per_read_block, chrm, strand, reg_start))
+                   (str('read_id'), 'u4')])
+        per_read_q.put((
+            per_read_block, read_id_lookup, chrm, strand, reg_start))
 
     # get order of all bases from position array
     as_reg_poss = np.argsort(reg_poss)
@@ -1674,7 +2010,7 @@ def compute_read_stats(
         ctrl_cov = [ctrl_cov[pos] if pos in ctrl_cov else 0
                     for pos in reg_poss]
     else:
-        ctrl_cov = repeat(0)
+        ctrl_cov = repeat(0, reg_poss.shape[0])
 
     return reg_base_stats, us_reg_poss, reg_cov, ctrl_cov, valid_cov
 
@@ -1694,25 +2030,17 @@ def get_region_stats(
     except NotImplementedError:
         return None
 
+    if reg_poss.shape[0] == 0:
+        return None
+
     reg_frac_standard_base = np.array([
         np.greater_equal(
             base_stats, single_read_thresh).sum() / base_stats.shape[0]
         if base_stats.shape[0] > 0 else np.NAN
         for base_stats in reg_base_stats])
 
-    reg_stats = np.array(
-        [pos_stats for pos_stats in zip(
-            reg_frac_standard_base,
-            reg_poss, repeat(chrm), repeat(strand),
-            reg_cov, ctrl_cov, valid_cov)
-         if pos_stats[-1] >= min_test_vals and
-         not np.isnan(pos_stats[0])],
-        dtype=[(str('frac'), 'f8'), (str('pos'), 'u4'), (str('chrm'), 'S32'),
-               (str('strand'), 'S1'), (str('cov'), 'u4'),
-               (str('control_cov'), 'u4'), (str('valid_cov'), 'u4')])
-
-    if reg_stats.shape[0] == 0:
-        return None
+    reg_stats = (reg_frac_standard_base, reg_poss, chrm, strand,
+                 reg_cov, ctrl_cov, valid_cov)
 
     return reg_stats
 
@@ -1768,10 +2096,10 @@ def test_significance(
     """
     Test for significant shifted signal in mutliprocessed batches
     """
-    manager = mp.Manager()
-    region_q = manager.Queue()
-    stats_q = manager.Queue()
-    per_read_q = manager.Queue() if per_read_bn else None
+    region_q = mp.Queue()
+    stats_q = mp.Queue()
+    per_read_q = mp.Queue(PER_READ_BLOCKS_QUEUE_LIMIT) \
+                 if per_read_bn else None
     # split chromosomes into separate regions to process independently
     chrm_sizes = th.get_chrm_sizes(raw_read_coverage, ctrl_read_coverage)
     num_regions = 0
@@ -1812,27 +2140,39 @@ def test_significance(
             per_read_fn = per_read_bn + '.tombo.per_read_stats'
         per_read_stats = PerReadStats(per_read_fn, stat_type, region_size)
 
+    # if both queues are acitve and the per-read writes are slow, then the
+    # stats_q will not be accessed until all per-read blocks are processed
+    # alternate between queues to make sure both queues are being emptied.
     all_reg_stats = []
+    check_per_read_q = True
     while any(p.is_alive() for p in test_ps):
-        try:
-            if per_read_bn is None: raise queue.Empty
-            reg_read_stats = per_read_q.get(block=False)
-            per_read_stats.write_per_read_block(*reg_read_stats)
-        except queue.Empty:
+        if check_per_read_q:
+            check_per_read_q = False
+            try:
+                if per_read_bn is None: raise queue.Empty
+                per_read_block = per_read_q.get(block=False)
+                per_read_stats.write_per_read_block(*per_read_block)
+                del per_read_block
+            except queue.Empty:
+                sleep(0.5)
+                continue
+        else:
+            check_per_read_q = True
             try:
                 reg_stats = stats_q.get(block=False)
                 all_reg_stats.append(reg_stats)
             except queue.Empty:
-                sleep(1)
+                sleep(0.5)
                 continue
 
     # Clear leftover values from queues
+    while per_read_bn is not None and not per_read_q.empty():
+        per_read_block = per_read_q.get(block=False)
+        per_read_stats.write_per_read_block(*per_read_block)
+        del per_read_block
     while not stats_q.empty():
         reg_stats = stats_q.get(block=False)
         all_reg_stats.append(reg_stats)
-    while per_read_bn is not None and not per_read_q.empty():
-        reg_read_stats = per_read_q.get(block=False)
-        per_read_stats.write_per_read_block(*reg_read_stats)
 
     if VERBOSE: sys.stderr.write('\nTabulating all stats.\n')
     if per_read_bn is not None:
@@ -1841,10 +2181,8 @@ def test_significance(
     if len(all_reg_stats) == 0:
         th._error_message_and_exit(
             'No genomic positions contain --minimum-test-reads.')
-    # put all stats back together
-    all_stats = np.concatenate(all_reg_stats)
 
-    return all_stats
+    return all_reg_stats
 
 
 ##########################
@@ -1863,18 +2201,20 @@ def test_shifts_main(args):
         stat_type = SAMP_COMP_TXT
         single_read_thresh = (
             args.single_read_threshold if args.single_read_threshold is not None
-            else HYPO_THRESH)
+            else SAMP_COMP_THRESH)
         if VERBOSE: sys.stderr.write(
                 'Performing two-sample comparison significance testing.\n')
         ctrl_read_coverage = th.parse_fast5s(
             args.control_fast5_basedirs, args.corrected_group,
             args.basecall_subgroups)
-        all_stats = test_significance(
+        all_reg_stats = test_significance(
             raw_read_coverage, args.minimum_test_reads,
             args.fishers_method_context, single_read_thresh,
             args.multiprocess_region_size, args.processes,
             args.per_read_statistics_basename, stat_type,
             ctrl_read_coverage=ctrl_read_coverage)
+        write_stats(all_reg_stats, args.statistics_file_basename, stat_type,
+                    args.minimum_test_reads)
     else:
         tb_model_fn = args.tombo_model_filename
         bio_samp_type = args.bio_sample_type
@@ -1892,16 +2232,18 @@ def test_shifts_main(args):
             stat_type = DE_NOVO_TXT
             single_read_thresh = (
                 args.single_read_threshold if args.single_read_threshold
-                is not None else HYPO_THRESH)
+                is not None else DE_NOVO_THRESH)
             if VERBOSE: sys.stderr.write(
                     'Performing de novo model testing against a ' +
                     'standard model\n')
-            all_stats = test_significance(
+            all_reg_stats = test_significance(
                 raw_read_coverage, args.minimum_test_reads,
                 args.fishers_method_context, single_read_thresh,
                 args.multiprocess_region_size, args.processes,
                 args.per_read_statistics_basename, stat_type,
                 std_ref=std_ref)
+            write_stats(all_reg_stats, args.statistics_file_basename, stat_type,
+                        args.minimum_test_reads)
         # else perform comparison model testing
         else:
             stat_type = ALT_MODEL_TXT
@@ -1921,20 +2263,34 @@ def test_shifts_main(args):
                 th._error_message_and_exit(
                     'No alternative models successfully loaded.')
 
-            all_stats = []
             for alt_name, alt_ref in alt_refs.items():
                 if VERBOSE: sys.stderr.write(
                         'Performing alternative model testing against ' +
                         alt_name + ' model\n')
-                all_stats.append((alt_name, test_significance(
+                all_reg_stats = test_significance(
                     raw_read_coverage, args.minimum_test_reads, 0,
                     single_read_thresh, args.multiprocess_region_size,
                     args.processes, args.per_read_statistics_basename, stat_type,
-                    std_ref=std_ref, alt_ref=alt_ref, alt_name=alt_name)))
+                    std_ref=std_ref, alt_ref=alt_ref, alt_name=alt_name)
+                write_stats(all_reg_stats, args.statistics_file_basename,
+                            stat_type, args.minimum_test_reads, alt_name)
+                del all_reg_stats
     # TODO add comparison to processed genome reference determined by
     # deep learning performed on the genomic sequence
 
-    write_stats(all_stats, args.statistics_file_basename, stat_type)
+    return
+
+def aggregate_per_read_main(args):
+    global VERBOSE
+    VERBOSE = not args.quiet
+    th.VERBOSE = VERBOSE
+
+    all_reg_stats, stat_type = apply_per_read_thresh(
+        args.per_read_statistics_filename, args.single_read_threshold,
+        args.minimum_test_reads)
+
+    write_stats(all_reg_stats, args.statistics_file_basename, stat_type,
+                args.minimum_test_reads)
 
     return
 

@@ -19,12 +19,15 @@ def main(args=None):
         ('Re-squiggle:', [
             ('resquiggle','Re-annotate raw signal with ' +
              'genomic alignment from existing basecalls.',
-             _option_parsers.get_eventless_resquiggle_parser()),
+             _option_parsers.get_resquiggle_parser()),
         ]),
         ('Modified Base Detection:',[
             ('test_significance','Test for shifts in signal ' +
              'indicative of non-canonical bases.',
              _option_parsers.get_test_signif_parser()),
+            ('aggregate_per_read_stats','Aggregate per-read statistics ' +
+             'to produce a genomic base statistics file.',
+             _option_parsers.get_aggregate_per_read_parser()),
         ]),
         ('Text Output Commands:', [
             ('write_wiggles','Write text outputs for genome browser ' +
@@ -61,6 +64,8 @@ def main(args=None):
         ('Other Plotting Commands:', [
             ('plot_roc','Plot ROC curve from known motif(s).',
              _option_parsers.get_roc_parser()),
+            ('plot_per_read_roc','Plot per-read ROC curve from known motif(s).',
+             _option_parsers.get_per_read_roc_parser()),
             ('plot_kmer','Plot signal distributions acorss kmers.',
              _option_parsers.get_kmer_dist_parser()),
             ('cluster_most_significant',
@@ -78,7 +83,7 @@ def main(args=None):
              'Apply filter to downsample for more even coverage.',
              _option_parsers.get_filter_coverage_parser()),
         ]),
-        ('Event-based Re-squiggle and Model Estimation:', [
+        ('Model Estimation and Event-based Re-squiggle:', [
             ('estimate_reference',
              'Estimate reference tombo model derived from the provided reads.',
              _option_parsers.get_est_ref_parser()),
@@ -92,17 +97,6 @@ def main(args=None):
             ('event_resquiggle', 'Re-annotate raw signal with genomic ' +
              'alignment from existing basecalls using event table.',
              _option_parsers.get_event_resquiggle_parser()),
-            ('model_resquiggle', 'Re-annotate raw signal after ' +
-             'event_resquiggle to more closely match a tombo model.',
-             _option_parsers.get_model_resquiggle_parser()),
-        ]),
-        ('Sequencing Time Anchored Plotting Commands (event_resquiggle only):', [
-            ('plot_correction',
-             'Plot segmentation before and after correction.',
-             _option_parsers.get_correction_parser()),
-            ('plot_multi_correction',
-             'Plot multiple raw signals anchored by genomic location.',
-             _option_parsers.get_multi_correction_parser()),
         ]),
     ]
     desc = '\n\n'.join([
@@ -114,10 +108,10 @@ def main(args=None):
     import argparse
     parser = argparse.ArgumentParser(
         prog='tombo',
-        description='Tombo is a suite of tools primarily for the ' +
-        'identification of modified nucleotides from nanopore sequencing ' +
-        'data. Tombo also provides tools for the analysis and ' +
-        'visualization of raw nanopore signal.',
+        description='********** TOMBO *********\n\nTombo is a suite of tools ' +
+        'primarily for the identification of modified nucleotides from ' +
+        'nanopore sequencing data.\n\nTombo also provides tools for the ' +
+        'analysis and visualization of raw nanopore signal.',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         '-v', '--version', action='version',
@@ -138,16 +132,16 @@ def main(args=None):
 
     if args.subcmd == 'resquiggle':
         from . import resquiggle
-        resquiggle.eventless_resquiggle_main(args)
+        resquiggle.resquiggle_main(args)
     elif args.subcmd == 'event_resquiggle':
         from . import _event_resquiggle
         _event_resquiggle.event_resquiggle_main(args)
-    elif args.subcmd == 'model_resquiggle':
-        from . import _model_resquiggle
-        _model_resquiggle.model_resquiggle_main(args)
     elif args.subcmd == 'test_significance':
         from . import tombo_stats
         tombo_stats.test_shifts_main(args)
+    elif args.subcmd == 'aggregate_per_read_stats':
+        from . import tombo_stats
+        tombo_stats.aggregate_per_read_main(args)
     elif args.subcmd == 'estimate_reference':
         from . import tombo_stats
         tombo_stats.est_ref_main(args)

@@ -6,18 +6,22 @@ The signal level data produced from a nanopore read is referred to as a squiggle
 
 The re-squiggle algorithm is the basis for the Tombo framework. The re-squiggle algorithm takes as input a read file (in FAST5 format) containing raw signal and associated base calls. The base calls are mapped to a genome reference and then the raw signal is assigned to the genomic sequence based on an expected current level model.
 
-TL;DR:
+**TL;DR**:
 
 *  Re-squiggle must be run before any other Tombo command (aside from the ``annotate_raw_with_fastqs`` pre-processing sub-command).
-*  Minimally the command takes a directory containing FAST5 files and a genome reference.
+*  Minimally the command takes a directory containing FAST5 files and a genome/transcriptome reference.
    
    - Genome reference may be previously known or discovered from this sample.
+
 *  FAST5 files must contain basecalls (as produced by albacore in fast5 mode or added with ``annotate_raw_with_fastqs``), but need not contain the "Events" table.
-*  Tombo currently only supports R9.4 and R9.5 data (via included default models). Other data may produce sub-optimal results.
+*  Tombo currently only supports R9.4 and R9.5 data (via included default models). R9.4.1 and R9.5.1 are supported. Other data may produce sub-optimal results.
 *  DNA and RNA reads will be detected automatically and processed accordingly (set explicitly with ``--dna`` or ``--rna``).
    
    -  Tombo does not perform spliced mapping. Thus a transcriptime reference must be passed to the re-squiggle command for RNA samples. For futher details on Tombo RNA processing see the :doc:`rna` section.
+
 *  Run ``resquiggle`` over multiple cores with the ``--processes`` option.
+
+   - The ``--threads-per-process`` is also provided, but it is generally recommended that this option remains set to the default of 1, though it may improve results on some computing environments.
 
 -----------------
 Algorithm Details
@@ -169,7 +173,11 @@ Additional Command Line Options
 
 ``--obs-per-base-filter``
 
-*  This option applies a filter to "stuck" reads (too many observations per genomic base). This filter is applied only to the index file and can be cleared later. See the :doc:`filtering` section for more details.
+*  This option applies a filter to "stuck" reads (too many observations per genomic base). This filter is applied only to the Tombo index file and can be cleared later. See the :doc:`filtering` section for more details.
+
+``--ignore-read-locks``
+
+*  Multiple independent ``resquiggle`` commands on the same set of reads should NOT be run simultaneously. This can cause hard to track errors and read file corruption. To protect against this, Tombo adds a lock (only acknowledged by Tombo) to each directory being processed. If a previous ``resquiggle`` command fails in a very unexpected fashion these locks can be left in place. In this case the ``--ignore-read-locks`` option is provided. This is the only intended use for this option.
 
 ---------------------
 Pre-process Raw Reads
@@ -184,3 +192,17 @@ This functionality requires that the FASTQ seqeunce header lines begin with the 
 .. code-block:: bash
 
     tombo annotate_raw_with_fastqs --fast5-basedir <fast5s-base-directory> --fastq-filenames reads.fastq
+
+---------------------------
+Non-standard Data Locations
+---------------------------
+
+In the Tombo framework, it is possible to access and store basecalls and genome-anchored re-squiggle results in custom locations within FAST5 files.
+
+For example, basecalls can be found in the ``Basecall_1D_001`` slot in a set of reads that have been basecalled more than one time. In this case the basecalls can be accessed in Tombo by specifying the ``--basecall-group`` option to the ``resquiggle`` command.
+
+It can also be adventageous to store re-squiggle results in a non-standard locations. For example, if one would like to test multiple sets of re-squiggle parameters or reference versions without having to overwrite old results and re-run the ``resquiggle`` command, the ``--corrected-group`` option can be specified. This will store the re-squiggle results in a new slot within the FAST5 file as well as creating a new Tombo index file.
+
+.. important::
+   
+   If the ``--corrected-group`` is specified in the ``resquiggle`` command, this same value must be passed to all other Tombo sub-commands in order to access these results. This inlcudes all filtering, plotting, significance testing, and text output commands.
