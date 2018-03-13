@@ -1515,11 +1515,11 @@ class PerReadStats(object):
             block_read_id_lookup = dict([
                 (read_id_val, read_id) for read_id, read_id_val in
                 self.per_read_blocks[block_data[2]][
-                    'block_stats/read_ids'].attrs.items()])
+                    'read_ids'].attrs.items()])
             reg_read_ids = [
                 block_read_id_lookup[r_id] for r_id in block_stats['read_id']]
-            int_block_stats.appen(np.array(
-                list(zip(reg_poss, reg_read_stats, conv_reg_ids)),
+            int_block_stats.append(np.array(
+                list(zip(reg_poss, reg_read_stats, reg_read_ids)),
                 dtype=[(str('pos'), 'u4'), (str('stat'), 'f8'),
                        (str('read_id'), object)]))
 

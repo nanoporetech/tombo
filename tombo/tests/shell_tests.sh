@@ -97,7 +97,7 @@ tombo event_resquiggle \
 
 printf "\n\n********* Testing minimap2 index **********\n"
 tombo resquiggle \
-      $natDir $mmiFn \
+      $natDir $genomeFn --minimap2-index $mmiFn \
       --corrected-group RawMinimapIndexCorrected \
       --processes 4 --overwrite \
       --failed-reads-filename testing.native.failed_read.txt
