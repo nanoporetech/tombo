@@ -508,9 +508,17 @@ def estimate_kmer_model(
                              _DEBUG_EST_NUM_KMER_SAVE)
     for kmer in product(DNA_BASES, repeat=kmer_width):
         kmer = ''.join(kmer)
-        kmer_levels = np.concatenate([
-            reg_kmer_levels[kmer] for reg_kmer_levels in all_reg_kmer_levels
-            if len(reg_kmer_levels[kmer]) > 0])
+        try:
+            kmer_levels = np.concatenate([
+                reg_kmer_levels[kmer] for reg_kmer_levels in all_reg_kmer_levels
+                if len(reg_kmer_levels[kmer]) > 0])
+        except ValueError:
+            th._error_message_and_exit(
+                'At least one k-mer is not covered at any poitions by ' +
+                '--minimum-test-reads.\n\t\tConsider fitting to a smaller ' +
+                'k-mer via the --upstream-bases and --downstream-bases, ' +
+                'or lowering --minimum-test-reads.\n\t\tNote that this may ' +
+                'result in a lower quality model.')
         if kmer_levels.shape[0] < min_kmer_obs:
             min_obs = min(
                 sum(len(reg_levs[''.join(kmer)])
