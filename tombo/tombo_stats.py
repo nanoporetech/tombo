@@ -1276,7 +1276,8 @@ class TomboStats(object):
         # on the fraction estimation as a binomial variable)
         damp_frac = (non_mod_counts + cov_damp_counts[0]) / (
             self.stats['valid_cov'] + sum(cov_damp_counts))
-        self.stats = append_fields(self.stats, 'damp_frac', damp_frac)
+        damp_name = 'damp_frac' if sys.version_info[0] > 2 else b'damp_frac'
+        self.stats = append_fields(self.stats, damp_name, damp_frac)
 
         return
 
@@ -2018,7 +2019,8 @@ def compute_read_stats(
         ctrl_cov = [ctrl_cov[pos] if pos in ctrl_cov else 0
                     for pos in reg_poss]
     else:
-        ctrl_cov = repeat(0, reg_poss.shape[0])
+        # convert to list since python2 repeat objects can't be pickled
+        ctrl_cov = list(repeat(0, reg_poss.shape[0]))
 
     return reg_base_stats, us_reg_poss, reg_cov, ctrl_cov, valid_cov
 

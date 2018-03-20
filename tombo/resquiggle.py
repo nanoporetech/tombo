@@ -1128,8 +1128,7 @@ def resquiggle_all_reads(
         rsqgl_args = (
             proc_rsqgl_conns, std_ref, outlier_thresh, corr_grp, bio_samp_type,
             seg_params, sig_aln_params, obs_filter, index_q is None, const_scale)
-        rsqgl_process = Process(target=_resquiggle_worker, args=rsqgl_args,
-                                daemon=True)
+        rsqgl_process = Process(target=_resquiggle_worker, args=rsqgl_args)
         rsqgl_process.start()
 
     # now open mapping thread for each map connection created above

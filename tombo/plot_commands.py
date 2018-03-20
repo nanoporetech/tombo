@@ -203,6 +203,12 @@ def plot_per_read_roc(
                 'stat':r.FloatVector(unzip_stats[0]),
                 'motif_match':r.BoolVector(unzip_stats[1])})
 
+    # python2 rpy2 ListVector can't take unicode keys
+    if sys.version_info[0] < 3:
+        conv_all_motif_stats_for_r = {}
+        for k, v in all_motif_stats_for_r.items():
+            conv_all_motif_stats_for_r[k.encode()] = v
+        all_motif_stats_for_r = conv_all_motif_stats_for_r
     all_motif_stats_for_r = r.ListVector(all_motif_stats_for_r)
 
     if VERBOSE: sys.stderr.write('Computing accuracy statistics.\n')
@@ -889,7 +895,7 @@ def plot_corrections(
 def plot_multi_corrections(
         f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
         num_reads_per_plot, num_regions, num_obs, include_orig_bcs,
-        genome_locations):
+        genome_locs):
     th._warning_message('The plot_multi_correction command may be deprecated ' +
                         'in future versions of Tombo.')
     num_regions = num_regions if num_regions % 2 == 0 else \
@@ -898,7 +904,7 @@ def plot_multi_corrections(
         f5_dirs1, corrected_group, basecall_subgroups)
     read_coverage = th.get_coverage(raw_read_coverage)
 
-    if genome_locations is None:
+    if genome_locs is None:
         coverage_regions = []
         for (chrm, strand), cs_coverage in read_coverage.items():
             reg_covs, reg_lens = zip(*[
@@ -923,16 +929,7 @@ def plot_multi_corrections(
                 'number of reads than requested.')
     else:
         if VERBOSE: sys.stderr.write('Parsing genome locations.\n')
-        parsed_locations = []
-        for chrm_pos_strand in genome_locations:
-            split_vals = chrm_pos_strand.replace('"', '').replace(
-                "'", "").split(':')[:3]
-            # default to plus strand if not specified
-            if len(split_vals) == 2:
-                parsed_locations.append((
-                    split_vals[0], split_vals[1], '+'))
-            else:
-                parsed_locations.append(split_vals)
+        parsed_locs = th.parse_genome_locations(genome_locs, default_strand='+')
         plot_locs = [
             ('{:03d}'.format(i), (chrm, int(pos) - 1, strand))
             for i, (chrm, pos, strand) in enumerate(parsed_locations)]
@@ -1480,22 +1477,14 @@ def plot_max_coverage(
 def plot_genome_locations(
         f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
         f5_dirs2, num_bases, overplot_thresh, overplot_type,
-        genome_locations, tb_model_fn, alt_model_fn, plot_default_stnd,
+        genome_locs, tb_model_fn, alt_model_fn, plot_default_stnd,
         plot_default_alt):
     if VERBOSE: sys.stderr.write('Parsing genome locations.\n')
-    # ignore strand for genome location plotting
-    genome_locations = [
-        chrm_pos.replace('"', '').replace("'", "").split(':')[:3]
-        for chrm_pos in genome_locations]
     # minus one here as all python internal coords are 0-based, but
     # genome is generally 1-based
     plot_intervals = []
-    for i, chrm_pos_strand in enumerate(genome_locations):
-        if len(chrm_pos_strand) == 2:
-            chrm, pos = chrm_pos_strand
-            strand = None
-        else:
-            chrm, pos, strand = chrm_pos_strand
+    for i, (chrm, pos, strand) in enumerate(
+            th.parse_genome_locations(genome_locs)):
         int_start = max(
             0, int(int(pos) - np.floor(num_bases / 2.0) - 1))
         plot_intervals.append(th.intervalData(
@@ -1527,19 +1516,12 @@ def plot_genome_locations(
 
 def plot_per_read_mods_genome_location(
         f5_dirs, corrected_group, basecall_subgroups, pdf_fn,
-        per_read_stats_fn, genome_locations, num_bases, num_reads, box_center,
+        per_read_stats_fn, genome_locs, num_bases, num_reads, box_center,
         fasta_fn):
     if VERBOSE: sys.stderr.write('Parsing genome locations.\n')
-    genome_locations = [
-        chrm_pos.replace('"', '').replace("'", "").split(':')[:3]
-        for chrm_pos in genome_locations]
     plot_intervals = []
-    for i, chrm_pos_strand in enumerate(genome_locations):
-        if len(chrm_pos_strand) == 2:
-            chrm, pos = chrm_pos_strand
-            strand = '+'
-        else:
-            chrm, pos, strand = chrm_pos_strand
+    for i, (chrm, pos, strand) in enumerate(th.parse_genome_locations(
+            genome_locs, default_strand='+')):
         int_start = max(
             0, int(int(pos) - np.floor(num_bases / 2.0) - 1) + 1)
         plot_intervals.append(th.intervalData(
@@ -2146,7 +2128,7 @@ def plot_main(args):
                  if 'num_obs' in args else None),]
     nread_opt = [('num_reads', args.num_reads
                   if 'num_reads' in args else None),]
-    glocs_opt = [('genome_locations', args.genome_locations
+    glocs_opt = [('genome_locs', args.genome_locations
                   if 'genome_locations' in args else None),]
     f5dirs2_opt = [('f5_dirs2', args.control_fast5_basedirs
                     if 'control_fast5_basedirs' in args else None),]

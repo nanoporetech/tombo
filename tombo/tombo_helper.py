@@ -128,6 +128,27 @@ def get_chrm_sizes(raw_read_coverage, raw_read_coverage2=None):
                 for chrm, strnd_sizes in
                 strand_chrm_sizes.items())
 
+def parse_genome_locations(genome_locs, default_strand=None):
+    parsed_locs = []
+    for chrm_pos_strand in genome_locs:
+        # strip off any quotes and return up to the first 3 values
+        split_vals = chrm_pos_strand.replace('"', '').replace(
+            "'", "").split(':')[:3]
+        # default to plus strand if not specified
+        if len(split_vals) == 1:
+            _error_message_and_exit(
+                'Invalid genome location provided: ' + chrm_pos_strand +
+                '\n\t\tTry adding quotation marks around specified genome ' +
+                'locations (especially for sequence identifiers with ' +
+                'special characters).')
+        elif len(split_vals) == 2:
+            parsed_locs.append((
+                split_vals[0], split_vals[1], default_strand))
+        else:
+            parsed_locs.append(split_vals)
+
+    return parsed_locs
+
 class TomboMotif(object):
     def _parse_motif(self, rev_comp_motif=False):
         """
