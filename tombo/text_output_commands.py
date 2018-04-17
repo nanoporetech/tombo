@@ -257,8 +257,7 @@ def write_most_signif(
         all_reg_data = [
             int_i._replace(
                 seq=genome_index.get_seq(int_i.chrm, int_i.start, int_i.end))
-            for int_i in plot_intervals
-            if int_i.chrm in genome_index.index.index]
+            for int_i in plot_intervals if int_i.chrm in genome_index]
 
     if VERBOSE: sys.stderr.write('Outputting region seqeuences.\n')
     with io.open(seqs_fn, 'wt') as seqs_fp:

@@ -257,6 +257,11 @@ class Fasta(object):
             for chrm in self.index:
                 yield chrm
 
+    def __contains__(self, chrm):
+        if self.has_pyfaidx:
+            return chrm in self.index.index
+        return chrm in self.index
+
 
 #############################################
 ###### Automatic Sample-Type Detection ######
