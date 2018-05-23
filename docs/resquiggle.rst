@@ -2,19 +2,22 @@
 Re-squiggle Algorithm
 *********************
 
-The signal level data produced from a nanopore read is referred to as a squiggle. Base calling this squiggle information generally contains some errors compared to a refernce genome. The re-squiggle algorithm defines a new squiggle to genomic sequence assignment, hence a re-squiggle.
+The electric current signal level data produced from a nanopore read is referred to as a squiggle. Base calling this squiggle information generally contains some errors compared to a refernce sequence. The re-squiggle algorithm defines a new assignment from squiggle to genomic sequence, hence a re-squiggle.
 
-The re-squiggle algorithm is the basis for the Tombo framework. The re-squiggle algorithm takes as input a read file (in FAST5 format) containing raw signal and associated base calls. The base calls are mapped to a genome reference and then the raw signal is assigned to the genomic sequence based on an expected current level model.
+The re-squiggle algorithm is the basis for the Tombo framework. The re-squiggle algorithm takes as input a read file (in FAST5 format) containing raw signal and associated base calls. The base calls are mapped to a genome or transcriptome reference and then the raw signal is assigned to the genomic sequence based on an expected current level model.
 
 **TL;DR**:
 
-*  Re-squiggle must be run before any other Tombo command (aside from the ``annotate_raw_with_fastqs`` pre-processing sub-command).
+*  Re-squiggle must be run before modified base detection and other Tombo command.
 *  Minimally the command takes a directory containing FAST5 files and a genome/transcriptome reference.
    
-   - Genome reference may be previously known or discovered from this sample.
+   - The reference sequence may be previously known or discovered from this sample.
 
-*  FAST5 files must contain basecalls (as produced by albacore in fast5 mode or added with ``annotate_raw_with_fastqs``), but need not contain the "Events" table.
-*  Tombo currently only supports R9.4 and R9.5 data (via included default models). R9.4.1 and R9.5.1 are supported. Other data may produce sub-optimal results.
+*  FAST5 files must contain basecalls (as produced by albacore in fast5 mode or added with ``annotate_raw_with_fastqs``).
+   
+   - FAST5 files need NOT contain the "Events" table (required by ``nanoraw`` the Tombo predecessor).
+
+*  Tombo currently only supports both DNA and RNA data (including R9.4 and R9.5; 1D and 1D2 data; R9.*.1 chemistries). Other data may produce sub-optimal results (e.g. R7 data).
 *  DNA and RNA reads will be detected automatically and processed accordingly (set explicitly with ``--dna`` or ``--rna``).
    
    -  Tombo does not perform spliced mapping. Thus a transcriptime reference must be passed to the re-squiggle command for RNA samples. For futher details on Tombo RNA processing see the :doc:`rna` section.
@@ -27,9 +30,10 @@ The re-squiggle algorithm is the basis for the Tombo framework. The re-squiggle 
 Algorithm Details
 -----------------
 
-The re-squiggle algorithm occurs in four main steps described below.
+The re-squiggle algorithm occurs in five main steps described below.
 
 * Genome Mapping
+* Signal Normalization
 * Event Detection
 * Sequence to Signal Assignment
 * Resolve Skipped Bases
@@ -41,29 +45,44 @@ The genome mapping is performed via the python API to ``minimap2`` (`mappy pytho
 
 Read base called sequence location within the FAST5 file is defined by the ``--basecall-group`` and ``--basecall-subgroups`` command line options. The default values of these parameters point to the default location for base calls from albacore or ``annotate_raw_with_fastqs``.
 
-The genomic sequence for successfully mapped reads are then passed on to the sequence to signal assignment stage.
+The genomic sequence for successfully mapped reads are then passed on to the :ref:`seqeunce_to_signal` stage.
 
-.. tip::
-   
-   Unless the optional dependency ``pyfaidx`` is installed (included in default conda installation), each process reads the whole reference genome into memory in order to extract genomic seqeunce. Take care when running Tombo on larger genomes to avoid overflowing a systems memory. This is true even if the optional ``--minimap2-index`` parameter is provided. The minimap2 index parameter only effects the mapping call itself.
+Signal Normalization
+--------------------
+
+Before the first iteration of the event detection and signal to sequence assignment steps, the raw signal for a read is normalized using median shift and MAD (median absolute deviation) scale parameters.
+
+:math:`NormSignal = \frac{RawSignal - Shift}{Scale}`
+
+As of Tombo version 1.3 after the first iteration, new shift and scale parameters are computed by matching the expected signal levels with those observed from the first iteration of signal to seuquence assignment. The `Theil-Sen estimator <https://en.wikipedia.org/wiki/Theil%E2%80%93Sen_estimator>`_ for the relationship between expected and observed signal levels is computed and used as a correction factor for the previous scale parameter. A shift correction factor is also computed taking the median of intercepts over each base in the read.
+
+If either the shift or scale correction factors exceed a preset threshold, an additional round of event detection and sequence to signal to signal assignment is performed. This continues until the corrections factors are small enough or a maximum number of iterations are performed. Command line parameters to control this procedure can be found using the ``tombo resquiggle --print-advanced-arguments`` command.
+
+This method should be more robust to samples with higher modified base content than mean based sequence-dependent correction methods (e.g. M.O.M.).
+
+This per-read sequence-dependent normalization has provided much better results than previous Tombo scaling methods and is thus strongly recommended. Previous scaling methods are still made available for research purposes (see ``tombo resquiggle --print-advanced-arguments``).
 
 Event Detection
 ---------------
 
-The Tombo algorithm does not require the "Events" table (raw signal assignment to base calls). Instead, Tombo discovers events from the raw signal. This segmented signal makes downstream processing steps more efficient and stable. This event detection algorithm is different from the event detection performed in previous versions of albacore, but produces similar results.
+The Tombo algorithm does not require the "Events" table (raw signal assignment to base calls). Instead, Tombo discovers events from the raw signal. This segmented signal makes downstream processing steps more efficient and stable. The Tombo event detection algorithm is different from the event detection performed in previous versions of albacore, but produces similar results.
 
 Events are determined by identifying large shifts in current level, by taking the running difference between neighboring windows of raw signal (explicitly set this parameter with the ``--segmentation-parameters`` option). The largest jumps (or most significant via a t-test for RNA) are chosen as the breakpoints between events. The mean of normalized raw signal is then computed for each event.
 
-Raw signal normalization estimates a median shift parameter and a median absolute deviation (MAD) scale parameter. By default, a global scale value is taken as the mean of MAD computed from a random sample of reads and used to scale all reads. This behaviour can be overriden with ``--fit-scale-per-read`` option or the ``--fixed-scale`` option to manually set the global scaling value (advanced users only). Raw signal is also windsorized, ``--outlier-threshold`` parameter. These scaling parameters are stored in the Tombo FAST5 slot for access in later commands. Note that only median signal normalization is available within the Tombo framework.
-
 The ``--segmentation-parameters`` values have been optimized for DNA and RNA data types, so DNA and RNA read types should not be mixed in processing.
+
+.. _seqeunce_to_signal:
 
 Sequence to Signal Assignment
 -----------------------------
 
-Given the mapped genomic sequence and segmented signal, the sequence to signal assignment algorithm finds the most likely matching between these two.
+Given the mapped genomic sequence and normalized, segmented, raw signal, the sequence to signal assignment algorithm finds the most likely matching between these two.
 
-The algorithm first uses a large bandwidth (5000 events over the first 500 genomic bps) to identify the start of the genomic sequence within the events (see figure below). This is necessary as some portion at the beginning of a read is not base called and some additional sequence may have been trimmed from the alignment. The matching is determined by applying a dynamic programming/dynamic time warpping algorithm to find the most likely matching between the event signal levels and the expected signal levels given the genomic sequence.
+This matching is found by a dynamic programming/dynamic time warpping algorithm to match event signal levels with expected signal levels given genomic sequence.
+
+To compute this matching, a static banded matrix is constructed by computing the z-score for event level (x-axis) against genomic positions (y-axis). The negative absolute value z-score is shifted to an expected value of zero to fill the banded matrix (see figure **a** below). A forward pass computes the maximal cummulative score up to each matched event to genome position (see figure **b** below).
+
+At each iteration (moving from bottom left to top right) the maximal score is taken over three possibilities 1) staying in the same genomic position, and accumulating the shifted z-score 2) matching an event with a genomic position (with score bonus) 3) skipping this genomic position (with a score penalty). The score match and skip penalties are definied by the ``--signal-align-parameters`` option. The default values have been optimized for DNA and RNA data types. From this forward pass, the maximal score along the last genomic position is taken and traced back to obtain a matching of sequence and signal.
 
 ----
 
@@ -81,13 +100,13 @@ The algorithm first uses a large bandwidth (5000 events over the first 500 genom
 
 ----
 
-A static banded matrix is constructed by computing the z-score for event level (x-axis) against genomic positions (y-axis). The negative absolute value z-score is shifted to an expected value of zero to fill the banded matrix (see figure **a** above). A forward pass computes the maximal cummulative score up to each matched event to genome position (see figure **b** above).
+The algorithm first uses a large bandwidth (5000 events over the first 250 genomic bps) to identify the start of the genomic sequence within the events. This is necessary as some portion at the beginning of a read is not base called and some additional sequence may have been trimmed from the alignment.
 
-At each iteration the maximal score is taken over three possibilities 1) staying in the same genomic position, and accumulating the shifted z-score 2) matching an event with a genomic position (with score bonus) 3) skipping this genomic position (with a score penalty). The score match and skip penalties are definied by the ``--signal-align-parameters``. The default values have been optimized for DNA and RNA data types. From this forward pass, the maximal score along the last genomic position is taken and traced back to obtain the starting position of matching sequence and signal.
-
-If a read is short enough (less than 5500 events or less than 500 bps of called sequence), then the whole sequence to signal matching will be performed with a single run with an appropriate static bandwidth.
+If a read is short enough (less than 5250 events or less than 250 bps of called sequence), then the whole sequence to signal matching will be performed with a single run with an appropriate static bandwidth.
 
 For longer reads, the above computed start matching position is taken and then the same dynamic programming solution is applied except a smaller adaptive band is now used (see figure below). The bandwidth is definied by the ``--signal-align-parameters`` option and again has been optimized for DNA and RNA data types. At each genomic position, the band position is defined to center on the maximal score of the forward pass from the previous base. This aims to ensure that the traceback path will remain within the adaptive window. There are edge cases where the valid matching leaves the adaptive band. These reads are filtered out and included in the failed read group ``Read event to sequence alignment extends beyond --bandwidth``.
+
+Most reads can be processed with a smaller bandwidth, but if a read fails to be successfully re-squiggled a second, larger, "save" bandwidth is used to attempt to rescue a read and complete a successful sequence to signal assignment. For samples with many low quality reads, this can cause larger run times, but should speed up the vast majority of runs by ~40%.
 
 ----
 
@@ -110,7 +129,9 @@ Resolve Skipped Bases
 
 After the dynamic programming step, skipped bases must be resolved using the raw signal to obtain a matching of each genomic base to a bit of raw signal. A window around each skipped genomic base is identified. If a window does not contain enough raw signal to perform a raw signal search the window is expanded until enough signal is found. Overlapping windows are collapsed into a single window.
 
-After deletion windows are identified, a dynamic programming algorithm very similar to the last step is performed. Importantly, the raw signal is used instead of events and the skip move is no longer allowed. Additionally, each genomic base is forced to contain a minimal number of raw observations to produce more robust assignments (explicitly set this value with the ``--segmentation-parameters`` option). This completes the re-squiggle procedure producing a matching of a read's raw signal to the mapped genomic sequence.
+After deletion windows are identified, a dynamic programming algorithm very similar to the last step is performed. Importantly, the raw signal is used instead of events and the skip move is no longer allowed. Additionally, each genomic base is forced to contain a minimal number of raw observations to produce more robust assignments (explicitly set this value with the ``--segmentation-parameters`` option).
+
+This completes the re-squiggle procedure producing a matching of a read's raw signal to the mapped genomic sequence.
 
 -------------------------------
 Common Failed Read Descriptions
@@ -132,12 +153,11 @@ Common Failed Read Descriptions
 ``Read contains too many potential genomic deletions``
 ``Not enough raw signal around potential genomic deletion(s)``
 
-*  These errors indicate that the sequence to signal matching algorithm was unable to identify a valid path.
+*  These errors indicate that the sequence to signal matching algorithm was unable to identify a valid path. This can occur if a sample contains sequence divergent from the provided reference sequence.
 
 ``Poor raw to expected signal matching``
-``Poor raw to expected signal matching at read start``
 
-*  These errors indicate that the dynamic programming algorithm produce a poorly scored matching of genomic sequence to raw signal. Some potential sources for these errors include incorrect primary genomic mapping, incorrect genome sequence (compared to the biological sample), poor quality raw signal or an incompatible flowcell/library with included canonical models (only R9.5/4 flowcells currently supported; 2D reads are not supported; DNA and RNA are supported).
+*  This errors indicate that the dynamic programming algorithm produce a poorly scored matching of genomic sequence to raw signal (as definied by the ``--signal-matching-score``). Some potential sources for these errors include incorrect primary genomic mapping, incorrect genome sequence (compared to the biological sample), poor quality raw signal or an incompatible flowcell/library with included canonical models (only R9.5/4 flowcells currently supported; 2D reads are not supported; DNA and RNA are supported).
 
 ------------------
 Tombo FAST5 Format
@@ -145,17 +165,17 @@ Tombo FAST5 Format
 
 The result of the re-squiggle algorithm writes the sequence to signal assignment back into the read FAST5 files (found in the ``--corrected-group`` slot; the default value is the default for all other Tombo commands to read in this data). When running the re-squiggle algorithm a second time on a set of reads, the ``--overwrite`` option is required in order to write over the previous Tombo results.
 
-The ``--corrected-group`` slot contains attributes for the signal normalization (shift, scale, upper_limit, lower_limit and outlier_threshold) as well as a boolean flag indicating whether the read is DNA or RNA. Within the ``Alignment`` group, the gemomic mapped start, end, strand and chromosome as well as mapping statistics (number clipped start and end bases, matching, mismatching, inserted and deleted bases) are stored.
+The ``--corrected-group`` slot contains attributes for the signal normalization (shift, scale, upper_limit, lower_limit, outlier_threshold and the tombo signal matching score) as well as a boolean flag indicating whether the read is DNA or RNA. Within the ``Alignment`` group, the gemomic mapped start, end, strand and chromosome as well as mapping statistics (number clipped start and end bases, matching, mismatching, inserted and deleted bases) are stored.
 
 The ``Events`` slot contains a matrix with the matching of raw signal to genomic sequence. This slot contains a single attribute (``read_start_rel_to_raw``) giving the zero-based offset indicating the beginning of the read genomic sequence within the raw signal. Each entry in the ``Events`` table indicates the normalized mean signal level (``norm_mean``), optionally (triggered by the ``--include-event-stdev`` option) the normalized signal standard deviation (``norm_stdev``), the start position of this base (``start``), the length of this event in raw signal values (``length``) and the genomic base (``base``).
 
 This information is accessed as needed for down-stream Tombo processing commands.
 
-This data generally adds ~75% to the memory footprint of a minimal FAST5 file (containing raw and sequence data; not including a basecalling Events table). This may vary across files and sample types.
+This data generally adds ~75% to the memory footprint of a minimal FAST5 file (containing raw and sequence data; NOT including a basecalling Events table). This may vary across files and sample types.
 
-**Important RNA note**: Tombo performs only un-spliced mapping. As such, for potentially spliced transcripts a transcriptome file must be provided. While this makes Tombo RNA processing annotation dependent the transcriptome is the more appropriate setting for modified base detection and thus this path has been chosen for Tomob RNA processing. More details about RNA processing can be found in the :doc:`rna` section.
+**Important RNA note**: Tombo only processes un-spliced mappings. As such, for potentially spliced transcripts a transcriptome reference file must be provided. While this makes Tombo RNA processing dependent upon a gene annotation, the transcriptome is a more appropriate setting for modified base detection. More details about RNA processing can be found in the :doc:`rna` section.
 
-**Minor RNA note**: RNA reads pass through the pore in the 3' to 5' direction during sequencing. As such, the raw signal and albacore events are stored in the reverse direction from the genome. Tombo events for RNA data are stored in the opposite direction (corresponding to the genome sequence direction, not sequencing time direction) for several practical reasons. Thus if events are to be compared to the raw signal, the raw signal must be reversed. Tombo RNA models are stored in the same direction and thus may be considered inverted as compared to some other RNA HMM signal level models.
+**Minor RNA note**: RNA reads pass through the pore in the 3' to 5' direction during sequencing. As such, the raw signal and albacore events are stored in the reverse direction from DNA reads. Tombo events for RNA data are stored in the opposite direction (corresponding to the genome sequence direction, not sequencing time direction) for several practical reasons. Thus if events are to be compared to the raw signal, the raw signal must be reversed. Tombo RNA models are stored in the same direction and thus may be considered inverted as compared to some other RNA HMM signal level models.
 
 ----------------
 Tombo Index File

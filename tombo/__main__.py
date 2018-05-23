@@ -5,85 +5,110 @@ import sys
 from . import _option_parsers
 from ._version import TOMBO_VERSION
 
+import argparse
+class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    def _format_action(self, action):
+        parts = super(
+            argparse.RawDescriptionHelpFormatter, self)._format_action(action)
+        if action.nargs == argparse.PARSER:
+            parts = "\n".join(parts.split("\n")[1:])
+        return parts
+
 def main(args=None):
     """The main routine."""
     if args is None:
         args = sys.argv[1:]
 
-    commands = [
-        ('Pre-processing:', [
+    # seperate re-squiggle command since all others are nested
+    rsqgl_help = [
+        ('resquiggle',
+         'Re-annotate raw signal with genomic alignment from ' +
+         'existing basecalls.', _option_parsers.get_resquiggle_parser()),]
+    nested_commands = [
+        ('preprocess', 'Pre-process nanopore reads for Tombo processing.', [
             ('annotate_raw_with_fastqs','Add basecalled sequence ' +
              'from FASTQs to raw FAST5s.',
              _option_parsers.get_add_fastqs_parser()),
         ]),
-        ('Re-squiggle:', [
-            ('resquiggle','Re-annotate raw signal with ' +
-             'genomic alignment from existing basecalls.',
-             _option_parsers.get_resquiggle_parser()),
+        ('filter', 'Apply filter to Tombo index file for specified criterion.', [
+            ('clear_filters',
+             'Clear filters to process all successfully re-squiggled reads.',
+             _option_parsers.get_clear_filters_parser()),
+            ('genome_locations',
+             'Filter reads based on mapping location.',
+             _option_parsers.get_filter_genome_pos_parser()),
+            ('raw_signal_matching',
+             'Filter reads with poor raw to expected signal matching.',
+             _option_parsers.get_filter_signal_matching_parser()),
+            ('q_score',
+             'Filter reads with poor mean basecalling quality.',
+             _option_parsers.get_filter_qscore_parser()),
+            ('level_coverage',
+             'Filter reads for more even coverage.',
+             _option_parsers.get_filter_coverage_parser()),
+            ('stuck',
+             'Filter reads with more "stuck" bases.',
+             _option_parsers.get_filter_stuck_parser()),
         ]),
-        ('Modified Base Detection:',[
-            ('test_significance','Test for shifts in signal ' +
-             'indicative of non-canonical bases.',
-             _option_parsers.get_test_signif_parser()),
-            ('aggregate_per_read_stats','Aggregate per-read statistics ' +
-             'to produce a genomic base statistics file.',
-             _option_parsers.get_aggregate_per_read_parser()),
-        ]),
-        ('Text Output Commands:', [
-            ('write_wiggles','Write text outputs for genome browser ' +
-             'visualization and bioinformatic processing (wiggle file format).',
-             _option_parsers.get_wiggle_parser()),
-            ('write_most_significant_fasta',
-             'Write sequence centered on most modified genomic locations.',
+        ('detect_modifications', 'Perform statistical testing to detect ' +
+         'non-standard nucleotides.', [
+             ('de_novo', 'Test for shifts in raw signal against a ' +
+              'canonical base model.',
+              _option_parsers.get_de_novo_test_signif_parser()),
+             ('alternative_model', 'Test for shifts in raw signal which match ' +
+              'those of a specific known non-canonical base.',
+              _option_parsers.get_alt_test_signif_parser()),
+             ('sample_compare', 'Test for shifts in raw signal against signal ' +
+              'levels derived from a canonical base only sample (PCR/IVT).',
+              _option_parsers.get_samp_comp_test_signif_parser()),
+             ('aggregate_per_read_stats','Aggregate Tombo per-read statistics ' +
+              'to produce a genomic base statistics file.',
+              _option_parsers.get_aggregate_per_read_parser()),
+         ]),
+        ('text_output', 'Output Tombo results in text files.', [
+            ('browser_files', 'Write text outputs for genome browser ' +
+             'visualization and bioinformatic processing (wiggle or ' +
+             'bedGraph file format).',
+             _option_parsers.get_browser_files_parser()),
+            ('signif_sequence_context',
+             'Write genomic/transcriptomic sequence centered on most ' +
+             'modified genomic locations.',
              _option_parsers.get_write_signif_diff_parser()),
         ]),
-        ('Genome Anchored Plotting Commands:', [
-            ('plot_max_coverage',
+        ('plot', 'Save plots to visualize raw nanopore signal or ' +
+         'testing results.', [
+            ('max_coverage',
              'Plot raw signal in regions with maximal coverage.',
              _option_parsers.get_max_cov_parser()),
-            ('plot_genome_location',
+            ('genome_locations',
              'Plot raw signal at defined genomic locations.',
              _option_parsers.get_genome_loc_parser()),
-            ('plot_motif_centered',
+            ('motif_centered',
              'Plot raw signal at a specific motif.',
              _option_parsers.get_motif_loc_parser()),
-            ('plot_max_difference',
-             'Plot raw signal where signal differs most between two read groups.',
-             _option_parsers.get_max_diff_parser()),
-            ('plot_most_significant',
+            ('max_difference',
+             'Plot raw signal where signal differs most between two ' +
+             'read groups.', _option_parsers.get_max_diff_parser()),
+            ('most_significant',
              'Plot raw signal at most modified locations.',
              _option_parsers.get_signif_diff_parser()),
-            ('plot_motif_with_stats',
+            ('motif_with_stats',
              'Plot example signal and statistic distributions around a ' +
-             'motif of interst.',
-             _option_parsers.get_signif_motif_parser()),
-            ('plot_per_read',
-             'Plot per read modified base probabilities.',
+             'motif of interst.', _option_parsers.get_signif_motif_parser()),
+            ('per_read',
+             'Plot per-read modified base probabilities.',
              _option_parsers.get_per_read_parser()),
-        ]),
-        ('Other Plotting Commands:', [
-            ('plot_roc','Plot ROC curve from known motif(s).',
+            ('roc','Plot ROC curve from known motif(s).',
              _option_parsers.get_roc_parser()),
-            ('plot_per_read_roc','Plot per-read ROC curve from known motif(s).',
+            ('per_read_roc','Plot per-read ROC curve from known motif(s).',
              _option_parsers.get_per_read_roc_parser()),
-            ('plot_kmer','Plot signal distributions acorss kmers.',
+            ('kmer','Plot signal distributions acorss kmers.',
              _option_parsers.get_kmer_dist_parser()),
             ('cluster_most_significant',
              'Clustering traces at bases with most significant stats.',
              _option_parsers.get_cluster_signif_diff_parser()),
         ]),
-        ('Read Filtering (Only effects tombo index file):', [
-            ('clear_filters',
-             'Clear filters to process all successfully re-squiggled reads.',
-             _option_parsers.get_clear_filters_parser()),
-            ('filter_stuck',
-             'Apply filter based on observations per base thresholds.',
-             _option_parsers.get_filter_stuck_parser()),
-            ('filter_coverage',
-             'Apply filter to downsample for more even coverage.',
-             _option_parsers.get_filter_coverage_parser()),
-        ]),
-        ('Model Estimation and Event-based Re-squiggle:', [
+        ('build_model', 'Create canonical and alternative base Tombo models.', [
             ('estimate_reference',
              'Estimate reference tombo model derived from the provided reads.',
              _option_parsers.get_est_ref_parser()),
@@ -99,79 +124,122 @@ def main(args=None):
              _option_parsers.get_event_resquiggle_parser()),
         ]),
     ]
-    desc = '\n\n'.join([
-        grp + '\n' + '\n'.join([
-            '\t{0: <30}{1}'.format(cmd, cmd_help)
-            for cmd, cmd_help, cmd_parser in cmds])
-        for grp, cmds in commands])
 
-    import argparse
+    desc = ('Tombo command groups (additional help available ' +
+            'within each command group):\n' + '\n'.join([
+                '\t{0: <25}{1}'.format(grp_name, grp_help)
+                for grp_name, grp_help, _ in rsqgl_help + nested_commands]))
     parser = argparse.ArgumentParser(
         prog='tombo',
-        description='********** TOMBO *********\n\nTombo is a suite of tools ' +
+        description='********** Tombo *********\n\nTombo is a suite of tools ' +
         'primarily for the identification of modified nucleotides from ' +
         'nanopore sequencing data.\n\nTombo also provides tools for the ' +
-        'analysis and visualization of raw nanopore signal.',
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        'analysis and visualization of raw nanopore signal.\n\n' + desc,
+        formatter_class=SubcommandHelpFormatter)
     parser.add_argument(
         '-v', '--version', action='version',
-        version='tombo version: {}'.format(TOMBO_VERSION),
-        help='show tombo version and exit.')
-    subparsers = parser.add_subparsers(
-        title='commands', description=desc,
-        help='Additional help available for subcommands.')
+        version='Tombo version: {}'.format(TOMBO_VERSION),
+        help='show Tombo version and exit.')
 
-    # fill subparser with parsers and linked main functions
-    for grp, cmds in commands:
-        for cmd, cmd_help, cmd_parser in cmds:
-            subparser_cmd = subparsers.add_parser(
-                cmd, parents=[cmd_parser,], add_help=False)
-            subparser_cmd.set_defaults(subcmd=cmd, group=grp)
+    # Tombo command groups
+    service_subparsers = parser.add_subparsers(dest="service_command")
 
-    args = parser.parse_args(args)
+    # seperate re-squiggle command since all others are nested
+    rsqgl_parser = service_subparsers.add_parser(
+        rsqgl_help[0][0], parents=[rsqgl_help[0][2],],
+        add_help=False)
+    # resquiggle is both the service parser and action parser
+    rsqgl_parser.set_defaults(action_command=rsqgl_help[0][0])
 
-    if args.subcmd == 'resquiggle':
-        from . import resquiggle
-        resquiggle.resquiggle_main(args)
-    elif args.subcmd == 'event_resquiggle':
-        from . import _event_resquiggle
-        _event_resquiggle.event_resquiggle_main(args)
-    elif args.subcmd == 'test_significance':
-        from . import tombo_stats
-        tombo_stats.test_shifts_main(args)
-    elif args.subcmd == 'aggregate_per_read_stats':
-        from . import tombo_stats
-        tombo_stats.aggregate_per_read_main(args)
-    elif args.subcmd == 'estimate_reference':
-        from . import tombo_stats
-        tombo_stats.est_ref_main(args)
-    elif args.subcmd == 'estimate_alt_reference':
-        from . import tombo_stats
-        tombo_stats.est_alt_ref_main(args)
-    elif args.subcmd == 'estimate_scale':
-        from . import tombo_stats
-        tombo_stats.estimate_scale_main(args)
-    elif args.subcmd == 'annotate_raw_with_fastqs':
-        from . import tombo_helper
-        tombo_helper.annotate_reads_with_fastq_main(args)
-    elif args.subcmd == 'clear_filters':
-        from . import tombo_helper
-        tombo_helper.clear_filters_main(args)
-    elif args.subcmd == 'filter_stuck':
-        from . import tombo_helper
-        tombo_helper.filter_stuck_main(args)
-    elif args.subcmd == 'filter_coverage':
-        from . import tombo_helper
-        tombo_helper.filter_coverage_main(args)
-    elif args.group == 'Text Output Commands:':
-        from . import text_output_commands
-        if args.subcmd == 'write_wiggles':
-            text_output_commands.wiggle_main(args)
+    for grp_name, grp_help, grp_sub_cmds in nested_commands:
+        grp_desc = '\n'.join([
+            '\t{0: <30}{1}'.format(cmd_name, cmd_help)
+            for cmd_name, cmd_help, _ in grp_sub_cmds])
+        grp_parser = service_subparsers.add_parser(
+            grp_name, formatter_class=SubcommandHelpFormatter,
+            description=grp_desc)
+        grp_subparser = grp_parser.add_subparsers(
+            title=grp_name, dest="action_command")
+        for cmd_name, cmd_help, cmd_parser in grp_sub_cmds:
+            subparser_cmd = grp_subparser.add_parser(
+                cmd_name, parents=[cmd_parser,], add_help=False)
+
+    try:
+        save_args = args
+        args = parser.parse_args(args)
+    except:
+        import re
+        if any(re.match(rsqgl_help[0][0], val) for val in args) and any(
+                re.match(_option_parsers.printadv_opt[0], val)
+                for val in args):
+            args.extend(['foo', 'foo'])
+            args = parser.parse_args(args)
         else:
-            text_output_commands.write_signif_diff_main(args)
-    else:
+            raise
+
+    if args.service_command is None:
+        parser.print_help()
+        sys.stderr.write('\ntombo error: Must provide a tombo command group.\n')
+        sys.exit(2)
+
+    # if no second level parser is provided print that command groups help
+    if args.action_command is None:
+        save_args.append('-h')
+        parser.parse_args(save_args)
+
+    if args.action_command == 'resquiggle':
+        from . import resquiggle
+        resquiggle._resquiggle_main(args)
+
+    elif args.action_command == 'annotate_raw_with_fastqs':
+        from . import tombo_helper
+        tombo_helper._annotate_reads_with_fastq_main(args)
+
+    elif args.service_command == 'detect_modifications':
+        from . import tombo_stats
+        if args.action_command == 'aggregate_per_read_stats':
+            tombo_stats._aggregate_per_read_main(args)
+        else:
+            tombo_stats._test_shifts_main(args)
+
+    elif args.action_command == 'event_resquiggle':
+        from . import _event_resquiggle
+        _event_resquiggle._event_resquiggle_main(args)
+    elif args.service_command == 'build_model':
+        from . import tombo_stats
+        if args.action_command == 'estimate_reference':
+            tombo_stats._est_ref_main(args)
+        elif args.action_command == 'estimate_alt_reference':
+            tombo_stats._est_alt_ref_main(args)
+        elif args.action_command == 'estimate_scale':
+            tombo_stats._estimate_scale_main(args)
+        else:
+            from . import tombo_helper
+            tombo_helper._error_message_and_exit(
+                'Invalid Tombo build_model command.')
+
+    elif args.service_command == 'filter':
+        from . import tombo_helper
+        tombo_helper._filter_main(args)
+
+    elif args.service_command == 'text_output':
+        from . import _text_output_commands
+        if args.action_command == 'browser_files':
+            _text_output_commands._browser_files_main(args)
+        elif args.action_command == 'signif_sequence_context':
+            _text_output_commands._write_signif_diff_main(args)
+        else:
+            from . import tombo_helper
+            tombo_helper._error_message_and_exitI(
+                'Invalid Tombo text_output command.')
+
+    elif args.service_command == 'plot':
         from . import plot_commands
-        plot_commands.plot_main(args)
+        plot_commands._plot_main(args)
+
+    else:
+        from . import tombo_helper
+        tombo_helper._error_message_and_exitI('Invalid Tombo command.')
 
     return
 

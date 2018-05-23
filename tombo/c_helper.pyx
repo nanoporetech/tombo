@@ -7,7 +7,7 @@ ctypedef np.float64_t DTYPE_t
 DTYPE_INT = np.int64
 ctypedef np.int64_t DTYPE_INT_t
 
-from libc.math cimport log
+from libc.math cimport log, exp
 
 cdef extern from "math.h":
     double sqrt(double m)
@@ -211,3 +211,64 @@ def c_calc_llh_ratio(
     log_lh_ratio = alt_z_sum + alt_log_var_sum - ref_z_sum - ref_log_var_sum
 
     return log_lh_ratio
+
+def c_calc_llh_ratio_const_var(
+        np.ndarray[DTYPE_t] reg_means, np.ndarray[DTYPE_t] reg_ref_means,
+        np.ndarray[DTYPE_t] reg_alt_means, DTYPE_t const_var):
+    cdef DTYPE_t ref_diff, alt_diff, running_llhr, obs_mean
+    cdef DTYPE_INT_t idx
+    for idx in range(reg_means.shape[0]):
+        obs_mean = reg_means[idx]
+        ref_diff = obs_mean - reg_ref_means[idx]
+        alt_diff = obs_mean - reg_alt_means[idx]
+        running_llhr += ((alt_diff * alt_diff) -
+                         (ref_diff * ref_diff)) / const_var
+
+    return running_llhr
+
+def c_calc_scaled_llh_ratio_const_var(
+        np.ndarray[DTYPE_t] reg_means, np.ndarray[DTYPE_t] reg_ref_means,
+        np.ndarray[DTYPE_t] reg_alt_means, DTYPE_t const_var,
+        DTYPE_t scale_factor, DTYPE_t density_height_factor,
+        DTYPE_t density_height_power):
+    """
+    Scale log likelihood ratio with the normal distribution halfway
+    between the 2 distributions.
+
+    scale_factor - sets the spread of the value (2 makes peaks equal the normal
+        density centers, but this is very sharp near the boundary between the
+        reference and alternative densities
+    density_height_factor - globally scales the height of the scores. Set to
+        approximately match log likelihood scale.
+    density_height_power - scales the density height proportional to the
+        difference between the reference and alternate means. 0.5 makes all
+        densities peak at the same value. Recommend values between 0 and 0.5
+        so that more divergent reference and alternate densities contrbute more
+        to the score.
+    """
+    cdef DTYPE_t running_scaled_lhr = 0.0
+    cdef DTYPE_t ref_diff, alt_diff, ref_mean, alt_mean, scale_diff, \
+        obs_mean, means_diff
+    cdef DTYPE_INT_t idx
+    for idx in range(reg_means.shape[0]):
+        ref_mean = reg_ref_means[idx]
+        alt_mean = reg_alt_means[idx]
+        if ref_mean == alt_mean:
+            continue
+        obs_mean = reg_means[idx]
+        scale_mean = (alt_mean + ref_mean) / 2
+
+        ref_diff = obs_mean - ref_mean
+        alt_diff = obs_mean - alt_mean
+        scale_diff = obs_mean - scale_mean
+        means_diff = alt_mean - ref_mean
+        if means_diff < 0:
+            means_diff = means_diff * -1
+
+        running_scaled_lhr += exp(
+            -(scale_diff * scale_diff) / (scale_factor * const_var)) * (
+                (alt_diff * alt_diff) - (ref_diff * ref_diff)) / (
+                    const_var * (means_diff ** density_height_power) *
+                    density_height_factor)
+
+    return running_scaled_lhr

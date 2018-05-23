@@ -11,8 +11,9 @@ ctypedef np.int64_t DTYPE_INT_t
 
 from libcpp cimport bool
 
-def c_base_z_scores(np.ndarray[DTYPE_t] b_sig not None,
-                    DTYPE_t ref_mean, DTYPE_t ref_sd):
+def c_base_z_scores(
+        np.ndarray[DTYPE_t] b_sig not None, DTYPE_t ref_mean, DTYPE_t ref_sd,
+        bool do_winsorize_z=False, DTYPE_t max_half_z_score=10.0):
     cdef DTYPE_INT_t n_sig = b_sig.shape[0]
     b_z_scores = np.empty(n_sig, dtype=DTYPE)
     cdef DTYPE_t b_pos_z_score
@@ -21,7 +22,9 @@ def c_base_z_scores(np.ndarray[DTYPE_t] b_sig not None,
         b_pos_z_score = (b_sig[idx] - ref_mean) / ref_sd
         if b_pos_z_score > 0:
             # convert all z-scores to lower tail
-            b_pos_z_score *= -1
+            b_pos_z_score = -b_pos_z_score
+        if do_winsorize_z and b_pos_z_score < -max_half_z_score:
+            b_pos_z_score = -max_half_z_score
         b_z_scores[idx] = b_pos_z_score
     return b_z_scores
 
@@ -31,7 +34,15 @@ def c_reg_z_scores(
         np.ndarray[DTYPE_t] r_ref_sds not None,
         np.ndarray[DTYPE_INT_t] r_b_starts not None,
         DTYPE_INT_t reg_start, DTYPE_INT_t reg_end,
-        DTYPE_INT_t max_base_shift, DTYPE_INT_t min_obs_per_base):
+        DTYPE_INT_t max_base_shift, DTYPE_INT_t min_obs_per_base,
+        max_half_z_score=None):
+    # check whether max_half_z_score is valid and set bool flag accordingly
+    cdef DTYPE_t np_max_half_z_score
+    cdef bool do_winsorize_z = False
+    if max_half_z_score is not None:
+        do_winsorize_z = True
+        np_max_half_z_score = max_half_z_score
+
     cdef DTYPE_INT_t base_i, b_sig_start, b_sig_end, prev_sig_start, \
         prev_sig_end, idx
     cdef DTYPE_INT_t reg_len = reg_end - reg_start
@@ -75,7 +86,8 @@ def c_reg_z_scores(
         # produces *very* similar results
         reg_scores.append((
             c_base_z_scores(r_sig[b_sig_start:b_sig_end],
-                            r_ref_means[base_i], r_ref_sds[base_i]), (
+                            r_ref_means[base_i], r_ref_sds[base_i],
+                            do_winsorize_z, np_max_half_z_score), (
                                 b_sig_start-r_b_starts[reg_start],
                                 b_sig_end-r_b_starts[reg_start])))
 
@@ -286,6 +298,7 @@ def c_adaptive_banded_forward_pass(
         np.ndarray[DTYPE_t] r_ref_sds not None,
         DTYPE_t z_shift, DTYPE_t skip_pen, DTYPE_t stay_pen,
         DTYPE_INT_t start_seq_pos, DTYPE_t mask_fill_z_score,
+        bool do_winsorize_z, DTYPE_t max_half_z_score,
         bool return_z_scores=False):
     cdef DTYPE_INT_t n_bases = fwd_pass.shape[0] - 1
     cdef DTYPE_INT_t bandwidth = fwd_pass.shape[1]
@@ -294,7 +307,8 @@ def c_adaptive_banded_forward_pass(
 
     cdef DTYPE_INT_t event_pos, seq_pos, prev_band_start, curr_band_start, \
         band_pos, prev_b_pos, max_from
-    cdef DTYPE_t pos_z_score, ref_mean, ref_sd, max_score, skip_score, diag_score
+    cdef DTYPE_t pos_z_score, ref_mean, ref_sd, max_score, skip_score, \
+        diag_score
 
     cdef np.ndarray[DTYPE_t] shifted_z_scores = np.empty(bandwidth, dtype=DTYPE)
     cdef np.ndarray[DTYPE_t, ndim=2] all_shifted_z_scores
@@ -323,7 +337,8 @@ def c_adaptive_banded_forward_pass(
         ref_mean = r_ref_means[seq_pos]
         ref_sd = r_ref_sds[seq_pos]
         if curr_band_start + bandwidth <= n_events:
-            for event_pos in range(curr_band_start, curr_band_start + bandwidth):
+            for event_pos in range(curr_band_start,
+                                   curr_band_start + bandwidth):
                 pos_z_score = (event_means[event_pos] - ref_mean) / ref_sd
                 if pos_z_score < 0:
                     pos_z_score = -pos_z_score

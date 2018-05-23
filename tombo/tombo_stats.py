@@ -17,16 +17,17 @@ import h5py
 
 import numpy as np
 np.seterr(all='raise')
-import multiprocessing as mp
 
+from tqdm import tqdm
 from time import sleep
-from scipy import stats
 from operator import itemgetter
+from scipy import stats, optimize
 from collections import defaultdict
 from scipy.spatial.distance import pdist
-from itertools import repeat, product, count
+from multiprocessing import Process, Queue, Pipe
 from numpy.lib.recfunctions import append_fields
 from scipy.cluster.hierarchy import single, leaves_list
+from itertools import repeat, product, count, combinations
 
 if sys.version_info[0] > 2:
     unicode = str
@@ -34,11 +35,16 @@ if sys.version_info[0] > 2:
 # import tombo functions
 from . import tombo_helper as th
 
-from .c_helper import c_mean_std, c_calc_llh_ratio
-from ._default_parameters import SMALLEST_PVAL, MIN_POSITION_SD, \
-    STANDARD_MODELS, ALTERNATE_MODELS, MIN_KMER_OBS_TO_EST, ALT_EST_BATCH, \
-    MAX_KMER_OBS, NUM_DENS_POINTS, LLR_THRESH, SAMP_COMP_THRESH, \
-    DE_NOVO_THRESH, KERNEL_DENSITY_RANGE, ROC_PLOT_POINTS
+from .c_helper import c_mean_std, c_apply_outlier_thresh, c_new_means, \
+    c_calc_llh_ratio, c_calc_llh_ratio_const_var, \
+    c_calc_scaled_llh_ratio_const_var
+from ._default_parameters import (
+    SMALLEST_PVAL, MIN_POSITION_SD, STANDARD_MODELS, ALTERNATE_MODELS,
+    MIN_KMER_OBS_TO_EST, ALT_EST_BATCH, MAX_KMER_OBS, NUM_DENS_POINTS,
+    LLR_THRESH, SAMP_COMP_THRESH, DE_NOVO_THRESH, KERNEL_DENSITY_RANGE,
+    ROC_PLOT_POINTS, NANOPOLISH_CENTRAL_POS, NUM_READS_FOR_SCALE,
+    ROBUST_QUANTS, MAX_POINTS_FOR_THEIL_SEN, NUM_READS_TO_ADJUST_MODEL,
+    OCLLHR_SCALE, OCLLHR_HEIGHT, OCLLHR_POWER)
 
 VERBOSE = False
 
@@ -61,6 +67,15 @@ STANDARD_MODEL_NAME = 'standard'
 SAMP_COMP_TXT = 'sample_compare'
 DE_NOVO_TXT = 'de_novo'
 ALT_MODEL_TXT = 'model_compare'
+
+ALT_MODEL_SEP_CHAR = '_'
+
+NORM_TYPES = ('none', 'pA', 'pA_raw', 'median', 'robust_median',
+              'median_const_scale')
+
+# options specifying testing methods
+# assume constant SD in model to save on computation
+CONST_SD_MODEL = True
 
 
 #############################################
@@ -128,6 +143,194 @@ def get_pairwise_dists(reg_sig_diffs, index_q, dists_q, slide_span=None):
     return
 
 
+##################################
+###### Signal Normalization ######
+##################################
+
+def get_valid_cpts(norm_signal, running_stat_width, num_events):
+    """
+    DEPRECATED. Hook still included in re-squiggle, but commented out.
+
+    Get valid changepoints given largest differences in neighboring
+    moving windows
+
+    Note that this method is completely vectorized, but allows segments
+    as small as 2 observations. This should be okay R9+, but is problematic
+    for <=R7 and RNA
+    """
+    raw_cumsum = np.cumsum(np.concatenate([[0], norm_signal[:-1]]))
+    # get difference between all neighboring running_stat_width regions
+    running_diffs = np.abs(
+        (2 * raw_cumsum[running_stat_width:-running_stat_width]) -
+        raw_cumsum[:-2*running_stat_width] -
+        raw_cumsum[2*running_stat_width:])
+    not_peaks = np.logical_not(np.logical_and(
+        running_diffs > np.concatenate([[0], running_diffs[:-1]]),
+        running_diffs > np.concatenate([running_diffs[1:], [0]])))
+    running_diffs[not_peaks] = 0
+    valid_cpts = np.argsort(
+        running_diffs)[::-1][:num_events].astype(np.int64) + running_stat_width
+
+    return valid_cpts
+
+def calc_kmer_fitted_shift_scale(
+        prev_shift, prev_scale, r_event_means, r_model_means,
+        r_model_inv_vars=None, method='theil_sen'):
+    """
+    Compute fitted shift and scale parameters based on read sequence
+    """
+    if method == 'robust':
+        def read_lad_objective(x):
+            return np.sum(np.abs(((r_event_means - x[0]) / x[1]) -
+                                 r_model_means))
+
+        shift_corr_factor, scale_corr_factor = optimize.minimize(
+            read_lad_objective, np.array([0,1]), method='nelder-mead',
+            options={'xtol': 1e-8}).x
+    elif method == 'theil_sen':
+        n_points = r_model_means.shape[0]
+        # potentially sample points for long reads (>1kb)
+        if r_model_means.shape[0] > MAX_POINTS_FOR_THEIL_SEN:
+            n_points = MAX_POINTS_FOR_THEIL_SEN
+            samp_ind = np.random.choice(
+                r_model_means.shape[0], n_points, replace=False)
+            r_model_means = r_model_means[samp_ind]
+            r_event_means = r_event_means[samp_ind]
+        # compute Theil-Sen slope estimator
+        # despite computing each diff twice this vectorized solution is about
+        # 10X faster than a list comprehension approach
+        delta_event = r_event_means[:, np.newaxis] - r_event_means
+        delta_model = r_model_means[:, np.newaxis] - r_model_means
+        slopes = delta_model[delta_event > 0] / delta_event[delta_event > 0]
+        slopes.sort()
+        slope = np.median(slopes)
+        inter = np.median(r_model_means - (slope * r_event_means))
+        if slope == 0:
+            raise NotImplementedError(
+                'Read failed sequence-based signal re-scaling parameter ' +
+                'estimation.')
+        # convert to shift and scale parameters (e.g. (obs - shift) / scale)
+        scale_corr_factor = 1 / slope
+        shift_corr_factor = -inter / slope
+    elif method == 'mom':
+        model_mean_var = r_model_means * r_model_inv_vars
+        # prep kmer model coefficient matrix for the k-mers from this read
+        model_mean_var_sum = model_mean_var.sum()
+        coef_mat = np.array((
+            (r_model_inv_vars.sum(), model_mean_var_sum),
+            (model_mean_var_sum, (model_mean_var * r_model_means).sum())))
+
+        # prep dependent values from this reads true events
+        r_event_var = r_event_means * r_model_inv_vars
+        r_event_var_mean = r_event_var * r_model_means
+        dep_vect = np.array((r_event_var.sum(), r_event_var_mean.sum()))
+
+        shift_corr_factor, scale_corr_factor = np.linalg.solve(
+            coef_mat, dep_vect)
+    else:
+        th._error_message_and_exit(
+            'Invalid k-mer fitted normalization parameter method: ' + method +
+            '\n\t\tValid methods are "robust" and "mom".')
+
+    # apply shift and scale values fitted from kmer conditional model
+    shift = prev_shift + (shift_corr_factor * prev_scale)
+    scale = prev_scale * scale_corr_factor
+
+    return shift, scale, shift_corr_factor, scale_corr_factor
+
+def estimate_global_scale(fast5_fns, num_reads=NUM_READS_FOR_SCALE):
+    if VERBOSE: th._status_message('Estimating global scale parameter.')
+    np.random.shuffle(fast5_fns)
+    read_mads = []
+    if VERBOSE:
+        bar = tqdm(total=num_reads, desc='Total reads processed', smoothing=0)
+    for fast5_fn in fast5_fns:
+        try:
+            with h5py.File(fast5_fn, 'r') as fast5_data:
+                all_sig = th.get_raw_read_slot(fast5_data)['Signal'].value
+            shift = np.median(all_sig)
+            read_mads.append(np.median(np.abs(all_sig - shift)))
+            if VERBOSE: bar.update(1)
+        except:
+            continue
+        if len(read_mads) >= num_reads:
+            break
+
+    if VERBOSE: bar.close()
+    if len(read_mads) == 0:
+        th._error_message_and_exit(
+            'No reads contain raw signal for ' +
+            'global scale parameter estimation.')
+    if len(read_mads) < num_reads:
+        th._warning_message(
+            'Few reads contain raw signal for global scale parameter ' +
+            'estimation. Results may not be optimal.')
+
+    return np.mean(read_mads)
+
+def normalize_raw_signal(
+        all_raw_signal, read_start_rel_to_raw, read_obs_len,
+        norm_type=None, channel_info=None, outlier_thresh=None,
+        scale_values=None, event_means=None, model_means=None,
+        model_inv_vars=None, const_scale=None):
+    """
+    Apply scaling and windsorizing parameters to normalize raw signal
+    """
+    if norm_type not in NORM_TYPES and scale_values is None:
+        raise NotImplementedError(
+            'Normalization type ' + norm_type + ' is not a valid ' +
+            'option and shift or scale parameters were not provided.')
+
+    raw_signal = all_raw_signal[read_start_rel_to_raw:
+                                read_start_rel_to_raw + read_obs_len]
+    if scale_values is None:
+        if norm_type == 'none':
+            shift, scale = 0, 1
+        elif norm_type in ('pA_raw', 'pA'):
+            # correct raw signal as described here:
+            #     https://community.nanoporetech.com
+            #           /posts/squiggle-plot-for-raw-data
+            shift, scale = (
+                -1 * channel_info.offset,
+                channel_info.digitisation / channel_info.range)
+            if norm_type == 'pA':
+                # perform k-mer model fitted correction as in
+                # nanocorr/nanopolish/albacore(pre-RNN)
+                shift, scale, _, _ = calc_kmer_fitted_shift_scale(
+                    shift, scale, event_means, model_means, model_inv_vars,
+                    method='mom')
+        elif norm_type == 'median':
+            shift = np.median(raw_signal)
+            scale = np.median(np.abs(raw_signal - shift))
+        elif norm_type == 'median_const_scale':
+            assert const_scale is not None
+            shift = np.median(raw_signal)
+            scale = const_scale
+        elif norm_type == 'robust_median':
+            shift = np.mean(np.percentile(raw_signal, ROBUST_QUANTS))
+            scale = np.median(np.abs(raw_signal - read_robust_med))
+    else:
+        shift = scale_values.shift
+        scale = scale_values.scale
+
+    norm_signal = (raw_signal - shift) / scale
+
+    # windsorize the raw signal
+    lower_lim, upper_lim = None, None
+    if outlier_thresh is not None or scale_values is not None:
+        if outlier_thresh is not None:
+            read_med = np.median(norm_signal)
+            read_mad = np.median(np.abs(norm_signal - read_med))
+            lower_lim = read_med - (read_mad * outlier_thresh)
+            upper_lim = read_med + (read_mad * outlier_thresh)
+        else:
+            lower_lim = scale_values.lower_lim
+            upper_lim = scale_values.upper_lim
+        norm_signal = c_apply_outlier_thresh(norm_signal, lower_lim, upper_lim)
+
+    return norm_signal, th.scaleValues(shift, scale, lower_lim, upper_lim)
+
+
 #############################
 ##### Tombo Model Class #####
 #############################
@@ -137,6 +340,41 @@ class TomboModel(object):
     Load, store and access Tombo model attributes and sequence-based expected
     mean and standard deviation levels (median normalization only)
     """
+    def center_model(self, shift_corr_factor, scale_corr_factor):
+        centered_means = {}
+        for kmer, k_mean in self.means.items():
+            centered_means[kmer] = (
+                k_mean * scale_corr_factor) + shift_corr_factor
+
+        self.means = centered_means
+
+        return
+
+    def make_constant_sd(self):
+        med_sd = np.median(list(self.sds.values()))
+        self.sds = dict((kmer, med_sd) for kmer in self.sds)
+        return
+
+    def write_model(self, ref_fn, alt_base=None, alt_name=None):
+        # Explicity use btype string names for py3 compatiblity as well as
+        # pickle-ability of numpy arrays for consistency. See discussion here:
+        # https://github.com/numpy/numpy/issues/2407
+        ref_for_file = np.array(
+            [(kmer, self.means[kmer], self.sds[kmer]) for kmer in self.means],
+            dtype=[(str('kmer'), 'S' + unicode(self.kmer_width)),
+                   (str('mean'), 'f8'), (str('sd'), 'f8')])
+
+        with h5py.File(ref_fn, 'w') as ref_fp:
+            ref_fp.create_dataset('model', data=ref_for_file, compression="gzip")
+            ref_fp.attrs['central_pos'] = self.central_pos
+            if alt_base is None:
+                ref_fp.attrs['model_name'] = STANDARD_MODEL_NAME
+            else:
+                ref_fp.attrs['model_name'] = alt_name
+                ref_fp.attrs['alt_base'] = alt_base
+
+        return
+
     def _parse_tombo_model(self):
         """
         Parse a tombo model file
@@ -162,9 +400,8 @@ class TomboModel(object):
                     pass
 
         except:
-            th._error_message_and_exit(
-                'Invalid tombo kmer model file provided: '
-                + unicode(self.ref_fn))
+            th._error_message_and_exit('Invalid tombo model file provided: '
+                                       + unicode(self.ref_fn))
 
         mean_ref = {}
         sd_ref = {}
@@ -179,37 +416,88 @@ class TomboModel(object):
         self.alt_base = alt_base
         self.name = model_name
 
-        self.kmer_width = len(next(k for k in mean_ref))
+        return
+
+    def _parse_text_model(self):
+        """
+        Parse a text model file (such as those from nanopolish)
+        """
+        try:
+            mean_ref, sd_ref = {}, {}
+            with io.open(self.ref_fn) as fp:
+                for line in fp:
+                    if line.startswith('#'): continue
+                    try:
+                        kmer, kmer_mean, kmer_sd = line.split()[:3]
+                        kmer_mean, kmer_sd = map(float, (kmer_mean, kmer_sd))
+                    except ValueError:
+                        # header or other non-kmer field
+                        continue
+                    mean_ref[kmer] = kmer_mean
+                    sd_ref[kmer] = kmer_sd
+        except:
+            th._error_message_and_exit('Invalid text pA model file provided: '
+                                       + unicode(self.ref_fn))
+
+        self.means = mean_ref
+        self.sds = sd_ref
+        self.central_pos = NANOPOLISH_CENTRAL_POS
+        self.alt_base = None
+        self.name = STANDARD_MODEL_NAME
 
         return
 
-    def __init__(self, ref_fn):
-        self.ref_fn = ref_fn
-        self._parse_tombo_model()
+    def _load_std_model(self, kmer_ref, central_pos):
+        mean_ref = {}
+        sd_ref = {}
+        for kmer, kmer_mean, kmer_std in kmer_ref:
+            # reference may or may not be stored as a numpy array
+            try:
+                kmer = kmer.decode()
+            except AttributeError:
+                pass
+            mean_ref[kmer] = kmer_mean
+            sd_ref[kmer] = kmer_std
+
+        self.means = mean_ref
+        self.sds = sd_ref
+        self.central_pos = central_pos
+        self.alt_base = None
+        self.name = STANDARD_MODEL_NAME
+
+        return
+
+    def add_invvar(self):
+        self.inv_var = {}
+        for kmer, stdev in self.sds.items():
+            self.inv_var[kmer] = 1 / (stdev * stdev)
+
+        return
+
+    def __init__(self, ref_fn, is_text_model=False, kmer_ref=None,
+                 central_pos=None, minimal_startup=False):
+        if ref_fn is None:
+            assert kmer_ref is not None and central_pos is not None
+            self._load_std_model(kmer_ref, central_pos)
+        else:
+            self.ref_fn = th.resolve_path(ref_fn)
+            if is_text_model:
+                self._parse_text_model()
+            else:
+                self._parse_tombo_model()
+
+        self.kmer_width = len(next(k for k in self.means))
         self.is_std_model = (self.name == STANDARD_MODEL_NAME and
                              self.alt_base is None)
         self.is_alt_model = not self.is_std_model
+
+        if not minimal_startup:
+            self.add_invvar()
 
 
 ############################
 ##### Model Estimation #####
 ############################
-
-def write_tombo_model(kmer_ref, ref_fn, central_pos,
-                      alt_base=None, alt_name=None):
-    """
-    Write a tombo model file
-    """
-    with h5py.File(ref_fn, 'w') as ref_fp:
-        ref_fp.create_dataset('model', data=kmer_ref, compression="gzip")
-        ref_fp.attrs['central_pos'] = central_pos
-        if alt_base is None:
-            ref_fp.attrs['model_name'] = STANDARD_MODEL_NAME
-        else:
-            ref_fp.attrs['model_name'] = alt_name
-            ref_fp.attrs['alt_base'] = alt_base
-
-    return
 
 def parse_tombo_models(alt_fns, std_ref):
     """
@@ -243,12 +531,12 @@ def get_default_standard_ref(raw_read_coverage, bio_samp_type=None):
     if bio_samp_type is not None:
         standard_ref_fn = STANDARD_MODELS[bio_samp_type]
     elif th.is_rna(raw_read_coverage):
-        if VERBOSE: sys.stderr.write(
-                'Using default canonical ***** RNA ***** model.\n')
+        if VERBOSE: th._status_message(
+                'Using default canonical ***** RNA ***** model.')
         standard_ref_fn = STANDARD_MODELS['RNA']
     else:
-        if VERBOSE: sys.stderr.write(
-                'Using default canonical ***** DNA ***** model.\n')
+        if VERBOSE: th._status_message(
+                'Using default canonical ***** DNA ***** model.')
         standard_ref_fn = STANDARD_MODELS['DNA']
     # get full filename path with setuptools
     standard_ref_fn = pkg_resources.resource_filename(
@@ -260,35 +548,53 @@ def get_default_standard_ref_from_files(fast5_fns, bio_samp_type=None):
     if bio_samp_type is not None:
         standard_ref_fn = STANDARD_MODELS[bio_samp_type]
     elif th.is_rna_from_files(fast5_fns):
-        if VERBOSE: sys.stderr.write(
-                'Using default canonical ***** RNA ***** model.\n')
+        if VERBOSE: th._status_message(
+                'Using default canonical ***** RNA ***** model.')
         standard_ref_fn = STANDARD_MODELS['RNA']
+        bio_samp_type = 'RNA'
     else:
-        if VERBOSE: sys.stderr.write(
-                'Using default canonical ***** DNA ***** model.\n')
+        if VERBOSE: th._status_message(
+                'Using default canonical ***** DNA ***** model.')
         standard_ref_fn = STANDARD_MODELS['DNA']
+        bio_samp_type = 'DNA'
     # get full filename path with setuptools
     standard_ref_fn = pkg_resources.resource_filename(
         'tombo', 'tombo_models/' + standard_ref_fn)
 
     return standard_ref_fn, bio_samp_type
 
+def _print_alt_models():
+    alt_model_types = [tuple(mod_name.split(ALT_MODEL_SEP_CHAR))
+                       for mod_name in ALTERNATE_MODELS.keys()]
+    alt_bio_samps = ['',] + sorted(set(list(zip(*alt_model_types))[0]))
+    alt_mods = list(set(list(zip(*alt_model_types))[1]))
+    row_format ="{:<10}" * (len(alt_bio_samps)) + '\n'
+    sys.stderr.write(row_format.format(*alt_bio_samps))
+    for alt_mod in alt_mods:
+        has_mod = [alt_mod,]
+        for bio_samp in alt_bio_samps[1:]:
+            has_mod.append(' X' if (bio_samp, alt_mod) in alt_model_types else '')
+        sys.stderr.write(row_format.format(*has_mod))
+
+    return
+
 def get_default_alt_ref(alt_name, raw_read_coverage, bio_samp_type=None):
     if bio_samp_type is not None:
         try:
-            alt_model_fn = ALTERNATE_MODELS[bio_samp_type + '_' + alt_name]
+            alt_model_fn = ALTERNATE_MODELS[
+                bio_samp_type + ALT_MODEL_SEP_CHAR + alt_name]
         except KeyError:
             alt_model_fn = None
     elif th.is_rna(raw_read_coverage):
         bio_samp_type = 'RNA'
         try:
-            alt_model_fn = ALTERNATE_MODELS['RNA_' + alt_name]
+            alt_model_fn = ALTERNATE_MODELS['RNA' + ALT_MODEL_SEP_CHAR + alt_name]
         except KeyError:
             alt_model_fn = None
     else:
         bio_samp_type = 'DNA'
         try:
-            alt_model_fn = ALTERNATE_MODELS['DNA_' + alt_name]
+            alt_model_fn = ALTERNATE_MODELS['DNA' + ALT_MODEL_SEP_CHAR + alt_name]
         except KeyError:
             alt_model_fn = None
     if alt_model_fn is not None:
@@ -324,8 +630,12 @@ def get_ref_from_seq(seq, std_ref, rev_strand=False, alt_ref=None):
     if rev_strand:
         seq_kmers = seq_kmers[::-1]
 
-    ref_means = np.array([std_ref.means[kmer] for kmer in seq_kmers])
-    ref_sds = np.array([std_ref.sds[kmer] for kmer in seq_kmers])
+    try:
+        ref_means = np.array([std_ref.means[kmer] for kmer in seq_kmers])
+        ref_sds = np.array([std_ref.sds[kmer] for kmer in seq_kmers])
+    except KeyError:
+        _error_message_and_exit(
+            'Invalid sequence encountered from genome sequence.')
     if alt_ref is None:
         alt_means, alt_sds = None, None
     else:
@@ -408,21 +718,22 @@ def get_region_kmer_levels(
     return reg_kmer_levels
 
 def _est_kmer_model_worker(
-        region_q, kmer_level_q, raw_read_coverage, cov_thresh,
+        region_q, kmer_level_q, progress_q, raw_read_coverage, cov_thresh,
         upstrm_bases, dnstrm_bases, cs_cov_thresh, est_mean, region_size):
     while not region_q.empty():
         try:
             chrm, strand, reg_start = region_q.get(block=False)
         except queue.Empty:
+            # sometimes throws false empty error with get(block=False)
+            if not region_q.empty():
+                continue
             break
 
         reg_reads = [r_data for r_data in raw_read_coverage[(chrm, strand)]
                      if not (r_data.start >= reg_start + region_size or
                              r_data.end <= reg_start)]
         if len(reg_reads) == 0:
-            if VERBOSE:
-                sys.stderr.write('.')
-                sys.stderr.flush()
+            progress_q.put(1)
             continue
 
         reg_kmer_levels = get_region_kmer_levels(
@@ -430,9 +741,7 @@ def _est_kmer_model_worker(
             cs_cov_thresh, est_mean, region_size, reg_start, strand)
         if reg_kmer_levels is not None:
             kmer_level_q.put(reg_kmer_levels)
-        if VERBOSE:
-            sys.stderr.write('.')
-            sys.stderr.flush()
+        progress_q.put(1)
 
     return
 
@@ -444,19 +753,14 @@ if _PROFILE_EST_REF:
                         filename='est_kmer_model.prof')
         return
 
-def estimate_kmer_model(
-        f5_dirs, corrected_group, basecall_subgroups,
-        kmer_ref_fn, cov_thresh, upstrm_bases, dnstrm_bases, min_kmer_obs,
-        kmer_specific_sd, cs_cov_thresh, est_mean, region_size, num_processes):
-    """
-    Estimate a standard tombo k-mer model
-    """
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs, corrected_group, basecall_subgroups)
+def extract_kmer_levels(
+        raw_read_coverage, region_size, cov_thresh, upstrm_bases, dnstrm_bases,
+        cs_cov_thresh, est_mean, num_processes):
     chrm_sizes = th.get_chrm_sizes(raw_read_coverage)
 
-    region_q = mp.Queue()
-    kmer_level_q = mp.Queue()
+    region_q = Queue()
+    kmer_level_q = Queue()
+    progress_q = Queue()
     num_regions = 0
     for chrm, chrm_len in chrm_sizes.items():
         plus_covered = (chrm, '+') in raw_read_coverage
@@ -469,39 +773,45 @@ def estimate_kmer_model(
                 region_q.put((chrm, '-', reg_start))
                 num_regions +=1
 
-    if VERBOSE: sys.stderr.write(
-            'Extracting average kmer levels across ' + unicode(num_regions) +
-            ' regions. (Will print a dot or each batch completed)\n')
     est_args = (
-        region_q, kmer_level_q, raw_read_coverage, cov_thresh,
+        region_q, kmer_level_q, progress_q, raw_read_coverage, cov_thresh,
         upstrm_bases, dnstrm_bases, cs_cov_thresh, est_mean, region_size)
     est_ps = []
     for p_id in range(num_processes):
-        p = mp.Process(target=_est_kmer_model_worker, args=est_args)
+        p = Process(target=_est_kmer_model_worker, args=est_args)
         p.start()
         est_ps.append(p)
 
+    if VERBOSE:
+        th._status_message('Extracting average k-mer levels.')
+        bar = tqdm(total=num_regions, smoothing=0)
     all_reg_kmer_levels = []
     while any(p.is_alive() for p in est_ps):
         try:
             reg_kmer_levels = kmer_level_q.get(block=False)
             all_reg_kmer_levels.append(reg_kmer_levels)
         except queue.Empty:
-            sleep(1)
-            continue
+            try:
+                iter_proc = progress_q.get(block=False)
+                if VERBOSE: bar.update(iter_proc)
+            except queue.Empty:
+                sleep(1)
+                continue
     while not kmer_level_q.empty():
         reg_kmer_levels = kmer_level_q.get(block=False)
         all_reg_kmer_levels.append(reg_kmer_levels)
-    if VERBOSE: sys.stderr.write('\n')
+    if VERBOSE: bar.close()
 
     if len(all_reg_kmer_levels) == 0:
         th._error_message_and_exit(
             'No genomic positions contain --minimum-test-reads. Consider ' +
             'setting this option to a lower value.')
 
-    if VERBOSE: sys.stderr.write('Tabulating k-mer model statistics.\n')
+    return all_reg_kmer_levels
+
+def tabulate_kmer_levels(kmer_width, all_reg_kmer_levels, min_kmer_obs):
+    if VERBOSE: th._status_message('Tabulating k-mer model statistics.')
     all_kmer_mean_sds = []
-    kmer_width = upstrm_bases + dnstrm_bases + 1
     if _DEBUG_EST_STD:
         kmer_dens = []
         save_x = np.linspace(KERNEL_DENSITY_RANGE[0], KERNEL_DENSITY_RANGE[1],
@@ -530,7 +840,7 @@ def estimate_kmer_model(
                 'k-mer or providing more reads.\n\t' + unicode(min_obs) +
                 ' observations found in least common kmer.')
         all_kmer_mean_sds.append((kmer, np.median(kmer_levels[:,0]),
-                                  np.mean(kmer_levels[:,1])))
+                                  np.median(kmer_levels[:,1])))
         if _DEBUG_EST_STD:
             kmer_kde = stats.gaussian_kde(
                 kmer_levels[:,0],
@@ -544,16 +854,117 @@ def estimate_kmer_model(
             fp.write('\n'.join('\t'.join(map(str, (kmer, x, y)))
                                for kmer, dens_i in kmer_dens
                                for x, y in zip(save_x, dens_i)) + '\n')
+    return all_kmer_mean_sds
 
-    # Explicity use btype string names for py3 compatiblity as well as
-    # pickle-ability of numpy arrays for consistency. See discussion here:
-    # https://github.com/numpy/numpy/issues/2407
-    kmer_ref = np.array(
-        all_kmer_mean_sds, dtype=[(str('kmer'), 'S' + unicode(kmer_width)),
-                                  (str('mean'), 'f8'), (str('sd'), 'f8')])
+def center_model_to_median_norm(
+        raw_read_coverage, init_ref, max_reads=NUM_READS_TO_ADJUST_MODEL):
+    upstrm_bases = init_ref.central_pos
+    dnstrm_bases = init_ref.kmer_width - init_ref.central_pos - 1
+    def get_read_corr_factors(r_data):
+        with h5py.File(r_data.fn, 'r+') as fast5_data:
+            all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'].value
+            event_starts, r_seq = th.get_multiple_slots_read_centric(
+                fast5_data, ('start', 'base'), r_data.corr_group)
+
+        if r_data.rna:
+            all_raw_signal = all_raw_signal[::-1]
+        norm_signal, scale_values = normalize_raw_signal(
+            all_raw_signal, 0, all_raw_signal.shape[0], 'median', None, None)
+
+        event_starts = event_starts.astype(np.int64)
+        rsrtr = r_data.read_start_rel_to_raw + event_starts[upstrm_bases]
+        # since the last segment end wasn't extracted the events are already
+        # clipped by one, so deal with event boundary clipping here
+        if dnstrm_bases > 1:
+            event_starts = event_starts[upstrm_bases:-(dnstrm_bases - 1)]
+        else:
+            assert dnstrm_bases == 1, (
+                'Must have at least one upstream and downstream base for ' +
+                'a Tombo model.')
+            event_starts = event_starts[upstrm_bases:]
+        # reset event starts to 0
+        event_starts -= event_starts[0]
+
+        norm_signal = norm_signal[rsrtr:rsrtr + event_starts[-1]]
+
+        r_seq = b''.join(r_seq).decode()
+        r_ref_means = get_ref_from_seq(r_seq, init_ref)[0]
+
+        (_, _, shift_corr_factor,
+         scale_corr_factor) = calc_kmer_fitted_shift_scale(
+             scale_values.shift, scale_values.scale,
+             c_new_means(norm_signal, event_starts), r_ref_means,
+             method='theil_sen')
+
+        return shift_corr_factor, scale_corr_factor
+
+
+    all_shift_corr_factors, all_scale_corr_factors = [], []
+    all_reads = [r_data for cs_reads in raw_read_coverage.values()
+                 for r_data in cs_reads]
+    random.shuffle(all_reads)
+    not_enough_reads = True
+    for r_data in all_reads:
+        try:
+            r_shift_corr_factor, r_scale_corr_factor = get_read_corr_factors(
+                r_data)
+            all_shift_corr_factors.append(r_shift_corr_factor)
+            all_scale_corr_factors.append(r_scale_corr_factor)
+            if len(all_scale_corr_factors) >= max_reads:
+                not_enough_reads = False
+                break
+        except:
+            continue
+
+    if not_enough_reads:
+        if len(all_shift_corr_factors) == 0:
+            th._error_message_and_exit(
+                'No reads succcessfully processed for sequence-based ' +
+                'normalization parameter re-fitting.')
+        th._warning_message(
+            'Fewer reads succcessfully processed for sequence-based ' +
+            'normalization parameter re-fitting than requested.')
+
+    # compute median shift and scale correction factors
+    # scale parameter should be taken in log space, but median performs
+    # the same computation
+    med_shift_corr_factor = np.median(all_shift_corr_factors)
+    med_scale_corr_factor = np.median(all_scale_corr_factors)
+
+    th._status_message('Shift and scale adjustments to match model to ' +
+                       'median normalization: ' + str(med_shift_corr_factor) +
+                       " " + str(med_scale_corr_factor))
+    init_ref.center_model(med_shift_corr_factor, med_scale_corr_factor)
+
+    return init_ref
+
+def estimate_kmer_model(
+        f5_dirs, corrected_group, basecall_subgroups,
+        kmer_ref_fn, cov_thresh, upstrm_bases, dnstrm_bases, min_kmer_obs,
+        kmer_specific_sd, cs_cov_thresh, est_mean, region_size, num_processes):
+    """
+    Estimate a standard tombo k-mer model
+    """
+    raw_read_coverage = th.parse_fast5s(
+        f5_dirs, corrected_group, basecall_subgroups)
+    all_reg_kmer_levels = extract_kmer_levels(
+        raw_read_coverage, region_size, cov_thresh, upstrm_bases, dnstrm_bases,
+        cs_cov_thresh, est_mean, num_processes)
+
+    all_kmer_mean_sds = tabulate_kmer_levels(
+        upstrm_bases + dnstrm_bases + 1, all_reg_kmer_levels, min_kmer_obs)
+
+    # adjust model to match median normalization best via Theil-Sen optimizer fit
+    # this will increase the accuracy of median normalized re-squiggle results
+    # and should reduce the need for (or number of) iterative re-squiggle runs
+    init_ref = TomboModel(
+        ref_fn=None, kmer_ref=all_kmer_mean_sds, central_pos=upstrm_bases)
+
+    centered_ref = center_model_to_median_norm(raw_read_coverage, init_ref)
+
     if not kmer_specific_sd:
-        kmer_ref['sd'] = np.median(kmer_ref['sd'])
-    write_tombo_model(kmer_ref, kmer_ref_fn, upstrm_bases)
+        centered_ref.make_constant_sd()
+    centered_ref.write_model(kmer_ref_fn)
 
     return
 
@@ -572,6 +983,9 @@ def _parse_base_levels_worker(
         try:
             r_fn, corr_slot = reads_q.get(block=False)
         except queue.Empty:
+            # sometimes throws false empty error with get(block=False)
+            if not reads_q.empty():
+                continue
             break
 
         with h5py.File(r_fn, 'r') as fast5_data:
@@ -605,7 +1019,7 @@ def get_batch_kmer_levels(
                      std_ref.central_pos, completed_kmers)
     base_lev_ps = []
     for p_id in range(num_processes):
-        p = mp.Process(target=_parse_base_levels_worker, args=base_lev_args)
+        p = Process(target=_parse_base_levels_worker, args=base_lev_args)
         p.start()
         base_lev_ps.append(p)
 
@@ -629,8 +1043,8 @@ def parse_base_levels(
     """
     Parse base levels and store grouped by k-mer
     """
-    reads_q = mp.Queue()
-    kmer_level_q = mp.Queue()
+    reads_q = Queue()
+    kmer_level_q = Queue()
 
     all_kmer_levels = dict(
         (''.join(kmer), [])
@@ -638,6 +1052,12 @@ def parse_base_levels(
     # store set of k-mers with enough observations to save on memory footprint
     # while filling more rare k-mers
     completed_kmers = set()
+    if VERBOSE:
+        all_reads_bar = tqdm(total=len(all_reads), smoothing=0,
+                             desc='Number of total reads used', leave=True)
+        min_kmer_bar = tqdm(total=kmer_obs_thresh, smoothing=0,
+                            desc='K-mer with fewest observations', leave=True)
+        curr_min_kmer_count = 0
     all_reads = iter(all_reads)
     n_batches = 0
     while True:
@@ -655,17 +1075,25 @@ def parse_base_levels(
             batch_total_kmers.append(len(all_kmer_levels[kmer]))
             if batch_total_kmers[-1] > max_kmer_obs:
                 completed_kmers.add(kmer)
-
-        curr_min_kmer_count = min(batch_total_kmers)
+        if VERBOSE:
+            if no_more_reads:
+                all_reads_bar.update(all_reads_bar.total - all_reads_bar.n)
+            else:
+                all_reads_bar.update(parse_levels_batch_size)
+            new_min_kmer_count = min(batch_total_kmers)
+            min_kmer_bar.update(new_min_kmer_count - curr_min_kmer_count)
+            curr_min_kmer_count = new_min_kmer_count
+            sleep(0.1)
+        else:
+            curr_min_kmer_count = min(batch_total_kmers)
         if curr_min_kmer_count > kmer_obs_thresh or no_more_reads:
             break
 
         n_batches += 1
-        if VERBOSE: sys.stderr.write(
-                '\t' + unicode(n_batches * parse_levels_batch_size) +
-                ' reads processed. Current minimum k-mer observations: ' +
-                unicode(curr_min_kmer_count) + ' towards goal of ' +
-                unicode(kmer_obs_thresh) + '\n')
+
+    if VERBOSE:
+        all_reads_bar.close()
+        min_kmer_bar.close()
 
     fewest_kmer_obs = min(len(kmer_levels) for kmer_levels in
                           all_kmer_levels.values())
@@ -724,7 +1152,7 @@ def est_kernel_density(
         all_reads, std_ref, parse_levels_batch_size, kmer_obs_thresh,
         max_kmer_obs, min_kmer_obs_to_est, num_processes)
 
-    if VERBOSE: sys.stderr.write('Fitting kernel densities for k-mer levels\n')
+    if VERBOSE: th._status_message('Fitting kernel densities for k-mer levels.')
     kmer_dens = {}
     for kmer, norm_levels in base_levels.items():
         norm_levels = np.array(norm_levels)
@@ -749,17 +1177,17 @@ def estimate_kmer_densities(
     cntrl_read_coverage = th.parse_fast5s(
         control_dirs, corrected_group, basecall_subgroups)
 
-    if VERBOSE: sys.stderr.write('Parsing standard model file\n')
+    if VERBOSE: th._status_message('Parsing standard model file.')
     if standard_ref_fn is None:
         standard_ref_fn, bio_samp_type = get_default_standard_ref(
             raw_read_coverage, bio_samp_type)
     std_ref = TomboModel(standard_ref_fn)
 
-    if VERBOSE: sys.stderr.write('Parsing base levels from alternative reads\n')
+    if VERBOSE: th._status_message('Parsing base levels from alternative reads.')
     alt_dens = est_kernel_density(
         raw_read_coverage, std_ref, kmer_obs_thresh, density_basename,
         save_x, kernel_dens_bw, num_processes, 'alternate')
-    if VERBOSE: sys.stderr.write('Parsing base levels from standard reads\n')
+    if VERBOSE: th._status_message('Parsing base levels from standard reads.')
     std_dens = est_kernel_density(
         cntrl_read_coverage, std_ref, kmer_obs_thresh, density_basename,
         save_x, kernel_dens_bw, num_processes, 'control')
@@ -769,7 +1197,7 @@ def estimate_kmer_densities(
 def load_kmer_densities(
         alt_dens_fn, std_dens_fn, f5_dirs, corrected_group,
         basecall_subgroups, std_ref_fn, bio_samp_type):
-    if VERBOSE: sys.stderr.write('Parsing standard model file\n')
+    if VERBOSE: th._status_message('Parsing standard model file.')
     if std_ref_fn is None:
         if f5_dirs is None and bio_samp_type is None:
             th._error_message_and_exit(
@@ -783,7 +1211,7 @@ def load_kmer_densities(
             raw_read_coverage, bio_samp_type)
     std_ref = TomboModel(std_ref_fn)
 
-    if VERBOSE: sys.stderr.write('Parsing density files\n')
+    if VERBOSE: th._status_message('Parsing density files.')
     alt_dens = parse_kmer_densities_file(alt_dens_fn)
     std_dens = parse_kmer_densities_file(std_dens_fn)
     num_dens_points = next(v for v in alt_dens.values()).shape[0]
@@ -844,9 +1272,9 @@ def isolate_alt_density(
     std_frac = np.percentile([
         get_peak_frac(std_dens[kmer], shifted_alt_dens[kmer])
         for kmer in std_dens if kmer.count(alt_base) == 1], alt_frac_pctl)
-    if VERBOSE: sys.stderr.write(
+    if VERBOSE: th._status_message(
             'Alternative base incorporation rate estimate: ' +
-            unicode(1 - std_frac) + '\n')
+            unicode(1 - std_frac))
     if std_frac >= 1:
         th._warning_message(
             'Alternative base incorporation rate ' +
@@ -873,9 +1301,9 @@ def isolate_alt_density(
             alt_level = np.average(save_x, weights=diff_dens)
         alt_ref.append((kmer, alt_level, model_sd))
 
-    alt_ref = np.array(alt_ref, dtype=[
-        (str('kmer'), 'S' + unicode(std_ref.kmer_width)),
-        (str('mean'), 'f8'), (str('sd'), 'f8')])
+    alt_ref = TomboModel(
+        ref_fn=None, kmer_ref=alt_ref, central_pos=std_ref.central_pos,
+        minimal_startup=True)
 
     return alt_ref
 
@@ -900,12 +1328,12 @@ def estimate_alt_model(
             alt_dens_fn, std_dens_fn, f5_dirs, corrected_group,
             basecall_subgroups, std_ref_fn, bio_samp_type)
 
-    if VERBOSE: sys.stderr.write('Isolating alternative base distribtuions\n')
+    if VERBOSE: th._status_message('Isolating alternative base distribtuions.')
     # perform alternative density isolation algorithm
     alt_ref = isolate_alt_density(
         alt_dens, std_dens, alt_base, alt_frac_pctl, std_ref, save_x)
 
-    return alt_ref, std_ref.central_pos
+    return alt_ref
 
 if _PROFILE_ALT_EST:
     _est_alt_wrapper = estimate_alt_model
@@ -913,7 +1341,7 @@ if _PROFILE_ALT_EST:
         import cProfile
         cProfile.runctx('_est_alt_wrapper(*args)', globals(), locals(),
                         filename='est_alt_model.prof')
-        return None, None
+        return None
 
 
 ####################################
@@ -1151,8 +1579,8 @@ def write_stats(
     """
     Write a tombo statistics file
     """
-    if VERBOSE: sys.stderr.write(
-            'Saving signal shift significance testing results.\n')
+    if VERBOSE: th._status_message(
+            'Saving signal shift significance testing results.')
     def convert_reg_stats(reg_stats):
         # get all unique fasta record names to store in HDF5 attributes and
         # encode as integers in the stats numpy table
@@ -1345,7 +1773,8 @@ class TomboStats(object):
             yield (
                 self._get_chrm_name(pos_stat), pos_stat['strand'].decode(),
                 pos_stat['pos'], pos_stat['frac'],
-                pos_stat['damp_frac'] if self.has_damp_frac else None)
+                pos_stat['damp_frac'] if self.has_damp_frac else None,
+                pos_stat['valid_cov'])
 
         return
 
@@ -1387,7 +1816,7 @@ class TomboStats(object):
 
         return selected_regs
 
-    def create_stat_dict(self):
+    def create_stat_dict(self, dict_batch_size=10000):
         """
         Create random access to fraction modified values by position
 
@@ -1395,11 +1824,25 @@ class TomboStats(object):
         Access dictionary will be stored in the stat_dict slot
         """
         self.has_stat_dict = True
-        self.stat_dict = dict(
-            ((self._get_chrm_name(pos_stat), pos_stat[str('strand')].decode(),
-              pos_stat[str('pos')]), 1 - (
-                  pos_stat[str('frac')] if self.has_damp_frac else
-                  pos_stat[str('damp_frac')])) for pos_stat in self.stats)
+        self.dict_batch_size = dict_batch_size
+        s_stats = np.sort(self.stats, order=['chrm', 'strand', 'pos'])
+        self.stat_dict = {}
+        # split at chromosome/strand switches
+        for cs_stats in np.split(s_stats, np.where(np.logical_or(
+                s_stats['strand'][:-1] != s_stats['strand'][1:],
+                np.diff(s_stats['chrm']) != 0))[0] + 1):
+            for batch_stats in np.split(cs_stats, np.where(np.diff(
+                    np.floor_divide(
+                        cs_stats['pos'], dict_batch_size)) != 0)[0] + 1):
+                batch_fracs = 1 - (
+                    batch_stats[str('damp_frac')] if self.has_damp_frac else
+                    batch_stats[str('frac')])
+                self.stat_dict[(
+                    self._get_chrm_name(batch_stats[0]),
+                    batch_stats[0]['strand'].decode(),
+                    np.floor_divide(batch_stats[0]['pos'],
+                                    dict_batch_size))] = (
+                                        batch_fracs, batch_stats['pos'])
 
         return
 
@@ -1407,10 +1850,16 @@ class TomboStats(object):
         """
         Obtain statistic value from the requested genomic position
         """
+        # TODO: Add a get_reg_pos function and only get the reg values
+        # once. Just need to handle edge of batch cases
         if not self.has_stat_dict:
             self.create_stat_dict()
         try:
-            pos_frac = self.stat_dict[(chrm, strand, pos)]
+            reg_fracs, reg_poss = self.stat_dict[(
+                chrm, strand, np.floor_divide(pos, self.dict_batch_size))]
+            pos_index = np.where(reg_poss == pos)[0]
+            if len(pos_index) != 1: raise KeyError
+            pos_frac = reg_fracs[pos_index[0]]
         except KeyError:
             pos_frac = missing_value
 
@@ -1592,9 +2041,10 @@ class PerReadStats(object):
 ##### Base-by-base Testing #####
 ################################
 
-def apply_per_read_thresh(pr_stats_fn, single_read_thresh, min_test_vals):
-    if VERBOSE: sys.stderr.write(
-            'Loading and aggregating per-read statistics.\n')
+def apply_per_read_thresh(
+        pr_stats_fn, single_read_thresh, min_test_vals, lower_thresh):
+    if VERBOSE: th._status_message(
+            'Loading and aggregating per-read statistics.')
     all_reg_stats = []
     pr_stats = PerReadStats(pr_stats_fn)
     for chrm, strand, start, end, block_stats in pr_stats:
@@ -1605,7 +2055,16 @@ def apply_per_read_thresh(pr_stats_fn, single_read_thresh, min_test_vals):
         reg_poss = np.unique(block_stats['pos'])
 
         reg_cov = [base_stats.shape[0] for base_stats in reg_base_stats]
-        if pr_stats.stat_type == ALT_MODEL_TXT:
+        if lower_thresh is not None:
+            # filter base statistics that fall between the upper and lower
+            # stat threshold for the log likelihood statistic
+            reg_base_stats = [
+                base_stats[np.logical_or(
+                    base_stats <= lower_thresh,
+                    base_stats >= single_read_thresh)]
+                for base_stats in reg_base_stats]
+            valid_cov = [base_stats.shape[0] for base_stats in reg_base_stats]
+        elif pr_stats.stat_type == ALT_MODEL_TXT:
             # filter base statistics that fall between the upper and lower
             # stat threshold for the log likelihood statistic
             reg_base_stats = [
@@ -1832,7 +2291,7 @@ def calc_llh_ratio(reg_means, reg_ref_means, reg_ref_vars,
 
 def compute_alt_model_read_stats(
         r_data, gnm_begin_lag, gnm_end_lag, reg_start, region_size,
-        std_ref, alt_ref):
+        std_ref, alt_ref, use_standard_llhr):
     """
     Compute signficance statistics using comparison of read signal to canonical
     and alternative models method for a single read within a specified genomic
@@ -1908,20 +2367,39 @@ def compute_alt_model_read_stats(
     for alt_base_pos in re.finditer(alt_ref.alt_base, r_seq):
         alt_pos = alt_base_pos.start()
         alt_base_poss.append(alt_pos + read_start)
-        pos_lh_ratio = c_calc_llh_ratio(
-            r_means[alt_pos:alt_pos + motif_width],
-            r_ref_means[alt_pos:alt_pos + motif_width],
-            r_ref_vars[alt_pos:alt_pos + motif_width],
-            r_alt_means[alt_pos:alt_pos + motif_width],
-            r_alt_vars[alt_pos:alt_pos + motif_width])
+        if CONST_SD_MODEL:
+            const_var = r_ref_vars[alt_pos]
+            if use_standard_llhr:
+                pos_lh_ratio = c_calc_llh_ratio_const_var(
+                    r_means[alt_pos:alt_pos + motif_width],
+                    r_ref_means[alt_pos:alt_pos + motif_width],
+                    r_alt_means[alt_pos:alt_pos + motif_width],
+                    const_var)
+            else:
+                pos_lh_ratio = c_calc_scaled_llh_ratio_const_var(
+                    r_means[alt_pos:alt_pos + motif_width],
+                    r_ref_means[alt_pos:alt_pos + motif_width],
+                    r_alt_means[alt_pos:alt_pos + motif_width],
+                    const_var, OCLLHR_SCALE, OCLLHR_HEIGHT, OCLLHR_POWER)
+        else:
+            if use_standard_llhr:
+                pos_lh_ratio = c_calc_llh_ratio(
+                    r_means[alt_pos:alt_pos + motif_width],
+                    r_ref_means[alt_pos:alt_pos + motif_width],
+                    r_ref_vars[alt_pos:alt_pos + motif_width],
+                    r_alt_means[alt_pos:alt_pos + motif_width],
+                    r_alt_vars[alt_pos:alt_pos + motif_width])
+            else:
+                raise NotImplementedError(
+                    'Variable SD scaled likelihood ratio not implemented.')
         log_lh_ratios.append(pos_lh_ratio)
 
     return np.array(log_lh_ratios), np.array(alt_base_poss), read_id
 
 def compute_read_stats(
         chrm, strand, reg_start, reg_reads, fm_offset, min_test_vals,
-        region_size, single_read_thresh, ctrl_reg_reads, std_ref,
-        alt_ref, per_read_q, stat_type):
+        region_size, single_read_thresh, lower_thresh, ctrl_reg_reads, std_ref,
+        alt_ref, use_standard_llhr, per_read_q, stat_type):
     if stat_type == SAMP_COMP_TXT:
         ctrl_means, ctrl_sds, ctrl_cov = get_reads_ref(
             ctrl_reg_reads, reg_start, region_size,
@@ -1948,7 +2426,7 @@ def compute_read_stats(
             else:
                 r_stats, r_poss, read_id = compute_alt_model_read_stats(
                     r_data, gnm_begin_lag, gnm_end_lag, reg_start, region_size,
-                    std_ref, alt_ref)
+                    std_ref, alt_ref, use_standard_llhr)
         except NotImplementedError:
             continue
         if r_stats is None: continue
@@ -2006,7 +2484,15 @@ def compute_read_stats(
 
     reg_cov = [base_stats.shape[0] for base_stats in reg_base_stats]
 
-    if stat_type == ALT_MODEL_TXT:
+    if lower_thresh is not None:
+        # filter base statistics that fall between the upper and lower
+        # stat threshold for the log likelihood statistic
+        reg_base_stats = [
+            base_stats[np.logical_or(base_stats <= lower_thresh,
+                                     base_stats >= single_read_thresh)]
+            for base_stats in reg_base_stats]
+        valid_cov = [base_stats.shape[0] for base_stats in reg_base_stats]
+    elif stat_type == ALT_MODEL_TXT:
         # filter base statistics that fall between the upper and lower
         # stat threshold for the log likelihood statistic
         reg_base_stats = [base_stats[np.abs(base_stats) >= single_read_thresh]
@@ -2026,8 +2512,8 @@ def compute_read_stats(
 
 def get_region_stats(
         chrm, strand, reg_start, reg_reads, fm_offset, min_test_vals,
-        region_size, single_read_thresh, ctrl_reg_reads, std_ref,
-        alt_ref, per_read_q, stat_type):
+        region_size, single_read_thresh, lower_thresh, ctrl_reg_reads, std_ref,
+        alt_ref, use_standard_llhr, per_read_q, stat_type):
     """
     Compute requested statistics for a specific region of the genome
     """
@@ -2035,8 +2521,8 @@ def get_region_stats(
         (reg_base_stats, reg_poss,
          reg_cov, ctrl_cov, valid_cov) = compute_read_stats(
              chrm, strand, reg_start, reg_reads, fm_offset, min_test_vals,
-             region_size, single_read_thresh, ctrl_reg_reads, std_ref,
-             alt_ref, per_read_q, stat_type)
+             region_size, single_read_thresh, lower_thresh, ctrl_reg_reads,
+             std_ref, alt_ref, use_standard_llhr, per_read_q, stat_type)
     except NotImplementedError:
         return None
 
@@ -2055,23 +2541,24 @@ def get_region_stats(
     return reg_stats
 
 def _test_signif_worker(
-        region_q, stats_q, per_read_q, raw_read_coverage, fm_offset,
-        min_test_vals, single_read_thresh, region_size, ctrl_read_coverage,
-        std_ref, alt_ref, stat_type):
+        region_q, stats_q, progress_q, per_read_q, raw_read_coverage, fm_offset,
+        min_test_vals, single_read_thresh, lower_thresh, region_size,
+        ctrl_read_coverage, std_ref, alt_ref, use_standard_llhr, stat_type):
     ctrl_reg_reads = None
     while not region_q.empty():
         try:
             chrm, strand, reg_start = region_q.get(block=False)
         except queue.Empty:
+            # sometimes throws false empty error with get(block=False)
+            if not region_q.empty():
+                continue
             break
 
         reg_reads = [r_data for r_data in raw_read_coverage[(chrm, strand)]
                      if not (r_data.start >= reg_start + region_size or
                              r_data.end <= reg_start)]
         if len(reg_reads) == 0:
-            if VERBOSE:
-                sys.stderr.write('.')
-                sys.stderr.flush()
+            progress_q.put(1)
             continue
 
         if ctrl_read_coverage is not None:
@@ -2081,13 +2568,11 @@ def _test_signif_worker(
                         r_data.end <= reg_start)]
         reg_stats = get_region_stats(
             chrm, strand, reg_start, reg_reads, fm_offset, min_test_vals,
-            region_size, single_read_thresh, ctrl_reg_reads, std_ref,
-            alt_ref, per_read_q, stat_type)
+            region_size, single_read_thresh, lower_thresh, ctrl_reg_reads,
+            std_ref, alt_ref, use_standard_llhr, per_read_q, stat_type)
         if reg_stats is not None:
             stats_q.put(reg_stats)
-        if VERBOSE:
-            sys.stderr.write('.')
-            sys.stderr.flush()
+        progress_q.put(1)
 
     return
 
@@ -2099,16 +2584,105 @@ if _PROFILE_SIGNIF:
                         filename='test_signif.prof')
         return
 
+
+##############################################
+########## Testing Multi-processing ##########
+##############################################
+
+def _get_progress_queue(progress_q, prog_conn, num_regions):
+    th._status_message(
+        'Performing modified base detection across genomic regions.')
+    bar = tqdm(total=num_regions, smoothing=0)
+
+    tot_num_rec_proc = 0
+    while True:
+        try:
+            iter_val = progress_q.get(block=False)
+            tot_num_rec_proc += iter_val
+            bar.update(iter_val)
+        except queue.Empty:
+            if prog_conn.poll():
+                break
+            sleep(0.1)
+            continue
+
+    bar.close()
+    prog_conn.send(tot_num_rec_proc)
+
+    return
+
+def _get_stats_queue(stats_q, stats_conn, min_test_reads, stats_file_bn,
+                     alt_name, stat_type):
+    # TODO convert to a TomboStats class that writes each batch to file as
+    # they are received
+    all_reg_stats = []
+    while True:
+        try:
+            reg_stats = stats_q.get(block=False)
+            all_reg_stats.append(reg_stats)
+        except queue.Empty:
+            if stats_conn.poll():
+                sleep(0.1)
+                break
+            sleep(0.1)
+            continue
+
+    # Clear leftover values from queues
+    while not stats_q.empty():
+        reg_stats = stats_q.get(block=False)
+        all_reg_stats.append(reg_stats)
+
+    if len(all_reg_stats) == 0:
+        th._error_message_and_exit(
+            'No genomic positions contain --minimum-test-reads.')
+
+    write_stats(all_reg_stats, stats_file_bn,
+                stat_type, min_test_reads, alt_name)
+    stats_conn.send(True)
+
+    return
+
+def _get_per_read_queue(
+        per_read_q, per_read_conn, per_read_fn, stat_type, region_size):
+    per_read_stats = PerReadStats(per_read_fn, stat_type, region_size)
+
+    while True:
+        try:
+            per_read_block = per_read_q.get(block=False)
+            per_read_stats.write_per_read_block(*per_read_block)
+            del per_read_block
+        except queue.Empty:
+            if per_read_conn.poll():
+                sleep(0.1)
+                break
+            sleep(0.1)
+            continue
+
+    # Clear leftover values from queues
+    while not per_read_q.empty():
+        per_read_block = per_read_q.get(block=False)
+        per_read_stats.write_per_read_block(*per_read_block)
+        del per_read_block
+    per_read_stats.close()
+
+    # indicate that the process has closed
+    per_read_conn.send(True)
+
+    return
+
 def test_significance(
         raw_read_coverage, min_test_vals, fm_offset, single_read_thresh,
-        region_size, num_processes, per_read_bn, stat_type,
-        ctrl_read_coverage=None, std_ref=None, alt_ref=None, alt_name=None):
+        lower_thresh, region_size, num_processes, per_read_bn, stat_type,
+        min_test_reads, stats_file_bn,
+        ctrl_read_coverage=None, std_ref=None, alt_ref=None,
+        use_standard_llhr=False, alt_name=None):
     """
     Test for significant shifted signal in mutliprocessed batches
     """
-    region_q = mp.Queue()
-    stats_q = mp.Queue()
-    per_read_q = mp.Queue(PER_READ_BLOCKS_QUEUE_LIMIT) \
+    region_q = Queue()
+    stats_q = Queue()
+    progress_q = Queue()
+    per_read_q = Queue(PER_READ_BLOCKS_QUEUE_LIMIT) \
                  if per_read_bn else None
     # split chromosomes into separate regions to process independently
     chrm_sizes = th.get_chrm_sizes(raw_read_coverage, ctrl_read_coverage)
@@ -2130,181 +2704,240 @@ def test_significance(
                 region_q.put((chrm, '-', reg_start))
                 num_regions += 1
 
-    if VERBOSE: sys.stderr.write(
-            'Performing significance testing across ' + unicode(num_regions) +
-            ' regions. (Will print a dot for each batch completed)\n')
     test_args = (
-        region_q, stats_q, per_read_q, raw_read_coverage, fm_offset,
-        min_test_vals, single_read_thresh, region_size, ctrl_read_coverage,
-        std_ref, alt_ref, stat_type)
+        region_q, stats_q, progress_q, per_read_q, raw_read_coverage, fm_offset,
+        min_test_vals, single_read_thresh, lower_thresh, region_size,
+        ctrl_read_coverage, std_ref, alt_ref, use_standard_llhr, stat_type)
     test_ps = []
     for p_id in range(num_processes):
-        p = mp.Process(target=_test_signif_worker, args=test_args)
+        p = Process(target=_test_signif_worker, args=test_args)
         p.start()
         test_ps.append(p)
 
+    # start queue getter processes
+    if VERBOSE:
+        main_prog_conn, prog_conn = Pipe()
+        prog_p = Process(target=_get_progress_queue,
+                            args=(progress_q, prog_conn, num_regions))
+        prog_p.daemon = True
+        prog_p.start()
+
+    # main region stats queue getter
+    main_stats_conn, stats_conn = Pipe()
+    stats_p = Process(target=_get_stats_queue, args=(
+        stats_q, stats_conn, min_test_reads, stats_file_bn, alt_name, stat_type))
+    stats_p.daemon = True
+    stats_p.start()
+
+    # per-read stats queue getter
     if per_read_bn is not None:
         if stat_type == ALT_MODEL_TXT:
             per_read_fn = per_read_bn + '.' + alt_name + '.tombo.per_read_stats'
         else:
             per_read_fn = per_read_bn + '.tombo.per_read_stats'
-        per_read_stats = PerReadStats(per_read_fn, stat_type, region_size)
+        main_per_read_conn, per_read_conn = Pipe()
+        per_read_p = Process(
+            target=_get_per_read_queue,
+            args=(per_read_q, per_read_conn, per_read_fn, stat_type, region_size))
+        per_read_p.daemon = True
+        per_read_p.start()
 
-    # if both queues are acitve and the per-read writes are slow, then the
-    # stats_q will not be accessed until all per-read blocks are processed
-    # alternate between queues to make sure both queues are being emptied.
-    all_reg_stats = []
-    check_per_read_q = True
-    while any(p.is_alive() for p in test_ps):
-        if check_per_read_q:
-            check_per_read_q = False
-            try:
-                if per_read_bn is None: raise queue.Empty
-                per_read_block = per_read_q.get(block=False)
-                per_read_stats.write_per_read_block(*per_read_block)
-                del per_read_block
-            except queue.Empty:
-                sleep(0.5)
-                continue
-        else:
-            check_per_read_q = True
-            try:
-                reg_stats = stats_q.get(block=False)
-                all_reg_stats.append(reg_stats)
-            except queue.Empty:
-                sleep(0.5)
-                continue
+    # wait for test processes to finish
+    for test_p in test_ps:
+        test_p.join()
 
-    # Clear leftover values from queues
-    while per_read_bn is not None and not per_read_q.empty():
-        per_read_block = per_read_q.get(block=False)
-        per_read_stats.write_per_read_block(*per_read_block)
-        del per_read_block
-    while not stats_q.empty():
-        reg_stats = stats_q.get(block=False)
-        all_reg_stats.append(reg_stats)
+    # in a very unlikely case the progress queue could die while the
+    # main process remains active and thus we would have a deadlock here
+    if VERBOSE and prog_p.is_alive():
+        # send signal to getter queue to finish and return results
+        main_prog_conn.send(True)
+        # returns total number of processed reads if that is needed
+        main_prog_conn.recv()
 
-    if VERBOSE: sys.stderr.write('\nTabulating all stats.\n')
     if per_read_bn is not None:
-        per_read_stats.close()
+        main_per_read_conn.send(True)
+        main_per_read_conn.recv()
 
-    if len(all_reg_stats) == 0:
-        th._error_message_and_exit(
-            'No genomic positions contain --minimum-test-reads.')
+    main_stats_conn.send(True)
+    main_stats_conn.recv()
 
-    return all_reg_stats
+    return
 
 
 ##########################
 ##### Main Functions #####
 ##########################
 
-def test_shifts_main(args):
-    global VERBOSE
-    VERBOSE = not args.quiet
-    th.VERBOSE = VERBOSE
+def _test_shifts_de_novo_main(
+        args, lower_thresh, single_read_thresh, bio_samp_type, raw_read_coverage):
+    tb_model_fn = args.tombo_model_filename
+    if bio_samp_type is None:
+        bio_samp_type = 'RNA' if th.is_rna(raw_read_coverage) else 'DNA'
+    if tb_model_fn is None:
+        tb_model_fn, bio_samp_type = get_default_standard_ref(
+            raw_read_coverage, bio_samp_type)
+    std_ref = TomboModel(tb_model_fn)
 
-    raw_read_coverage = th.parse_fast5s(
-        args.fast5_basedirs, args.corrected_group, args.basecall_subgroups)
-    # if second set of reads is prodived, perform comparison testing
-    if args.control_fast5_basedirs is not None:
-        stat_type = SAMP_COMP_TXT
-        single_read_thresh = (
-            args.single_read_threshold if args.single_read_threshold is not None
-            else SAMP_COMP_THRESH)
-        if VERBOSE: sys.stderr.write(
-                'Performing two-sample comparison significance testing.\n')
-        ctrl_read_coverage = th.parse_fast5s(
-            args.control_fast5_basedirs, args.corrected_group,
-            args.basecall_subgroups)
-        all_reg_stats = test_significance(
-            raw_read_coverage, args.minimum_test_reads,
-            args.fishers_method_context, single_read_thresh,
-            args.multiprocess_region_size, args.processes,
-            args.per_read_statistics_basename, stat_type,
-            ctrl_read_coverage=ctrl_read_coverage)
-        write_stats(all_reg_stats, args.statistics_file_basename, stat_type,
-                    args.minimum_test_reads)
-    else:
-        tb_model_fn = args.tombo_model_filename
-        bio_samp_type = args.bio_sample_type
-        if bio_samp_type is None:
-            bio_samp_type = 'RNA' if th.is_rna(raw_read_coverage) else 'DNA'
-        if tb_model_fn is None:
-            tb_model_fn, bio_samp_type = get_default_standard_ref(
-                raw_read_coverage, bio_samp_type)
-        std_ref = TomboModel(tb_model_fn)
-
-        # if no alt model provided perform de novo testing for shifts
-        # from a standard model
-        if (args.alternate_model_filenames is None and
-            args.alternate_bases is None):
-            stat_type = DE_NOVO_TXT
-            single_read_thresh = (
-                args.single_read_threshold if args.single_read_threshold
-                is not None else DE_NOVO_THRESH)
-            if VERBOSE: sys.stderr.write(
-                    'Performing de novo model testing against a ' +
-                    'standard model\n')
-            all_reg_stats = test_significance(
-                raw_read_coverage, args.minimum_test_reads,
-                args.fishers_method_context, single_read_thresh,
-                args.multiprocess_region_size, args.processes,
-                args.per_read_statistics_basename, stat_type,
-                std_ref=std_ref)
-            write_stats(all_reg_stats, args.statistics_file_basename, stat_type,
-                        args.minimum_test_reads)
-        # else perform comparison model testing
-        else:
-            stat_type = ALT_MODEL_TXT
-            single_read_thresh = (
-                args.single_read_threshold if args.single_read_threshold
-                is not None else LLR_THRESH)
-            if VERBOSE: sys.stderr.write(
-                    'Performing alternative model testing\n')
-            if args.alternate_model_filenames is not None:
-                alt_refs = parse_tombo_models(
-                    args.alternate_model_filenames, std_ref)
-            else:
-                alt_refs = load_alt_refs(
-                    args.alternate_bases, raw_read_coverage,
-                    std_ref, bio_samp_type)
-            if len(alt_refs) == 0:
-                th._error_message_and_exit(
-                    'No alternative models successfully loaded.')
-
-            for alt_name, alt_ref in alt_refs.items():
-                if VERBOSE: sys.stderr.write(
-                        'Performing alternative model testing against ' +
-                        alt_name + ' model\n')
-                all_reg_stats = test_significance(
-                    raw_read_coverage, args.minimum_test_reads, 0,
-                    single_read_thresh, args.multiprocess_region_size,
-                    args.processes, args.per_read_statistics_basename, stat_type,
-                    std_ref=std_ref, alt_ref=alt_ref, alt_name=alt_name)
-                write_stats(all_reg_stats, args.statistics_file_basename,
-                            stat_type, args.minimum_test_reads, alt_name)
-                del all_reg_stats
-    # TODO add comparison to processed genome reference determined by
-    # deep learning performed on the genomic sequence
+    stat_type = DE_NOVO_TXT
+    lower_thresh, single_read_thresh = (
+        (lower_thresh, single_read_thresh) if single_read_thresh
+        is not None else DE_NOVO_THRESH[bio_samp_type])
+    if VERBOSE: th._status_message(
+            'Performing de novo model testing against canonical model.')
+    test_significance(
+        raw_read_coverage, args.minimum_test_reads,
+        args.fishers_method_context, single_read_thresh, lower_thresh,
+        args.multiprocess_region_size, args.processes,
+        args.per_read_statistics_basename, stat_type,
+        args.minimum_test_reads, args.statistics_file_basename,
+        std_ref=std_ref)
 
     return
 
-def aggregate_per_read_main(args):
+def _test_shifts_alt_main(
+        args, lower_thresh, single_read_thresh, bio_samp_type, raw_read_coverage):
+    tb_model_fn = args.tombo_model_filename
+    if bio_samp_type is None:
+        bio_samp_type = 'RNA' if th.is_rna(raw_read_coverage) else 'DNA'
+    if tb_model_fn is None:
+        tb_model_fn, bio_samp_type = get_default_standard_ref(
+            raw_read_coverage, bio_samp_type)
+    std_ref = TomboModel(tb_model_fn)
+
+    stat_type = ALT_MODEL_TXT
+    lower_thresh, single_read_thresh = (
+        (lower_thresh, single_read_thresh) if single_read_thresh
+        is not None else LLR_THRESH[bio_samp_type])
+    if VERBOSE: th._status_message('Performing alternative model testing.')
+    if args.alternate_model_filenames is not None:
+        alt_refs = parse_tombo_models(
+            args.alternate_model_filenames, std_ref)
+    else:
+        alt_refs = load_alt_refs(
+            args.alternate_bases, raw_read_coverage,
+            std_ref, bio_samp_type)
+    if len(alt_refs) == 0:
+        th._error_message_and_exit('No alternative models successfully loaded.')
+
+    for alt_name, alt_ref in alt_refs.items():
+        if VERBOSE: th._status_message(
+                'Performing alternative model testing against ' +
+                alt_name + ' model.')
+        test_significance(
+            raw_read_coverage, args.minimum_test_reads, 0,
+            single_read_thresh, lower_thresh,
+            args.multiprocess_region_size, args.processes,
+            args.per_read_statistics_basename, stat_type,
+            args.minimum_test_reads, args.statistics_file_basename,
+            std_ref=std_ref, alt_ref=alt_ref,
+            use_standard_llhr=args.standard_log_likelihood_ratio,
+            alt_name=alt_name)
+
+    return
+
+def _test_shifts_samp_comp_main(
+        args, lower_thresh, single_read_thresh, bio_samp_type, raw_read_coverage):
+    stat_type = SAMP_COMP_TXT
+    if single_read_thresh is None:
+        if bio_samp_type is None:
+            bio_samp_type = 'RNA' if th.is_rna(raw_read_coverage) else 'DNA'
+        lower_thresh, single_read_thresh = SAMP_COMP_THRESH[bio_samp_type]
+    if VERBOSE: th._status_message(
+            'Performing two-sample comparison significance testing.')
+    ctrl_read_coverage = th.parse_fast5s(
+        args.control_fast5_basedirs, args.corrected_group,
+        args.basecall_subgroups)
+    test_significance(
+        raw_read_coverage, args.minimum_test_reads,
+        args.fishers_method_context, single_read_thresh, lower_thresh,
+        args.multiprocess_region_size, args.processes,
+        args.per_read_statistics_basename, stat_type,
+        args.minimum_test_reads, args.statistics_file_basename,
+        ctrl_read_coverage=ctrl_read_coverage)
+
+    return
+
+def _test_shifts_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
 
+    if args.action_command == 'alternative_model':
+        if args.print_available_models:
+            _print_alt_models()
+            sys.exit()
+        if args.fast5_basedirs is None or args.statistics_file_basename is None:
+            _error_message_and_exit(
+                'Must provide both a set of FAST5 read files ' +
+                '(--fast5-basedirs) and an output file basename ' +
+                '(--statistics-file-basename).')
+
+    if args.single_read_threshold is None:
+        lower_thresh = None
+        single_read_thresh = None
+    elif len(args.single_read_threshold) == 1:
+        single_read_thresh = args.single_read_threshold[0]
+        lower_thresh = None
+    else:
+        if len(args.single_read_threshold) > 2:
+            th._warning_message(
+                'Only 1 or 2 values may be passed as single-read ' +
+                'thresholds. Only using the first 2 options provided.')
+        lower_thresh = args.single_read_threshold[0]
+        single_read_thresh = args.single_read_threshold[1]
+
+    try:
+        # sample compare does not have bio_sample_type in the namespace
+        bio_samp_type = args.bio_sample_type
+    except AttributeError:
+        bio_samp_type = None
+
+    raw_read_coverage = th.parse_fast5s(
+        args.fast5_basedirs, args.corrected_group, args.basecall_subgroups)
+
+    if args.action_command == 'de_novo':
+        _test_shifts_de_novo_main(
+            args, lower_thresh, single_read_thresh, bio_samp_type,
+            raw_read_coverage)
+    elif args.action_command == 'alternative_model':
+        _test_shifts_alt_main(
+            args, lower_thresh, single_read_thresh, bio_samp_type,
+            raw_read_coverage)
+    elif args.action_command == 'sample_compare':
+        _test_shifts_samp_comp_main(
+            args, lower_thresh, single_read_thresh, bio_samp_type,
+            raw_read_coverage)
+    else:
+        th._error_message_and_exit('Invalid Tombo detect_modifications command.')
+
+    return
+
+def _aggregate_per_read_main(args):
+    global VERBOSE
+    VERBOSE = not args.quiet
+    th.VERBOSE = VERBOSE
+
+    if len(args.single_read_threshold) == 1:
+        lower_thresh = None
+        single_read_thresh = args.single_read_threshold[0]
+    else:
+        if len(args.single_read_threshold) > 2:
+            th._warning_message(
+                'Only 1 or 2 values may be passed as single-read ' +
+                'thresholds. Only using the first 2 options provided.')
+        lower_thresh = args.single_read_threshold[0]
+        single_read_thresh = args.single_read_threshold[1]
+
     all_reg_stats, stat_type = apply_per_read_thresh(
-        args.per_read_statistics_filename, args.single_read_threshold,
-        args.minimum_test_reads)
+        args.per_read_statistics_filename, single_read_thresh,
+        args.minimum_test_reads, lower_thresh)
 
     write_stats(all_reg_stats, args.statistics_file_basename, stat_type,
                 args.minimum_test_reads)
 
     return
 
-def est_ref_main(args):
+def _est_ref_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
@@ -2324,12 +2957,12 @@ def est_ref_main(args):
 
     return
 
-def est_alt_ref_main(args):
+def _est_alt_ref_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
 
-    alt_ref, upstrm_bases = estimate_alt_model(
+    alt_ref = estimate_alt_model(
         args.fast5_basedirs, args.control_fast5_basedirs,
         args.corrected_group, args.basecall_subgroups,
         args.tombo_model_filename, args.bio_sample_type,
@@ -2339,17 +2972,17 @@ def est_alt_ref_main(args):
         args.control_density_filename, args.processes)
     # returns None when profiling method
     if alt_ref is None: return
-    write_tombo_model(alt_ref, args.alternate_model_filename, upstrm_bases,
-                      args.alternate_model_base, args.alternate_model_name)
+    alt_ref.write_model(args.alternate_model_filename,
+                        args.alternate_model_base, args.alternate_model_name)
 
     return
 
-def estimate_scale_main(args):
+def _estimate_scale_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
 
-    if VERBOSE: sys.stderr.write('Getting files list\n')
+    if VERBOSE: th._status_message('Getting files list.')
     try:
         if not os.path.isdir(args.fast5_basedir):
             th._error_message_and_exit(
@@ -2368,8 +3001,8 @@ def estimate_scale_main(args):
             'No files identified in the specified ' +
             'directory or within immediate subdirectories.')
 
-    sys.stdout.write('Global scaling estimate: ' +
-                     unicode(th.estimate_global_scale(fast5_fns)) + '\n')
+    th._status_message('Global scaling estimate: ' +
+                       unicode(estimate_global_scale(fast5_fns)))
 
     return
 

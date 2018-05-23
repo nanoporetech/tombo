@@ -29,6 +29,7 @@ if sys.version_info[0] > 2:
     unicode = str
 
 # import tombo functions
+from . import tombo_stats as ts
 from . import tombo_helper as th
 
 from ._default_parameters import SEG_PARAMS_TABLE
@@ -70,14 +71,6 @@ GAP_PAT = re.compile('-+')
 #################################################
 ########## Raw Signal Re-squiggle Code ##########
 #################################################
-
-def get_valid_cpts(raw_signal, min_obs_per_base, running_stat_width,
-                   num_cpts=None):
-    if num_cpts is None:
-        return c_valid_cpts(
-            raw_signal, min_obs_per_base, running_stat_width)
-    return c_valid_cpts_w_cap(
-        raw_signal, min_obs_per_base, running_stat_width, num_cpts)
 
 def get_indel_groups(
         alignVals, align_segs, raw_signal, min_obs_per_base,
@@ -184,7 +177,7 @@ def get_indel_groups(
             raise NotImplementedError('Reached maximum number of ' +
                                'changepoints for a single indel')
         try:
-            cpts = get_valid_cpts(
+            cpts = c_valid_cpts_w_cap(
                 raw_signal[align_segs[group_start]:align_segs[group_end]],
                 min_obs_per_base, running_stat_width, num_cpts)
         # not implemented error returned when fewer cpts found than requested
@@ -262,7 +255,7 @@ def find_read_start(
         if starts_rel_to_read[-1] > num_obs else starts_rel_to_read
     if begin_read_starts.shape[0] <= 0:
         return norm_signal, starts_rel_to_read
-    signal_cpts = get_valid_cpts(
+    signal_cpts = c_valid_cpts_w_cap(
         norm_signal[:num_obs], min_obs_per_base, running_stat_width,
         begin_read_starts.shape[0])
 
@@ -317,14 +310,18 @@ def resquiggle_read(
         rna = th.is_read_rna(fast5_data)
         if rna:
             all_raw_signal = all_raw_signal[::-1]
-        event_means, event_kmers = None, None
+        r_event_means, r_model_means, r_model_inv_vars = None, None, None
         if norm_type == 'pA':
             event_data = fast5_data[
                 '/Analyses/' + basecall_group + '/' +
                 read_info.Subgroup + '/Events'].value
-            event_means = event_data['mean']
-            event_kmers = list(map(lambda x: x.decode(),
-                                   event_data['model_state']))
+            r_event_means = event_data['mean']
+            r_event_kmers = list(map(lambda x: x.decode(),
+                                     event_data['model_state']))
+            r_model_means = np.array([
+                pore_model.means[kmer] for kmer in r_event_kmers])
+            r_model_inv_vars = np.array([
+                pore_model.inv_var[kmer] for kmer in r_event_kmers])
         fast5_data.close()
     except:
         raise NotImplementedError(
@@ -340,11 +337,11 @@ def resquiggle_read(
     else:
         running_stat_width, min_obs_per_base = seg_params
 
-    # normalize signal
-    norm_signal, scale_values = th.normalize_raw_signal(
+    # normalize signal (potentially using model fitting if provided)
+    norm_signal, scale_values = ts.normalize_raw_signal(
         all_raw_signal, read_start_rel_to_raw, starts_rel_to_read[-1],
-        norm_type, channel_info, outlier_thresh, pore_model=pore_model,
-        event_means=event_means, event_kmers=event_kmers)
+        norm_type, channel_info, outlier_thresh, event_means=r_event_means,
+        model_means=r_model_means, model_inv_vars=r_model_inv_vars)
     if fix_read_start:
         norm_signal, read_start_rel_to_raw = find_read_start(
             norm_signal, starts_rel_to_read, min_obs_per_base,
@@ -395,9 +392,14 @@ def resquiggle_read(
         pass
 
     if not skip_index:
+        is_filtered = False
+        if obs_filter is not None:
+            base_lens = np.diff(new_segs)
+            is_filtered = any(np.percentile(base_lens, pctl) > thresh
+                              for pctl, thresh in obs_filter)
         return th.prep_index_data(
             fast5_fn, genome_loc, read_start_rel_to_raw, new_segs,
-            corrected_group, read_info.Subgroup, rna, obs_filter)
+            corrected_group, read_info.Subgroup, rna, is_filtered)
 
     return
 
@@ -1134,11 +1136,11 @@ def resquiggle_all_reads(
         p.start()
         resquiggle_ps.append(p)
 
-    if VERBOSE: sys.stderr.write(
+    if VERBOSE: th._status_message(
             'Correcting ' + unicode(num_reads) + ' files with ' +
             unicode(len(basecall_subgroups)) + ' subgroup(s)/read(s) ' +
             'each (Will print a dot for each ' + unicode(PROGRESS_INTERVAL) +
-            ' reads completed).\n')
+            ' reads completed).')
     failed_reads = defaultdict(list)
     all_index_data = []
     while any(p.is_alive() for p in align_ps):
@@ -1200,7 +1202,7 @@ def check_for_albacore(files, basecall_group, num_reads=50):
 
     return
 
-def event_resquiggle_main(args):
+def _event_resquiggle_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
@@ -1220,7 +1222,7 @@ def event_resquiggle_main(args):
     else:
         mapper_data = mapperData(args.graphmap_executable, 'graphmap')
 
-    if VERBOSE: sys.stderr.write('Getting file list.\n')
+    if VERBOSE: th._status_message('Getting file list.')
     try:
         if not os.path.isdir(args.fast5_basedir):
             th._error_message_and_exit(
@@ -1264,13 +1266,14 @@ def event_resquiggle_main(args):
     # are requested
     pore_model = None
     if args.normalization_type == 'pA':
-        pore_model = th.parse_pore_model(args.pore_model_filename)
+        pore_model = ts.TomboModel(
+            args.pore_model_filename, is_text_model=True)
 
     obs_filter = th.parse_obs_filter(args.obs_per_base_filter) \
                  if 'obs_per_base_filter' in args else None
 
     failed_reads, all_index_data = resquiggle_all_reads(
-        files, args.genome_fasta, mapper_data,
+        files, args.reference_fasta, mapper_data,
         args.basecall_group, args.basecall_subgroups,
         args.corrected_group, args.normalization_type, outlier_thresh,
         args.timeout, args.cpts_limit, args.overwrite,
@@ -1282,12 +1285,12 @@ def event_resquiggle_main(args):
     fail_summary = [(err, len(fns)) for err, fns in failed_reads.items()]
     if len(fail_summary) > 0:
         total_num_failed = sum(map(itemgetter(1), fail_summary))
-        sys.stderr.write('Failed reads summary (' + unicode(total_num_failed) +
+        th._status_message('Failed reads summary (' + unicode(total_num_failed) +
                          ' total failed):\n' + '\n'.join(
                              "\t" + err + " :\t" + unicode(n_fns)
-                             for err, n_fns in sorted(fail_summary)) + '\n')
+                             for err, n_fns in sorted(fail_summary)))
     else:
-        sys.stderr.write('All reads successfully re-squiggled!\n')
+        th._status_message('All reads successfully re-squiggled!')
     if args.failed_reads_filename is not None:
         with io.open(args.failed_reads_filename, 'wt') as fp:
             fp.write('\n'.join((

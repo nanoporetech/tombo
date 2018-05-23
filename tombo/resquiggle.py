@@ -17,11 +17,12 @@ import h5py
 
 import numpy as np
 np.seterr(all='raise')
+import multiprocessing as mp
 
+from tqdm import tqdm
 from time import sleep
 from operator import itemgetter
 from collections import defaultdict
-from multiprocessing import Process, Pipe
 
 if sys.version_info[0] > 2:
     unicode = str
@@ -33,7 +34,8 @@ from . import tombo_helper as th
 from ._default_parameters import (
     SEG_PARAMS_TABLE, ALGN_PARAMS_TABLE, EXTRA_SIG_FACTOR, MASK_FILL_Z_SCORE,
     MASK_BASES, START_BANDWIDTH, START_SEQ_WINDOW, BAND_BOUNDARY_THRESH,
-    DEL_FIX_WINDOW, MAX_DEL_FIX_WINDOW, MIN_EVENT_TO_SEQ_RATIO, MAX_RAW_CPTS)
+    DEL_FIX_WINDOW, MAX_DEL_FIX_WINDOW, MIN_EVENT_TO_SEQ_RATIO, MAX_RAW_CPTS,
+    PHRED_BASE, SHIFT_CHANGE_THRESH, SCALE_CHANGE_THRESH, SIG_MATCH_THRESH)
 
 from .dynamic_programming import traceback, forward_pass
 from .c_helper import (
@@ -43,8 +45,7 @@ from .c_dynamic_programming import (
     c_base_z_scores, c_adaptive_banded_forward_pass)
 
 VERBOSE = False
-PROGRESS_INTERVAL = 1000
-PROC_UPDATE_INTERVAL = max(1, int(PROGRESS_INTERVAL / 100))
+PROC_UPDATE_INTERVAL = 100
 
 _PROFILE_RSQGL = False
 
@@ -60,11 +61,10 @@ _NUM_DEBUG_ENDS = 250
 ########## Read Segmentation Scoring ##########
 ###############################################
 
-def get_read_seg_score(norm_signal, segs, r_ref_means, r_ref_sds):
+def get_read_seg_score(r_means, r_ref_means, r_ref_sds):
     return np.mean([
         np.abs((b_m - b_ref_m) / b_ref_s)
-        for b_m, b_ref_m, b_ref_s in
-        zip(c_new_means(norm_signal, segs), r_ref_means, r_ref_sds)])
+        for b_m, b_ref_m, b_ref_s in zip(r_means, r_ref_means, r_ref_sds)])
 
 
 ##################################
@@ -170,8 +170,8 @@ def _write_params_debug(
         norm_signal, segs, r_ref_means, r_ref_sds,
         running_stat_width, min_obs_per_base, mean_obs_per_event,
         match_evalue, skip_pen, bandwidth, fast5_fn):
-    mean_half_z_score = get_read_seg_score(
-        norm_signal, segs, r_ref_means, r_ref_sds)
+    r_means = c_new_means(norm_signal, segs)
+    mean_half_z_score = get_read_seg_score(r_means, r_ref_means, r_ref_sds)
     sys.stdout.write(
         '\t'.join(map(str, (
             running_stat_width, min_obs_per_base, mean_obs_per_event,
@@ -202,7 +202,7 @@ def get_model_fit_segs(
         segs, norm_signal, r_ref_means, r_ref_sds, min_obs_per_base,
         max_raw_cpts=None, del_fix_window=DEL_FIX_WINDOW,
         max_del_fix_window=MAX_DEL_FIX_WINDOW,
-        extra_sig_factor=EXTRA_SIG_FACTOR):
+        extra_sig_factor=EXTRA_SIG_FACTOR, max_half_z_score=None):
     """
     Find new segments at skipped bases during dynamic programming segmentation.
 
@@ -314,7 +314,8 @@ def get_model_fit_segs(
         reg_z_scores = c_reg_z_scores(
             norm_signal[sig_start:sig_end], r_ref_means[start:end],
             r_ref_sds[start:end], pseudo_starts,
-            0, n_events, n_events, min_obs_per_base)
+            0, n_events, n_events, min_obs_per_base,
+            max_half_z_score=max_half_z_score)
         reg_fwd_scores = forward_pass(reg_z_scores, min_obs_per_base)
         # perform signal based scoring segmentation
         #  - it is ~60X faster than base space
@@ -338,7 +339,7 @@ def get_model_fit_segs(
 
 def get_short_read_event_mapping(
         event_means, r_ref_means, r_ref_sds, skip_pen, stay_pen, z_shift,
-        reg_id=None, debug_fps=None):
+        reg_id=None, debug_fps=None, max_half_z_score=None):
     """
     Perform banded dynamic programming sequence to event alignment
     without masking
@@ -365,10 +366,18 @@ def get_short_read_event_mapping(
         np.linspace(0, mask_len, mask_len * 2)]).astype(np.int64)
     bandwidth = events_len - mask_len
 
-    shifted_z_scores = z_shift - np.row_stack([
-        np.abs(event_means[event_pos:event_pos + bandwidth]
-               - r_ref_means[seq_pos]) / r_ref_sds[seq_pos]
-        for seq_pos, event_pos in enumerate(band_event_starts)])
+    shifted_z_scores = np.empty((band_event_starts.shape[0], bandwidth))
+    for seq_pos, event_pos in enumerate(band_event_starts):
+        if max_half_z_score is None:
+            shifted_z_scores[seq_pos,:] = z_shift - np.abs(
+                event_means[event_pos:event_pos + bandwidth]
+                - r_ref_means[seq_pos]) / r_ref_sds[seq_pos]
+        else:
+            shifted_z_scores[seq_pos,:] = z_shift - np.minimum(
+                max_half_z_score, np.abs(
+                    event_means[event_pos:event_pos + bandwidth]
+                    - r_ref_means[seq_pos]) / r_ref_sds[seq_pos])
+
     fwd_pass, fwd_pass_move = c_banded_forward_pass(
         shifted_z_scores, band_event_starts, skip_pen, stay_pen)
 
@@ -397,7 +406,8 @@ def get_masked_start_fwd_pass(
         event_means, r_ref_means, r_ref_sds, mapped_start_offset,
         skip_pen, stay_pen, z_shift, bandwidth, events_per_base,
         mask_fill_z_score=MASK_FILL_Z_SCORE,
-        mask_bases=MASK_BASES, reg_id=None, debug_fps=None):
+        mask_bases=MASK_BASES, reg_id=None, debug_fps=None,
+        max_half_z_score=None):
     """
     Perform banded dynamic programming sequence to event alignment forcing
     the path to start and end at the previously discovered locations.
@@ -425,6 +435,14 @@ def get_masked_start_fwd_pass(
     assert event_means.shape[0] - mapped_start_offset >= bandwidth, (
         'Read sequence to signal matching starts too far into events for ' +
         'full adaptive assignment.')
+    # if max_half_z_score is none set it to valid float for cython
+    # z-score computation
+    if max_half_z_score is None:
+        do_winsorize_z = False
+        max_half_z_score = 0.0
+    else:
+        do_winsorize_z = True
+
     half_bandwidth = bandwidth // 2
 
     # check if the mapped start position is too close to the end of
@@ -437,7 +455,7 @@ def get_masked_start_fwd_pass(
                       int((half_bandwidth + 1) / events_per_base)) + 1
     band_event_starts = np.linspace(
         band_events_start_pos,
-        band_events_start_pos + (tmp_seq_len  * events_per_base),
+        band_events_start_pos + (tmp_seq_len * events_per_base),
         tmp_seq_len).astype(np.int64)
     mask_seq_len = max(
         mask_bases, next(i + 2 for i, bes in enumerate(band_event_starts)
@@ -456,11 +474,11 @@ def get_masked_start_fwd_pass(
         event_vals = event_means[event_pos + start_mask_len:
                                  event_pos + bandwidth - end_mask_len]
         b_z_scores = c_base_z_scores(
-            event_vals, r_ref_means[seq_pos], r_ref_sds[seq_pos])
+            event_vals, r_ref_means[seq_pos], r_ref_sds[seq_pos],
+            do_winsorize_z=do_winsorize_z, max_half_z_score=max_half_z_score)
         masked_z_scores = np.concatenate([
             [mask_fill_z_score] * start_mask_len, b_z_scores,
             [mask_fill_z_score] * end_mask_len])
-        del b_z_scores
         return masked_z_scores
     shifted_z_scores = np.empty((band_event_starts.shape[0], bandwidth))
     for seq_pos, event_pos in enumerate(band_event_starts):
@@ -473,8 +491,8 @@ def get_masked_start_fwd_pass(
 
 def get_mapping_start(
         event_means, r_ref_means, r_ref_sds, skip_pen, stay_pen, z_shift,
-        seq_window, bandwidth, norm_signal, valid_cpts, score_thresh,
-        min_obs_per_base, reg_id=None, debug_fps=None):
+        seq_window, bandwidth, norm_signal, valid_cpts,
+        min_obs_per_base, reg_id=None, debug_fps=None, max_half_z_score=None):
     """
     Perform banded dynamic programming sequence to event alignment through
     The beginning of an read to identify the start of genome sequence to
@@ -494,8 +512,6 @@ def get_mapping_start(
         event mapping
     :param norm_signal: Normalized raw signal vector
     :param valid_cpts: Segmentation positions within norm_signal
-    :param score_thresh: Read mean half-normal signal segmentation score
-        threshold
 
     :returns: Start position (0-based) of seqeunce to event alignment within
         events and the mean events_per_base through the queried portion of read
@@ -507,14 +523,18 @@ def get_mapping_start(
             'Genomic mapping too short for start/end discovery')
 
     # banded z-scores (moving up one event per base for start/end discovery
-    start_z_scores = z_shift - np.row_stack([
-        np.abs(event_means[seq_pos:seq_pos + bandwidth] -
-               r_ref_means[seq_pos]) / r_ref_sds[seq_pos]
-        for seq_pos in range(seq_window)])
-    start_band_event_starts = np.linspace(
-        0, seq_window, seq_window).astype(np.int64)
-
-    np.arange(seq_window, dtype=np.int64)
+    start_z_scores = np.empty((seq_window, bandwidth))
+    for seq_event_pos in range(seq_window):
+        if max_half_z_score is None:
+            start_z_scores[seq_event_pos,:] = z_shift - np.abs(
+                event_means[seq_event_pos:seq_event_pos + bandwidth]
+                - r_ref_means[seq_event_pos]) / r_ref_sds[seq_event_pos]
+        else:
+            start_z_scores[seq_event_pos,:] = z_shift - np.minimum(
+                max_half_z_score, np.abs(
+                    event_means[seq_event_pos:seq_event_pos + bandwidth]
+                    - r_ref_means[seq_event_pos]) / r_ref_sds[seq_event_pos])
+    start_band_event_starts = np.arange(seq_window, dtype=np.int64)
 
     start_fwd_pass, start_fwd_pass_move = c_banded_forward_pass(
         start_z_scores, start_band_event_starts, skip_pen, stay_pen)
@@ -533,12 +553,13 @@ def get_mapping_start(
     start_segs = start_segs - start_segs[0]
     start_segs = get_model_fit_segs(
         start_segs, start_sig, r_ref_means[:seq_window],
-        r_ref_sds[:seq_window], min_obs_per_base)
-    if get_read_seg_score(
-            start_sig, start_segs, r_ref_means[:seq_window],
-            r_ref_sds[:seq_window]) > score_thresh:
-        raise NotImplementedError(
-            'Poor raw to expected signal matching at read start')
+        r_ref_sds[:seq_window], min_obs_per_base,
+        max_half_z_score=max_half_z_score)
+    start_means = c_new_means(start_sig, start_segs)
+    #if get_read_seg_score(start_means, r_ref_means[:seq_window],
+    #                      r_ref_sds[:seq_window]) > sig_match_thresh:
+    #    raise NotImplementedError(
+    #        'Poor raw to expected signal matching at read start')
 
     # compute the average events per base to use for the start forward pass
     events_per_base = (start_tb[-1] - start_tb[0]) / len(start_tb)
@@ -549,9 +570,9 @@ def get_mapping_start(
 def find_adaptive_base_assignment(
         norm_signal, running_stat_width, min_obs_per_base, num_events, std_ref,
         genome_seq, genome_loc, skip_pen, stay_pen, z_shift, bandwidth, is_rna,
-        score_thresh, start_bandwidth=START_BANDWIDTH,
-        start_seq_window=START_SEQ_WINDOW,
-        band_boundary_thresh=BAND_BOUNDARY_THRESH, reg_id=None, debug_fps=None):
+        start_bandwidth=START_BANDWIDTH, start_seq_window=START_SEQ_WINDOW,
+        band_boundary_thresh=BAND_BOUNDARY_THRESH, reg_id=None, debug_fps=None,
+        max_half_z_score=None):
     """
     Perform banded dynamic programming sequence to event alignment by first
     identifying the start of the sequence to event matching and then
@@ -573,7 +594,6 @@ def find_adaptive_base_assignment(
     :param bandwidth: Bandwidth over which to search for sequence to
         event mapping
     :param is_rna: Is this an RNA read
-    :param score_thresh: Read mean half-normal segmentation score threshold
 
     :returns: Start of seqeunce to event alignment and the mean
         events_per_base through the queried portion of a read
@@ -586,7 +606,7 @@ def find_adaptive_base_assignment(
     else:
         valid_cpts = c_valid_cpts_w_cap(
             norm_signal, min_obs_per_base, running_stat_width, num_events)
-        #valid_cpts = th.get_valid_cpts(
+        #valid_cpts = ts.get_valid_cpts(
         #    norm_signal, running_stat_width, num_events)
     valid_cpts.sort()
     event_means = c_new_means(norm_signal, valid_cpts)
@@ -604,10 +624,11 @@ def find_adaptive_base_assignment(
 
     # for short reads, just search the whole read with an appropriate bandwidth
     if (event_means.shape[0] < start_bandwidth + start_seq_window or
-        seq_len < start_seq_window):
+        seq_len < max(start_seq_window, bandwidth / 2)):
         seq_events = get_short_read_event_mapping(
             event_means, r_ref_means, r_ref_sds, skip_pen, stay_pen,
-            z_shift, reg_id=reg_id, debug_fps=debug_fps)
+            z_shift, reg_id=reg_id, debug_fps=debug_fps,
+            max_half_z_score=max_half_z_score)
         seq_segs = valid_cpts[seq_events]
         read_start_rel_to_raw = seq_segs[0]
         seq_segs = seq_segs - read_start_rel_to_raw
@@ -620,8 +641,8 @@ def find_adaptive_base_assignment(
     mapped_start, events_per_base = get_mapping_start(
         event_means, r_ref_means, r_ref_sds, skip_pen, stay_pen, z_shift,
         start_seq_window, start_bandwidth, norm_signal, valid_cpts,
-        score_thresh, min_obs_per_base, reg_id=reg_id,
-        debug_fps=debug_fps)
+        min_obs_per_base, reg_id=reg_id,
+        debug_fps=debug_fps, max_half_z_score=max_half_z_score)
 
     # get number of events to clip and how far into the events the
     # discovered start is located
@@ -639,7 +660,8 @@ def find_adaptive_base_assignment(
         events_start_clip < bandwidth):
         seq_events = get_short_read_event_mapping(
             event_means, r_ref_means, r_ref_sds, skip_pen, stay_pen,
-            z_shift, reg_id=reg_id, debug_fps=debug_fps)
+            z_shift, reg_id=reg_id, debug_fps=debug_fps,
+            max_half_z_score=max_half_z_score)
         seq_segs = valid_cpts[seq_events]
         read_start_rel_to_raw = seq_segs[0]
         seq_segs = seq_segs - read_start_rel_to_raw
@@ -666,11 +688,20 @@ def find_adaptive_base_assignment(
     #fwd_pass_move[start_seq_len+1:,:] = np.NAN
     #band_event_starts[start_seq_len:] = np.NAN
 
+    # if max_half_z_score is none set it to valid float for cython
+    # z-score computation
+    if max_half_z_score is None:
+        do_winsorize_z = False
+        max_half_z_score = 0.0
+    else:
+        do_winsorize_z = True
+
     if _DEBUG_FULL or _DEBUG_MIDDLE:
         rest_z_scores = c_adaptive_banded_forward_pass(
             fwd_pass, fwd_pass_move, band_event_starts, event_means,
             r_ref_means, r_ref_sds, z_shift, skip_pen, stay_pen,
-            start_seq_len, MASK_FILL_Z_SCORE, True)
+            start_seq_len, MASK_FILL_Z_SCORE, do_winsorize_z, max_half_z_score,
+            return_z_scores=True)
         shifted_z_scores = np.empty((seq_len, bandwidth), dtype=np.float64)
         shifted_z_scores[:start_seq_len] = start_z_scores
         shifted_z_scores[start_seq_len:] = rest_z_scores
@@ -678,7 +709,7 @@ def find_adaptive_base_assignment(
         c_adaptive_banded_forward_pass(
             fwd_pass, fwd_pass_move, band_event_starts, event_means,
             r_ref_means, r_ref_sds, z_shift, skip_pen, stay_pen,
-            start_seq_len, MASK_FILL_Z_SCORE)
+            start_seq_len, MASK_FILL_Z_SCORE, do_winsorize_z, max_half_z_score)
 
     top_max_pos = np.argmax(fwd_pass[-1,:])
     if _DEBUG_FULL:
@@ -719,10 +750,11 @@ def find_adaptive_base_assignment(
 def resquiggle_read(
         all_raw_signal, channel_info, genome_seq, genome_loc,
         align_info, std_ref, outlier_thresh, corr_grp,
-        bio_samp_type, seg_params, sig_aln_params, obs_filter,
+        bio_samp_type, seg_params, sig_aln_params,
         fast5_fn=None, max_raw_cpts=MAX_RAW_CPTS,
         min_event_to_seq_ratio=MIN_EVENT_TO_SEQ_RATIO, skip_index=False,
-        reg_id=None, debug_fps=None, const_scale=None):
+        reg_id=None, debug_fps=None, const_scale=None, skip_seq_scaling=False,
+        scale_values=None, use_save_bandwith=False):
     """
     Perform banded dynamic programming sequence to event alignment for this read
 
@@ -741,9 +773,8 @@ def resquiggle_read(
     :param seg_params: 3 segmenation parameters (mean_obs_per_event,
         running_stat_width and min_obs_per_base)
     :param sig_aln_params: Signal align parameters (match_evalue, skip_pen
-        and bandwidth)
-    :param obs_filter: Obervations per base filter to apply for filtered slot
-        in FAST5
+        bandwidth, save_bandwidth, signal_matching_threshold and windsorizor
+        score)
     """
     # flip raw signal for re-squiggling
     is_rna = bio_samp_type == 'RNA'
@@ -751,12 +782,17 @@ def resquiggle_read(
         all_raw_signal = all_raw_signal[::-1]
 
     if sig_aln_params is None:
-        match_evalue, skip_pen, bandwidth, score_thresh = ALGN_PARAMS_TABLE[
-            bio_samp_type]
+        (match_evalue, skip_pen, bandwidth, save_bandwidth,
+         max_half_z_score) = ALGN_PARAMS_TABLE[bio_samp_type]
     else:
         # unpack signal alignment parameters
-        match_evalue, skip_pen, bandwidth, score_thresh = sig_aln_params
+        (match_evalue, skip_pen, bandwidth, save_bandwidth,
+         max_half_z_score) = sig_aln_params
         bandwidth = int(bandwidth)
+        save_bandwidth = int(save_bandwidth)
+
+    if use_save_bandwith:
+        bandwidth = save_bandwidth
     z_shift, stay_pen = ts.get_dynamic_prog_params(match_evalue)
 
     if seg_params is None:
@@ -773,14 +809,23 @@ def resquiggle_read(
     # i.e. one adaptive bandwidth per base is too much to find a good mapping
     if num_events / bandwidth > len(genome_seq):
         raise NotImplementedError('Too much raw signal for mapped sequence')
+
     # normalize signal
-    if const_scale is not None:
-        norm_signal, scale_values = th.normalize_raw_signal(
+    # note that channel_info is only used for pA normalization, which is not
+    # available here. This option is retained here in case some channel
+    # info should become useful in the future. The primary target for this is
+    # the before median parameter.
+    if scale_values is not None:
+        norm_signal, scale_values = ts.normalize_raw_signal(
+            all_raw_signal, 0, all_raw_signal.shape[0],
+            scale_values=scale_values)
+    elif const_scale is not None:
+        norm_signal, scale_values = ts.normalize_raw_signal(
             all_raw_signal, 0, all_raw_signal.shape[0],
             'median_const_scale', channel_info, outlier_thresh,
             const_scale=const_scale)
     else:
-        norm_signal, scale_values = th.normalize_raw_signal(
+        norm_signal, scale_values = ts.normalize_raw_signal(
             all_raw_signal, 0, all_raw_signal.shape[0],
             'median', channel_info, outlier_thresh)
 
@@ -788,7 +833,7 @@ def resquiggle_read(
      genome_seq, genome_loc) = find_adaptive_base_assignment(
          norm_signal, running_stat_width, min_obs_per_base, num_events, std_ref,
          genome_seq, genome_loc, skip_pen, stay_pen, z_shift, bandwidth, is_rna,
-         score_thresh, reg_id=reg_id, debug_fps=debug_fps)
+         reg_id=reg_id, debug_fps=debug_fps, max_half_z_score=max_half_z_score)
     norm_signal = norm_signal[read_start_rel_to_raw:
                               read_start_rel_to_raw + segs[-1]]
 
@@ -796,11 +841,27 @@ def resquiggle_read(
     # to be fixed.
     segs = get_model_fit_segs(
         segs, norm_signal, r_ref_means, r_ref_sds,
-        min_obs_per_base, max_raw_cpts)
+        min_obs_per_base, max_raw_cpts, max_half_z_score=max_half_z_score)
 
-    if get_read_seg_score(
-            norm_signal, segs, r_ref_means, r_ref_sds) > score_thresh:
-        raise NotImplementedError('Poor raw to expected signal matching')
+    if skip_seq_scaling:
+        norm_params_changed = False
+    else:
+        (shift, scale, shift_corr_factor,
+         scale_corr_factor) = ts.calc_kmer_fitted_shift_scale(
+             scale_values.shift, scale_values.scale,
+             c_new_means(norm_signal, segs), r_ref_means, method='theil_sen')
+        scale_values = th.scaleValues(
+            shift, scale, scale_values.lower_lim, scale_values.upper_lim)
+        # re-normalize signal with new fitted parameters
+        norm_signal = (norm_signal - shift_corr_factor) / scale_corr_factor
+        # determine if normalization parameters changed enough to warrant
+        # re-squiggling again
+        norm_params_changed = (
+            np.abs(shift_corr_factor) > SHIFT_CHANGE_THRESH or
+            np.abs(scale_corr_factor - 1) > SCALE_CHANGE_THRESH)
+
+    sig_match_score = get_read_seg_score(c_new_means(norm_signal, segs),
+                                         r_ref_means, r_ref_sds)
     if segs.shape[0] != len(genome_seq) + 1:
         raise ValueError('Aligned sequence does not match number ' +
                          'of segments produced')
@@ -815,17 +876,19 @@ def resquiggle_read(
         _write_fit_debug(
             norm_signal, segs, r_ref_means, r_ref_sds, genome_seq)
 
-    return (genome_loc, read_start_rel_to_raw, segs, genome_seq,
-            norm_signal, scale_values, corr_grp, align_info, is_rna)
+    return (genome_loc, read_start_rel_to_raw, segs, genome_seq, norm_signal,
+            scale_values, corr_grp, align_info, is_rna, sig_match_score,
+            norm_params_changed)
 
 
 #######################################
 ########## Genomic Alignment ##########
 #######################################
 
-def get_read_seq(fast5_data, bc_grp, bc_subgrp, bio_samp_type):
+def get_read_seq(fast5_data, bc_grp, bc_subgrp, bio_samp_type, q_score_thresh):
     """
-    Extract the read sequence from the Fastq slot providing useful error messages
+    Extract the read sequence from the Fastq slot providing useful error
+    messages
     """
     try:
         fastq_raw_value = fast5_data[
@@ -840,7 +903,18 @@ def get_read_seq(fast5_data, bc_grp, bc_subgrp, bio_samp_type):
     except (TypeError, AttributeError):
         pass
 
-    read_seq = fastq_raw_value.split('\n')[1]
+    s_fastq = fastq_raw_value.split('\n')
+    read_seq, read_q = s_fastq[1], s_fastq[3]
+
+    # compute read q-score
+    if sys.version_info[0] > 2:
+        mean_q_score = np.mean([q_val - PHRED_BASE
+                               for q_val in read_q.encode('ASCII')])
+    else:
+        mean_q_score = np.mean([ord(q_val) - PHRED_BASE
+                               for q_val in read_q.encode('ASCII')])
+    if q_score_thresh is not None and mean_q_score < q_score_thresh:
+        raise NotImplementedError('Read filtered by q-score.')
 
     read_data = th.get_raw_read_slot(fast5_data)
 
@@ -862,12 +936,12 @@ def get_read_seq(fast5_data, bc_grp, bc_subgrp, bio_samp_type):
     if bio_samp_type == 'RNA':
         read_seq = th.rev_transcribe(read_seq)
 
-    return read_seq, read_id, bio_samp_type
+    return read_seq, read_id, bio_samp_type, mean_q_score
 
 def map_read(fast5_data, bc_grp, bc_subgrp, corr_grp, aligner, bio_samp_type,
-             map_thr_buf, genome_index):
-    read_seq, read_id, bio_samp_type = get_read_seq(
-        fast5_data, bc_grp, bc_subgrp, bio_samp_type)
+             map_thr_buf, q_score_thresh):
+    read_seq, read_id, bio_samp_type, mean_q_score = get_read_seq(
+        fast5_data, bc_grp, bc_subgrp, bio_samp_type, q_score_thresh)
     try:
         alignment = next(aligner.map(str(read_seq), buf=map_thr_buf))
     except StopIteration:
@@ -896,11 +970,10 @@ def map_read(fast5_data, bc_grp, bc_subgrp, corr_grp, aligner, bio_samp_type,
         start_clipped_bases = len(read_seq) - alignment.q_en
         end_clipped_bases = alignment.q_st
 
-    # current version of mappy has a bug in the sequence extraction for
-    # long chromosomes, this line can be uncommented once the issue has been
-    # resolved https://github.com/lh3/minimap2/issues/126
-    #genome_seq = aligner.seq(chrm, ref_start, ref_end)
-    genome_seq = genome_index.get_seq(chrm, ref_start, ref_end)
+    # extract genome sequence from mappy aligner
+    genome_seq = aligner.seq(chrm, ref_start, ref_end)
+    if sys.version_info[0] < 3:
+        genome_seq = genome_seq.decode()
     if strand == '-':
         genome_seq = th.rev_comp(genome_seq)
     assert len(genome_seq) == ref_end - ref_start, (
@@ -910,16 +983,103 @@ def map_read(fast5_data, bc_grp, bc_subgrp, corr_grp, aligner, bio_samp_type,
         num_ins, num_del, num_match, num_aligned - num_match)
     genome_loc = th.genomeLoc(ref_start, strand, chrm)
 
-    return genome_seq, genome_loc, align_info, bio_samp_type
+    return genome_seq, genome_loc, align_info, bio_samp_type, mean_q_score
+
+def _io_and_map_read(
+        fast5_data, failed_reads_q, bc_subgrps, bc_grp, corr_grp, aligner,
+        bio_samp_type, map_thr_buf, fast5_fn, num_processed, map_conn,
+        outlier_thresh, compute_sd, obs_filter, index_q, q_score_thresh,
+        sig_match_thresh):
+    try:
+        # extract channel and raw data for this read
+        channel_info = th.get_channel_info(fast5_data)
+        all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'].value
+    except:
+        failed_reads_q.put(
+            ('Channel or raw signal information not found in FAST5 file',
+             fast5_fn))
+        return
+
+    for bc_subgrp in bc_subgrps:
+        try:
+            # TODO warn if reads appear to switch bio sample type
+            (genome_seq, genome_loc, align_info, bio_samp_type,
+             mean_q_score) = map_read(
+                 fast5_data, bc_grp, bc_subgrp, corr_grp, aligner,
+                 bio_samp_type, map_thr_buf, q_score_thresh)
+            if th.invalid_seq(genome_seq):
+                raise NotImplementedError(
+                    'Reference mapping contains non-canonical bases ' +
+                    '(transcriptome reference cannot contain U bases)')
+            map_conn.send([
+                all_raw_signal, channel_info, fast5_fn, genome_seq,
+                genome_loc, align_info, bio_samp_type, num_processed])
+            # wait until re-squiggle returns
+            read_failed, rsqgl_data = map_conn.recv()
+            if read_failed:
+                failed_reads_q.put((
+                    rsqgl_data[0], bc_subgrp + ':::' + rsqgl_data[1]))
+                continue
+
+            # unpack data needed to write new event data
+            # this is the return data from resquiggle_read
+            (genome_loc, read_start_rel_to_raw, segs, genome_seq,
+             norm_signal, scale_values, corr_grp, align_info,
+             is_rna, sig_match_score) = rsqgl_data
+            if not _DRY_RUN:
+                # write re-squiggle event assignment to the read FAST5 file
+                th.write_new_fast5_group(
+                    fast5_data, genome_loc, read_start_rel_to_raw, segs,
+                    genome_seq, norm_signal, scale_values, corr_grp,
+                    align_info.Subgroup, 'median', outlier_thresh,
+                    compute_sd, align_info=align_info, rna=is_rna,
+                    sig_match_score=sig_match_score)
+
+            if index_q is not None:
+                # check that read passes reversible filters
+                is_filtered = False
+                if sig_match_score > sig_match_thresh:
+                    failed_reads_q.put((
+                        'Poor raw to expected signal matching ' +
+                        '(revert with `tombo clear_filters`)',
+                        bc_subgrp + ':::' + fast5_fn))
+                    is_filtered = True
+                elif obs_filter is not None:
+                    base_lens = np.diff(segs)
+                    is_filtered = any(np.percentile(base_lens, pctl) > thresh
+                                      for pctl, thresh in obs_filter)
+                    failed_reads_q.put((
+                        'Read filtered by observation per base ' +
+                        'thresholds (revert with `tombo clear_filters`)',
+                        bc_subgrp + ':::' + fast5_fn))
+                # prep and load data into index queue
+                index_q.put(th.prep_index_data(
+                    fast5_fn, genome_loc, read_start_rel_to_raw, segs,
+                    corr_grp, align_info.Subgroup, is_rna, is_filtered,
+                    sig_match_score, mean_q_score))
+        except Exception as e:
+            # uncomment to identify mysterious errors
+            #map_conn.send(None)
+            #raise
+            try:
+                th.write_error_status(
+                    fast5_fn, corr_grp, bc_subgrp, unicode(e))
+            except:
+                pass
+            failed_reads_q.put((
+                unicode(e), bc_subgrp + ':::' + fast5_fn))
+
+    return
 
 
-########################################
-########## Re-squiggle Worker ##########
-########################################
+#########################################
+########## Re-squiggle Workers ##########
+#########################################
 
 def _resquiggle_worker(
         rsqgl_conns, std_ref, outlier_thresh, corr_grp, bio_samp_type,
-        seg_params, sig_aln_params, obs_filter, skip_index, const_scale):
+        seg_params, sig_aln_params, skip_index, const_scale, skip_seq_scaling,
+        max_scaling_iters):
     debug_fps = None
     if _DEBUG_MIDDLE or _DEBUG_FULL:
         debug_fps = _open_debug_fps()
@@ -936,10 +1096,9 @@ def _resquiggle_worker(
             continue
 
         try:
-            # get new mapping results
             map_info = rsqgl_conn.recv()
-            # None signals the connected thread has finished the reads queue
             if map_info is None:
+                # this thread has finished the reads queue
                 del rsqgl_conns[conn_num]
                 continue
 
@@ -949,16 +1108,49 @@ def _resquiggle_worker(
             rsqgl_data = resquiggle_read(
                 all_raw_signal, channel_info, genome_seq, genome_loc,
                 align_info, std_ref, outlier_thresh, corr_grp, bio_samp_type,
-                seg_params, sig_aln_params, obs_filter,
-                fast5_fn=fast5_fn, skip_index=skip_index, reg_id=reg_id,
-                debug_fps=debug_fps, const_scale=const_scale)
+                seg_params, sig_aln_params, fast5_fn=fast5_fn,
+                skip_index=skip_index, reg_id=reg_id, debug_fps=debug_fps,
+                const_scale=const_scale, skip_seq_scaling=skip_seq_scaling)
+            n_iters = 1
+            while n_iters < max_scaling_iters and rsqgl_data[-1]:
+                rsqgl_data = resquiggle_read(
+                    all_raw_signal, channel_info, genome_seq, genome_loc,
+                    align_info, std_ref, outlier_thresh, corr_grp, bio_samp_type,
+                    seg_params, sig_aln_params, fast5_fn=fast5_fn,
+                    skip_index=skip_index, reg_id=reg_id, debug_fps=debug_fps,
+                    skip_seq_scaling=skip_seq_scaling, scale_values=rsqgl_data[5])
+                n_iters += 1
         except Exception as e:
-            # uncomment to identify mysterious errors
-            #raise
-            rsqgl_conn.send([True, [unicode(e), fast5_fn]])
-            continue
+            try:
+                rsqgl_data = resquiggle_read(
+                    all_raw_signal, channel_info, genome_seq, genome_loc,
+                    align_info, std_ref, outlier_thresh, corr_grp, bio_samp_type,
+                    seg_params, sig_aln_params, fast5_fn=fast5_fn,
+                    skip_index=skip_index, reg_id=reg_id, debug_fps=debug_fps,
+                    const_scale=const_scale, skip_seq_scaling=skip_seq_scaling,
+                    use_save_bandwith=True)
+                n_iters = 1
+                while n_iters < max_scaling_iters and rsqgl_data[-1]:
+                    rsqgl_data = resquiggle_read(
+                        all_raw_signal, channel_info, genome_seq, genome_loc,
+                        align_info, std_ref, outlier_thresh, corr_grp,
+                        bio_samp_type, seg_params, sig_aln_params,
+                        fast5_fn=fast5_fn, skip_index=skip_index,
+                        reg_id=reg_id, debug_fps=debug_fps,
+                        skip_seq_scaling=skip_seq_scaling,
+                        scale_values=rsqgl_data[5],
+                        use_save_bandwith=True)
+                    n_iters += 1
+            except Exception as e:
+                # uncomment to identify mysterious errors
+                # added connection closing to avoid deadlocks here
+                #for rsqgl_conn in rsqgl_conns:
+                #    rsqgl_conn.send(None)
+                #raise
+                rsqgl_conn.send([True, [unicode(e), fast5_fn]])
+                continue
 
-        rsqgl_conn.send([False, rsqgl_data])
+        rsqgl_conn.send([False, rsqgl_data[:-1]])
 
     return
 
@@ -969,85 +1161,23 @@ if _PROFILE_RSQGL:
         cProfile.runctx('_resquiggle_wrapper(*args)', globals(), locals(),
                         filename='resquiggle_main.prof')
         return
-def _resquiggle_run_read(
-        fast5_data, failed_reads_q, bc_subgrps, bc_grp, corr_grp, aligner,
-        bio_samp_type, map_thr_buf, fast5_fn, num_processed, map_conn,
-        outlier_thresh, compute_sd, obs_filter, index_q, genome_index):
-    try:
-        # extract channel and raw data for this read
-        channel_info = th.get_channel_info(fast5_data)
-        all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'].value
-    except:
-        failed_reads_q.put(
-            ('Channel or raw signal information not found in FAST5 file',
-             fast5_fn))
 
-    for bc_subgrp in bc_subgrps:
-        try:
-            # TODO warn if reads appear to switch bio sample type
-            genome_seq, genome_loc, align_info, bio_samp_type = map_read(
-                fast5_data, bc_grp, bc_subgrp, corr_grp, aligner,
-                bio_samp_type, map_thr_buf, genome_index)
-            map_conn.send([
-                all_raw_signal, channel_info, fast5_fn, genome_seq,
-                genome_loc, align_info, bio_samp_type, num_processed])
-            # wait until re-squiggle returns
-            read_failed, rsqgl_data = map_conn.recv()
-            if read_failed:
-                failed_reads_q.put((
-                    rsqgl_data[0], bc_subgrp + ':::' + rsqgl_data[1]))
-                continue
-
-            # unpack data needed to write new event data
-            (genome_loc, read_start_rel_to_raw, segs, genome_seq,
-             norm_signal, scale_values, corr_grp, align_info,
-             is_rna) = rsqgl_data
-            if not _DRY_RUN:
-                # write re-squiggle event assignment to the read FAST5 file
-                th.write_new_fast5_group(
-                    fast5_data, genome_loc, read_start_rel_to_raw, segs,
-                    genome_seq, norm_signal, scale_values, corr_grp,
-                    align_info.Subgroup, 'median', outlier_thresh,
-                    compute_sd, align_info=align_info, rna=is_rna)
-
-            if index_q is not None:
-                index_data = th.prep_index_data(
-                    fast5_fn, genome_loc, read_start_rel_to_raw,
-                    segs, corr_grp, align_info.Subgroup, is_rna, obs_filter)
-
-                index_q.put(index_data)
-                if index_data[1][6]:
-                    failed_reads_q.put((
-                        'Read filtered by observation per base ' +
-                        'thresholds (revert with `tombo clear_filters`)',
-                        bc_subgrp + ':::' + fast5_fn))
-        except Exception as e:
-            # uncomment to identify mysterious errors
-            #raise
-            try:
-                th.write_error_status(
-                    fast5_fn, corr_grp, bc_subgrp, unicode(e))
-            except:
-                pass
-            failed_reads_q.put((
-                unicode(e), bc_subgrp + ':::' + fast5_fn))
-
-    return
-
-def _resquiggle_mappy_thread_worker(
+def _io_and_mappy_thread_worker(
         fast5_q, progress_q, failed_reads_q, index_q, bc_grp, bc_subgrps,
         corr_grp, aligner, outlier_thresh, compute_sd, sig_aln_params,
-        obs_filter, const_scale, bio_samp_type, seg_params,
-        overwrite, map_conn, genome_fn):
+        sig_match_thresh, obs_filter, bio_samp_type, overwrite, map_conn,
+        q_score_thresh):
     # get mappy aligner thread buffer
     map_thr_buf = mappy.ThreadBuffer()
-    genome_index = th.Fasta(genome_fn)
 
     num_processed = 0
     while True:
         try:
             fast5_fn = fast5_q.get(block=False)
         except queue.Empty:
+            # python27 sometimes throws false empty error with get(block=False)
+            if not fast5_q.empty():
+                continue
             # signal that all reads have been processed to child process
             map_conn.send(None)
             # update with all reads processed from this thread
@@ -1071,11 +1201,11 @@ def _resquiggle_mappy_thread_worker(
             continue
 
         try:
-            _resquiggle_run_read(
+            _io_and_map_read(
                 fast5_data, failed_reads_q, bc_subgrps, bc_grp, corr_grp,
                 aligner, bio_samp_type, map_thr_buf, fast5_fn,
                 num_processed, map_conn, outlier_thresh, compute_sd,
-                obs_filter, index_q, genome_index)
+                obs_filter, index_q, q_score_thresh, sig_match_thresh)
         finally:
             try:
                 fast5_data.close()
@@ -1085,30 +1215,92 @@ def _resquiggle_mappy_thread_worker(
     return
 
 
-###########################################
-########## Re-squiggle All Reads ##########
-###########################################
+############################################
+########## Multi-process Handling ##########
+############################################
 
-def load_minimap_index(genome_fn, mm_index):
-    if mm_index:
-        aligner = mappy.Aligner(str(mm_index), preset=str('map-ont'))
-    else:
-        aligner = mappy.Aligner(str(genome_fn), preset=str('map-ont'))
+def _get_progress_queue(progress_q, prog_conn, max_value):
+    if VERBOSE:
+        th._status_message(
+            'Re-squiggling reads (raw signal to genomic sequence alignment).')
+        bar = tqdm(total=max_value, smoothing=0)
 
-    return aligner
+    tot_num_rec_proc = 0
+    while True:
+        try:
+            iter_val = progress_q.get(block=False)
+            tot_num_rec_proc += iter_val
+            if VERBOSE: bar.update(iter_val)
+        except queue.Empty:
+            if prog_conn.poll():
+                break
+            sleep(0.1)
+            continue
+
+    if VERBOSE: bar.close()
+    prog_conn.send(tot_num_rec_proc)
+
+    return
+
+def _get_failed_read_queue(failed_reads_q, failed_read_conn):
+    failed_reads = defaultdict(list)
+    # continue to process the failed reads queue until the end signal
+    # is sent via the failed_read_conn
+    while True:
+        try:
+            errorType, fn = failed_reads_q.get(block=False)
+            failed_reads[errorType].append(fn)
+        except queue.Empty:
+            if failed_read_conn.poll():
+                break
+            sleep(0.1)
+            continue
+
+    # empty any entries left in queue after processes have finished
+    while not failed_reads_q.empty():
+        errorType, fn = failed_reads_q.get(block=False)
+        failed_reads[errorType].append(fn)
+
+    failed_read_conn.send(dict(failed_reads))
+
+    return
+
+def _get_index_queue(index_q, index_conn):
+    all_index_data = []
+    # continue to process the index queue until the end signal
+    # is sent via the index_conn
+    while True:
+        try:
+            r_index_data = index_q.get(block=False)
+            all_index_data.append(r_index_data)
+        except queue.Empty:
+            if index_conn.poll():
+                break
+            sleep(0.1)
+            continue
+
+    # empty any entries left in queue after processes have finished
+    while not index_q.empty():
+        r_index_data = index_q.get(block=False)
+        all_index_data.append(r_index_data)
+
+    index_conn.send(all_index_data)
+
+    return
 
 def resquiggle_all_reads(
         fast5_fns, aligner, bc_grp, bc_subgrps, corr_grp, std_ref,
         bio_samp_type, outlier_thresh, overwrite, num_ps, threads_per_proc,
-        compute_sd, skip_index, sig_aln_params, obs_filter, const_scale,
-        seg_params, genome_fn):
+        compute_sd, skip_index, sig_aln_params, sig_match_thresh, obs_filter,
+        const_scale, seg_params, q_score_thresh, skip_seq_scaling,
+        max_scaling_iters):
     """
     Perform genomic alignment and re-squiggle algorithm
     """
-    fast5_q = queue.Queue()
-    failed_reads_q = queue.Queue()
-    index_q = queue.Queue() if not skip_index else None
-    progress_q = queue.Queue()
+    fast5_q = mp.Queue()
+    failed_reads_q = mp.Queue()
+    index_q = mp.Queue() if not skip_index else None
+    progress_q = mp.Queue()
     for fast5_fn in fast5_fns:
         fast5_q.put(fast5_fn)
 
@@ -1117,85 +1309,85 @@ def resquiggle_all_reads(
     # a deadlock when some processes are started.
     # starting all multiprocess objects seems to fix this.
     map_conns = []
+    rsqgl_ps = []
     for _ in range(num_ps):
         proc_rsqgl_conns = []
         for _ in range(threads_per_proc):
             # open mp pipe to communicate with re-squiggle process
-            map_conn, rsqgl_conn = Pipe()
+            map_conn, rsqgl_conn = mp.Pipe()
             map_conns.append(map_conn)
             proc_rsqgl_conns.append(rsqgl_conn)
         # open re-squiggle process to void intensive processing hitting the GIL
         rsqgl_args = (
             proc_rsqgl_conns, std_ref, outlier_thresh, corr_grp, bio_samp_type,
-            seg_params, sig_aln_params, obs_filter, index_q is None, const_scale)
-        rsqgl_process = Process(target=_resquiggle_worker, args=rsqgl_args)
+            seg_params, sig_aln_params, index_q is None, const_scale,
+            skip_seq_scaling, max_scaling_iters)
+        rsqgl_process = mp.Process(target=_resquiggle_worker, args=rsqgl_args)
+        rsqgl_process.daemon = True
         rsqgl_process.start()
+        rsqgl_ps.append(rsqgl_process)
+
+    # start queue getter processes
+    main_prog_conn, prog_conn = mp.Pipe()
+    prog_p = mp.Process(target=_get_progress_queue,
+                        args=(progress_q, prog_conn, len(fast5_fns)))
+    prog_p.daemon = True
+    prog_p.start()
+    # failed read queue getter
+    main_failed_read_conn, failed_read_conn = mp.Pipe()
+    failed_reads_p = mp.Process(target=_get_failed_read_queue,
+                                args=(failed_reads_q, failed_read_conn))
+    failed_reads_p.daemon = True
+    failed_reads_p.start()
+    # index queue getter
+    if index_q is not None:
+        main_index_conn, index_conn = mp.Pipe()
+        index_p = mp.Process(target=_get_index_queue, args=(index_q, index_conn))
+        index_p.daemon = True
+        index_p.start()
 
     # now open mapping thread for each map connection created above
     resquiggle_ts = []
     for map_conn in map_conns:
         map_args = (fast5_q, progress_q, failed_reads_q, index_q, bc_grp,
                     bc_subgrps, corr_grp, aligner, outlier_thresh, compute_sd,
-                    sig_aln_params, obs_filter, const_scale, bio_samp_type,
-                    seg_params, overwrite, map_conn, genome_fn)
-        t = threading.Thread(target=_resquiggle_mappy_thread_worker,
+                    sig_aln_params, sig_match_thresh, obs_filter, bio_samp_type,
+                    overwrite, map_conn, q_score_thresh)
+        t = threading.Thread(target=_io_and_mappy_thread_worker,
                              args=map_args)
+        t.daemon = True
         t.start()
         resquiggle_ts.append(t)
 
-    if VERBOSE: sys.stderr.write(
-            'Correcting ' + unicode(len(fast5_fns)) + ' files with ' +
-            unicode(len(bc_subgrps)) + ' subgroup(s)/read(s) ' +
-            'each (Will print a dot for each ' + unicode(PROGRESS_INTERVAL) +
-            ' reads completed).\n')
-    tot_num_rec_proc = 0
-    failed_reads = defaultdict(list)
-    all_index_data = []
-    # note that this thread is counted so there will be 1 thread left when
-    # all children are done
-    while threading.active_count() > 1:
-        try:
-            errorType, fn = failed_reads_q.get(block=False)
-            failed_reads[errorType].append(fn)
-        except queue.Empty:
-            try:
-                num_rec_proc = progress_q.get(block=False)
-                num_int_proc = (
-                    ((tot_num_rec_proc + num_rec_proc) // PROGRESS_INTERVAL) -
-                    (tot_num_rec_proc // PROGRESS_INTERVAL))
-                if num_int_proc > 0:
-                    sys.stderr.write('.' * num_int_proc)
-                    sys.stderr.flush()
-                tot_num_rec_proc += num_rec_proc
-            except queue.Empty:
-                if index_q is not None:
-                    try:
-                        r_index_data = index_q.get(block=False)
-                        all_index_data.append(r_index_data)
-                    except queue.Empty:
-                        sleep(1)
-                        continue
-
-    # empty any entries left in queue after processes have finished
-    while not failed_reads_q.empty():
-        errorType, fn = failed_reads_q.get(block=False)
-        failed_reads[errorType].append(fn)
-    if index_q is not None:
-        while not index_q.empty():
-            r_index_data = index_q.get(block=False)
-            all_index_data.append(r_index_data)
-
-    # join all threads back with main thread
+    # wait for all mapping and re-squiggling workers to finish
+    for rsqgl_p in rsqgl_ps:
+        rsqgl_p.join()
     for t in resquiggle_ts:
         t.join()
 
-    # print newline after read progress dots
-    if VERBOSE: sys.stderr.write('\n')
+    # in a very unlikely case the progress queue could die while the
+    # main process remains active and thus we would have a deadlock here
+    if prog_p.is_alive():
+        # send signal to getter queue to finish and return results
+        main_prog_conn.send(True)
+        # returns total number of processed reads if that is needed
+        main_prog_conn.recv()
+    main_failed_read_conn.send(True)
+    failed_reads = main_failed_read_conn.recv()
+    all_index_data = None
+    if index_q is not None:
+        main_index_conn.send(True)
+        all_index_data = main_index_conn.recv()
 
-    return dict(failed_reads), all_index_data
+    return failed_reads, all_index_data
 
-def parse_files(args):
-    if VERBOSE: sys.stderr.write('Getting file list.\n')
+
+###################################
+########## Main Function ##########
+###################################
+
+def _parse_files_and_lock_dirs(args):
+    if VERBOSE: th._status_message('Getting file list.')
     try:
         if not os.path.isdir(args.fast5_basedir):
             th._error_message_and_exit(
@@ -1226,19 +1418,14 @@ def parse_files(args):
             files, args.basecall_group, num_reads=1000):
         th.clear_tombo_locks(lock_fns)
         th._error_message_and_exit(
-            'Reads do not to contain basecalls. Check --basecall-group option ' +
-            'if basecalls are stored in non-standard location or use ' +
-            '`tombo annotate_raw_with_fastqs` to add basecalls from FASTQ ' +
-            'files to raw FAST5 files.')
+            'Reads do not to contain basecalls. Check --basecall-group ' +
+            'option if basecalls are stored in non-standard location or ' +
+            'use `tombo annotate_raw_with_fastqs` to add basecalls from ' +
+            'FASTQ files to raw FAST5 files.')
 
     return files, fast5_basedir, index_fn, lock_fns
 
-
-###################################
-########## Main Function ##########
-###################################
-
-def resquiggle_main(args):
+def _resquiggle_main(args):
     """
     Main method for resquiggle
     """
@@ -1246,6 +1433,11 @@ def resquiggle_main(args):
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
     ts.VERBOSE = VERBOSE
+
+    if args.print_advanced_arguments:
+        from . import _option_parsers
+        _option_parsers.print_advanced_resquiggle()
+        sys.exit()
 
     if args.basecall_group == args.corrected_group:
         th._error_message_and_exit(
@@ -1258,15 +1450,16 @@ def resquiggle_main(args):
     obs_filter = th.parse_obs_filter(args.obs_per_base_filter) \
                  if 'obs_per_base_filter' in args else None
 
-    if VERBOSE: sys.stderr.write('Loading minimap2 reference.\n')
+    if VERBOSE: th._status_message('Loading minimap2 reference.')
     # to be enabled when mappy genome sequence extraction bug is fixed
-    #aligner = mappy.Aligner(str(args.reference_fasta), preset=str('map-ont'))
-    aligner = load_minimap_index(args.genome_fasta, args.minimap2_index)
+    aligner = mappy.Aligner(str(args.reference), preset=str('map-ont'))
     if not aligner:
         th._error_message_and_exit(
             'Failed to load reference genome FASTA for mapping.')
 
-    files, fast5_basedir, index_fn, lock_fns = parse_files(args)
+    # get files as late as possible in startup since it takes the longest
+    # and so other errors can't happen after locks are written
+    files, fast5_basedir, index_fn, lock_fns = _parse_files_and_lock_dirs(args)
 
     try:
         tb_model_fn = args.tombo_model_filename
@@ -1274,6 +1467,11 @@ def resquiggle_main(args):
         if tb_model_fn is None:
             tb_model_fn, bio_samp_type = ts.get_default_standard_ref_from_files(
                 files, bio_samp_type)
+        else:
+            bio_samp_type = 'RNA' if th.is_rna_from_files(files) else 'DNA'
+        sig_match_thresh = args.signal_matching_score
+        if sig_match_thresh is None:
+            sig_match_thresh = SIG_MATCH_THRESH[bio_samp_type]
         if not os.path.exists(tb_model_fn):
             th._error_message_and_exit('Invalid tombo model file provided.')
         # parse tombo model
@@ -1282,16 +1480,17 @@ def resquiggle_main(args):
         const_scale = None
         if args.fixed_scale is not None:
             const_scale = args.fixed_scale
-        elif not args.fit_scale_per_read:
-            const_scale = th.estimate_global_scale(files)
+        elif args.fit_global_scale:
+            const_scale = ts.estimate_global_scale(files)
 
         failed_reads, all_index_data = resquiggle_all_reads(
             files, aligner, args.basecall_group, args.basecall_subgroups,
             args.corrected_group, std_ref, bio_samp_type, outlier_thresh,
             args.overwrite, args.processes, args.threads_per_process,
             args.include_event_stdev, args.skip_index,
-            args.signal_align_parameters, obs_filter, const_scale,
-            args.segmentation_parameters, args.genome_fasta)
+            args.signal_align_parameters, sig_match_thresh,
+            obs_filter, const_scale, args.segmentation_parameters, args.q_score,
+            args.skip_sequence_rescaling, args.max_scaling_iterations)
     finally:
         th.clear_tombo_locks(lock_fns)
 
@@ -1300,12 +1499,16 @@ def resquiggle_main(args):
     fail_summary = [(err, len(fns)) for err, fns in failed_reads.items()]
     if len(fail_summary) > 0:
         total_num_failed = sum(map(itemgetter(1), fail_summary))
-        sys.stderr.write('Failed reads summary (' + unicode(total_num_failed) +
-                         ' total failed):\n' + '\n'.join(
-                             "\t" + err + " :\t" + unicode(n_fns)
-                             for err, n_fns in sorted(fail_summary)) + '\n')
+        th._status_message(
+            'Failed reads summary (' + unicode(total_num_failed) +
+            ' total failed):\n' + '\n'.join(
+                "\t" + err + " :\t" + unicode(n_fns)
+                for err, n_fns in sorted(fail_summary)))
     else:
-        sys.stderr.write('All reads successfully re-squiggled!\n')
+        if len(files) == len(all_index_data):
+            th._status_message('All reads successfully re-squiggled!')
+        else:
+            th._status_message('Tombo appears to have failed unexpectedly.')
     if args.failed_reads_filename is not None:
         with io.open(args.failed_reads_filename, 'wt') as fp:
             fp.write('\n'.join((

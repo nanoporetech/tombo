@@ -58,7 +58,7 @@ setup(
     version = __version__,
     packages = ["tombo"],
     install_requires = ['h5py <= 2.7.0', 'numpy', 'scipy', 'cython',
-                        'setuptools >= 18.0', 'mappy', 'future'],
+                        'setuptools >= 18.0', 'mappy >= 2.10', 'future', 'tqdm'],
     extras_require={'full':extras_require},
 
     author = "Marcus Stoiber",

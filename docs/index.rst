@@ -31,19 +31,63 @@ Basic tombo installation (python 2.7 and 3.4+ support)
 
 See :doc:`examples` for common workflows.
 
--------------
-Documentation
--------------
+===========
+Quick Start
+===========
 
-Run ``tombo -h`` to see all Tombo sub-commands and run ``tombo [sub-command] -h`` to see the options for any Tombo sub-command.
+Call 5mC and 6mA sites from raw nanopore read files. Then output genome browser `wiggle format file <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_ for 5mA calls and plot raw signal around most significant 6mA sites.
 
-Detailed documentation for all Tombo algorithms and sub-commands can be found through the links here.
+::
+
+   # skip this step if FAST5 files already contain basecalls
+   tombo preprocess annotate_raw_with_fastqs --fast5-basedir path/to/fast5s/ \
+       --fastq-filenames basecalls1.fastq basecalls2.fastq \
+       --sequencing-summary-filenames seq_summary1.txt seq_summary2.txt \
+       --processes 4
+   
+   tombo resquiggle path/to/fast5s/ genome.fasta --processes 4
+   tombo detect_modifications alternative_model --fast5-basedirs path/to/fast5s/ \
+       --statistics-file-basename sample.alt_modified_base_detection \
+       --per-read-statistics-basename sample.alt_modified_base_detection \
+       --processes 4
+   
+   # produces sample.alt_modified_base_detection.5mC.dampened_fraction.[plus|minus].wig files
+   tombo text_output --statistics-filename sample.alt_modified_base_detection.5mC.tombo.stats \
+       --browser-file-basename sample.alt_modified_base_detection.5mC --file-types dampened_fraction
+   
+   # plot raw signal at most significant locations
+   tombo plot most_significant --fast5-basedirs path/to/fast5s/ \
+       --statistics-filename sample.alt_modified_base_detection.6mA.tombo.stats \
+       --plot-standard-model --plot-alternate-model 6mA \
+       --pdf-filename sample.most_significant_6mA_sites.pdf
+
+Detect any deviations from expected signal levels for canonical bases to investigate any type of modification.
+
+::
+
+   tombo resquiggle path/to/fast5s/ genome.fasta --processes 4
+   tombo detect_modifications de_novo --fast5-basedirs path/to/fast5s/ \
+       --statistics-file-basename sample.de_novo_modified_base_detection \
+       --per-read-statistics-basename sample.de_novo_modified_base_detection \
+       --processes 4
+   
+   # produces sample.de_novo_modified_base_detection.dampened_fraction.[plus|minus].wig files
+   tombo text_output --statistics-filename sample.de_novo_modified_base_detection.tombo.stats \
+       --browser-file-basename sample.de_novo_modified_base_detection --file-types dampened_fraction
+
+.. note::
+   
+   All of these commands work for RNA data as well, but a transcriptome reference sequence must be provided for spliced transcripts.
+
+   Run ``tombo -h`` to see all Tombo command groups, run ``tombo [command-group] -h`` to see all commands within each group and run ``tombo [command-group] [comand] -h`` for help with arguments to each Tombo command.
+
+   Detailed documentation for all Tombo algorithms and commands can be found through the links here.
 
 ------
 Naming
 ------
 
-Tombo Ahi is a Japanese name for albacore (which is also the Oxford Nanopore Technologies basecaller). So use albacore to identify canonical bases and then use Tombo to detect more exotic, non-canonical bases.
+Tombo Ahi is a Japanese name for albacore (the name of the Oxford Nanopore Technologies basecaller). So use albacore to identify canonical bases and then use Tombo to detect more exotic, non-canonical bases.
 
 --------
 Contents
@@ -58,8 +102,8 @@ Contents
    text_output
    plotting
    filtering
-   model_training
    rna
+   model_training
 
 -------------------------
 Full API reference (beta)
