@@ -52,13 +52,18 @@ Call 5mC and 6mA sites from raw nanopore read files. Then output genome browser 
    tombo detect_modifications alternative_model --fast5-basedirs path/to/fast5s/ \
        --statistics-file-basename sample.alt_modified_base_detection \
        --per-read-statistics-basename sample.alt_modified_base_detection \
-       --processes 4
+       --alternate-bases 5mC 6mA --processes 4
    
-   # produces sample.alt_modified_base_detection.5mC.dampened_fraction.[plus|minus].wig files
-   tombo text_output --statistics-filename sample.alt_modified_base_detection.5mC.tombo.stats \
-       --browser-file-basename sample.alt_modified_base_detection.5mC --file-types dampened_fraction
+   # produces "estimated fraction of modified reads" genome browser files
+   # for 5mC testing
+   tombo text_output browser_files --statistics-filename sample.alt_modified_base_detection.5mC.tombo.stats \
+       --file-types dampened_fraction --browser-file-basename sample.alt_modified_base_detection.5mC
+   # and 6mA testing (along with coverage bedgraphs)
+   tombo text_output browser_files --statistics-filename sample.alt_modified_base_detection.6mA.tombo.stats \
+       --fast5-basedirs path/to/fast5s/  --file-types dampened_fraction coverage\
+       --browser-file-basename sample.alt_modified_base_detection.6mA
    
-   # plot raw signal at most significant locations
+   # plot raw signal at most significant 6mA locations
    tombo plot most_significant --fast5-basedirs path/to/fast5s/ \
        --statistics-filename sample.alt_modified_base_detection.6mA.tombo.stats \
        --plot-standard-model --plot-alternate-model 6mA \
@@ -74,8 +79,8 @@ Detect any deviations from expected signal levels for canonical bases to investi
        --per-read-statistics-basename sample.de_novo_modified_base_detection \
        --processes 4
    
-   # produces sample.de_novo_modified_base_detection.dampened_fraction.[plus|minus].wig files for further analysis
-   tombo text_output --statistics-filename sample.de_novo_modified_base_detection.tombo.stats \
+   # produces "estimated fraction of modified reads" genome browser files from de novo testing
+   tombo text_output browser_files --statistics-filename sample.de_novo_modified_base_detection.tombo.stats \
        --browser-file-basename sample.de_novo_modified_base_detection --file-types dampened_fraction
 
 ..

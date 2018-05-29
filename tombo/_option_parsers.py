@@ -547,7 +547,8 @@ altbs_opt=('--alternate-model-base', {
     'help':'Non-standard base is an alternative to this base.'})
 modbs_opt=('--alternate-bases', {
     'type':unicode, 'choices':ALT_BASES, 'nargs':'+',
-    'help':'Default non-standard base model for testing.'})
+    'help':'Default non-standard base model for testing (not required if ' +
+    'user created --alternate-model-filenames is provided).'})
 paltmod_opt=('--plot-alternate-model', {
     'type':unicode, 'choices':ALT_BASES,
     'help':'Add alternative model distribution to the plot.'})
@@ -882,7 +883,7 @@ def get_de_novo_test_signif_parser():
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
 
-    alt_args = parser.add_argument_group('Comparison Arguments')
+    alt_args = parser.add_argument_group('Comparison Model Arguments')
     alt_args.add_argument(dna_opt[0], **dna_opt[1])
     alt_args.add_argument(rna_opt[0], **rna_opt[1])
     alt_args.add_argument(hidden_tbmod_opt[0], **hidden_tbmod_opt[1])
@@ -904,9 +905,9 @@ def get_alt_test_signif_parser():
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(fast5dir_opt[0], **fast5dir_opt[1])
     req_args.add_argument(statbsnm_opt[0], **statbsnm_opt[1])
+    req_args.add_argument(modbs_opt[0], **modbs_opt[1])
 
     alt_args = parser.add_argument_group('Comparison Arguments')
-    alt_args.add_argument(modbs_opt[0], **modbs_opt[1])
     alt_args.add_argument(printalt_opt[0], **printalt_opt[1])
     alt_args.add_argument(dna_opt[0], **dna_opt[1])
     alt_args.add_argument(rna_opt[0], **rna_opt[1])
@@ -931,9 +932,8 @@ def get_samp_comp_test_signif_parser():
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
-
-    alt_args = parser.add_argument_group('Comparison Arguments')
-    alt_args.add_argument(ctrlfast5dir_opt[0], **ctrlfast5dir_opt[1])
+    req_args.add_argument(
+        ctrlfast5dir_opt[0], required=True, **ctrlfast5dir_opt[1])
 
     test_args = parser.add_argument_group('Significance Test Arguments')
     test_args.add_argument(fmo_opt[0], **fmo_opt[1])

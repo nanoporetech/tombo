@@ -634,7 +634,7 @@ def get_ref_from_seq(seq, std_ref, rev_strand=False, alt_ref=None):
         ref_means = np.array([std_ref.means[kmer] for kmer in seq_kmers])
         ref_sds = np.array([std_ref.sds[kmer] for kmer in seq_kmers])
     except KeyError:
-        _error_message_and_exit(
+        th._error_message_and_exit(
             'Invalid sequence encountered from genome sequence.')
     if alt_ref is None:
         alt_means, alt_sds = None, None
@@ -2862,15 +2862,22 @@ def _test_shifts_main(args):
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
 
+    # Check extra requirements for alternative model testing
     if args.action_command == 'alternative_model':
         if args.print_available_models:
             _print_alt_models()
             sys.exit()
         if args.fast5_basedirs is None or args.statistics_file_basename is None:
-            _error_message_and_exit(
+            th._error_message_and_exit(
                 'Must provide both a set of FAST5 read files ' +
                 '(--fast5-basedirs) and an output file basename ' +
                 '(--statistics-file-basename).')
+        if (args.alternate_model_filenames is None and
+            args.alternate_bases is None):
+            th._error_message_and_exit(
+                'Must provide an alterntive model against which to test.\n\t' +
+                'Run with --print-available-models option to see possible ' +
+                'values for the --alternate-bases option.')
 
     if args.single_read_threshold is None:
         lower_thresh = None
