@@ -56,6 +56,7 @@ _DEBUG_PARAMS = False
 _DRY_RUN = any((_DEBUG_PARAMS, _DEBUG_FIT, _DEBUG_FULL, _DEBUG_MIDDLE))
 _NUM_DEBUG_ENDS = 250
 
+MAX_QUEUE_SIZE = 1000
 
 ###############################################
 ########## Read Segmentation Scoring ##########
@@ -1175,9 +1176,10 @@ def _io_and_mappy_thread_worker(
         try:
             fast5_fn = fast5_q.get(block=False)
         except queue.Empty:
-            # python27 sometimes throws false empty error with get(block=False)
-            if not fast5_q.empty():
-                continue
+            sleep(0.1)
+            continue
+
+        if fast5_fn is None:
             # signal that all reads have been processed to child process
             map_conn.send(None)
             # update with all reads processed from this thread
@@ -1288,6 +1290,14 @@ def _get_index_queue(index_q, index_conn):
 
     return
 
+def _fill_files_queue(fast5_q, fast5_fns, num_threads):
+    for fast5_fn in fast5_fns:
+        fast5_q.put(fast5_fn)
+    for _ in range(num_threads):
+        fast5_q.put(None)
+
+    return
+
 def resquiggle_all_reads(
         fast5_fns, aligner, bc_grp, bc_subgrps, corr_grp, std_ref,
         bio_samp_type, outlier_thresh, overwrite, num_ps, threads_per_proc,
@@ -1297,17 +1307,20 @@ def resquiggle_all_reads(
     """
     Perform genomic alignment and re-squiggle algorithm
     """
-    fast5_q = mp.Queue()
+    fast5_q = mp.Queue(maxsize=MAX_QUEUE_SIZE)
     failed_reads_q = mp.Queue()
-    index_q = mp.Queue() if not skip_index else None
+    index_q = mp.Queue(maxsize=MAX_QUEUE_SIZE) if not skip_index else None
     progress_q = mp.Queue()
-    for fast5_fn in fast5_fns:
-        fast5_q.put(fast5_fn)
 
     # open all multiprocessing pipes and queues before threading
     # as opening threads before all process are open seems to cause
     # a deadlock when some processes are started.
     # starting all multiprocess objects seems to fix this.
+    files_p = mp.Process(target=_fill_files_queue,
+                         args=(fast5_q, fast5_fns, num_ps * threads_per_proc))
+    files_p.daemon = True
+    files_p.start()
+
     map_conns = []
     rsqgl_ps = []
     for _ in range(num_ps):
@@ -1360,6 +1373,7 @@ def resquiggle_all_reads(
         resquiggle_ts.append(t)
 
     # wait for all mapping and re-squiggling workers to finish
+    files_p.join()
     for rsqgl_p in rsqgl_ps:
         rsqgl_p.join()
     for t in resquiggle_ts:
