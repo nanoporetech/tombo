@@ -56,8 +56,6 @@ _DEBUG_PARAMS = False
 _DRY_RUN = any((_DEBUG_PARAMS, _DEBUG_FIT, _DEBUG_FULL, _DEBUG_MIDDLE))
 _NUM_DEBUG_ENDS = 250
 
-MAX_QUEUE_SIZE = 1000
-
 ###############################################
 ########## Read Segmentation Scoring ##########
 ###############################################
@@ -1307,9 +1305,9 @@ def resquiggle_all_reads(
     """
     Perform genomic alignment and re-squiggle algorithm
     """
-    fast5_q = mp.Queue(maxsize=MAX_QUEUE_SIZE)
+    fast5_q = mp.Queue(maxsize=th.MAX_QUEUE_SIZE)
     failed_reads_q = mp.Queue()
-    index_q = mp.Queue(maxsize=MAX_QUEUE_SIZE) if not skip_index else None
+    index_q = mp.Queue(maxsize=th.MAX_QUEUE_SIZE) if not skip_index else None
     progress_q = mp.Queue()
 
     # open all multiprocessing pipes and queues before threading

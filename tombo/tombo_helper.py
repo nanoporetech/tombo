@@ -35,6 +35,8 @@ from ._default_parameters import PHRED_BASE
 
 VERBOSE = False
 
+MAX_QUEUE_SIZE = 1000
+
 _ITER_QUEUE_LIMIT = 1000
 _PROC_UPDATE_INTERVAL = 100
 
@@ -2088,6 +2090,11 @@ def _prep_fastq_slot_worker(
         try:
             fast5_fn = fast5_q.get(block=False)
         except queue.Empty:
+            sleep(0.1)
+            continue
+
+        # None entry indicates that the fast5s queue is complete
+        if fast5_fn is None:
             break
 
         num_files_proc += 1
@@ -2161,24 +2168,34 @@ def _get_prep_queue(read_ids_q, prog_q, warn_q, fast5s_read_ids, been_warned):
 
     return fast5s_read_ids, iter_prog, been_warned
 
+def _fill_files_queue(fast5_q, fast5_fns, num_ps):
+    for fast5_fn in fast5_fns:
+        fast5_q.put(fast5_fn)
+    for _ in range(num_ps):
+        fast5_q.put(None)
+
+    return
+
 def _get_read_ids_and_prep_fastq_slot(
         fast5s_dir, bc_grp, bc_subgrp, overwrite, num_processes):
     """
     Extract read id from /Raw group and prep fastq slots for annotation with
     associated FASTQ files.
     """
-    if VERBOSE: _status_message('Getting read filenames.')
-    fast5_fns = get_files_list(fast5s_dir)
-    num_fast5s = len(fast5_fns)
-    fast5_q = Queue()
-    for fast5_fn in fast5_fns:
-        fast5_q.put(fast5_fn)
-
     if VERBOSE: _status_message(
             'Preparing reads and extracting read identifiers.')
+    fast5_q = mp.Queue(maxsize=MAX_QUEUE_SIZE)
     read_ids_q = Queue()
     prog_q = Queue()
     warn_q = Queue()
+
+    fast5_fns = get_files_list(fast5s_dir)
+    num_fast5s = len(fast5_fns)
+    files_p = mp.Process(target=_fill_files_queue,
+                         args=(fast5_q, fast5_fns, num_processes))
+    files_p.daemon = True
+    files_p.start()
+
     prep_args = (fast5_q, bc_grp, bc_subgrp, overwrite, read_ids_q,
                  prog_q, warn_q)
     prep_ps = []
