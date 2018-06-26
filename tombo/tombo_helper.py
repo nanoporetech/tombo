@@ -2184,14 +2184,14 @@ def _get_read_ids_and_prep_fastq_slot(
     """
     if VERBOSE: _status_message(
             'Preparing reads and extracting read identifiers.')
-    fast5_q = mp.Queue(maxsize=MAX_QUEUE_SIZE)
+    fast5_q = Queue(maxsize=MAX_QUEUE_SIZE)
     read_ids_q = Queue()
     prog_q = Queue()
     warn_q = Queue()
 
     fast5_fns = get_files_list(fast5s_dir)
     num_fast5s = len(fast5_fns)
-    files_p = mp.Process(target=_fill_files_queue,
+    files_p = Process(target=_fill_files_queue,
                          args=(fast5_q, fast5_fns, num_processes))
     files_p.daemon = True
     files_p.start()
