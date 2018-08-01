@@ -5,14 +5,17 @@ from __future__ import unicode_literals
 ###############################
 
 # default model names
+RNA_SAMP_TYPE = 'RNA'
+DNA_SAMP_TYPE = 'DNA'
+
 STANDARD_MODELS = {
-    'DNA':'tombo.DNA.model',
-    'RNA':'tombo.RNA.180mV.model',
+    DNA_SAMP_TYPE:'tombo.DNA.model',
+    RNA_SAMP_TYPE:'tombo.RNA.180mV.model',
 }
 ALTERNATE_MODELS = {
-    'DNA_5mC':'tombo.DNA.5mC.model',
-    'DNA_6mA':'tombo.DNA.6mA.model',
-    'RNA_5mC':'tombo.RNA.5mC.model',
+    DNA_SAMP_TYPE + '_5mC':'tombo.DNA.5mC.model',
+    DNA_SAMP_TYPE + '_6mA':'tombo.DNA.6mA.model',
+    RNA_SAMP_TYPE + '_5mC':'tombo.RNA.5mC.model',
 }
 
 
@@ -25,8 +28,8 @@ ALTERNATE_MODELS = {
 #   2) minimum observations per genomic base
 #   3) mean number of observations per event during segmentation
 SEG_PARAMS_TABLE = {
-    'RNA':(12, 6, 12),
-    'DNA':(5, 3, 5),
+    RNA_SAMP_TYPE:(12, 5, 15),
+    DNA_SAMP_TYPE:(5, 3, 5),
 }
 
 # table containing default signal to sequence assignment parameters
@@ -36,33 +39,61 @@ SEG_PARAMS_TABLE = {
 #   3) adaptive bandwidth
 #   4) save adaptive bandwidth (if first bw fails)
 #   5) z-score winsorizing threshold
+#   6) band boundary threshold
+#   7) start bandwidth
+#   8) start save bandwidth
+#   9) start num bases
 ALGN_PARAMS_TABLE = {
-    'RNA':(4, 8, 400, 1200, 5.0),
-    'DNA':(4.2, 4.2, 250, 1200, 5.0),
+    RNA_SAMP_TYPE:(6, 4, 500, 1500, 20.0, 50, 1000, 3000, 250),
+    DNA_SAMP_TYPE:(4.2, 4.2, 300, 1500, 20.0, 40, 750, 2500, 250),
 }
 
 # default thresholds for filtering out reads that don't match well to
 # expected signal levels
 SIG_MATCH_THRESH = {
-    'RNA':1.3,
-    'DNA':1.1,
+    RNA_SAMP_TYPE:2,
+    DNA_SAMP_TYPE:1.1,
 }
+
+# outlier signal winsorizing threshold
+OUTLIER_THRESH = 5.0
 
 # factor of extra raw signal above minimum to add around skipped bases for
 # raw signal segment detection
 EXTRA_SIG_FACTOR = 1.1
 
-MASK_FILL_Z_SCORE = -10
 MASK_BASES = 50
-
-START_BANDWIDTH = 5000
-START_SEQ_WINDOW = 250
-BAND_BOUNDARY_THRESH = 5
+MASK_FILL_Z_SCORE = -15
 
 DEL_FIX_WINDOW = 2
-MAX_DEL_FIX_WINDOW = 8
+MAX_DEL_FIX_WINDOW = 10
 MAX_RAW_CPTS = 200
 MIN_EVENT_TO_SEQ_RATIO = 1.1
+
+# special RNA scaling parameters from events to avoid adapter
+USE_RNA_EVENT_SCALE = True
+RNA_SCALE_NUM_EVENTS = 10000
+RNA_SCALE_MAX_FRAC_EVENTS = 0.75
+
+
+# collapse stalls for more robust dynamic programming results
+COLLAPSE_RNA_STALLS = True
+COLLAPSE_DNA_STALLS = False
+
+# stall identification parameters th.stallParams
+# percentile stall method params
+PCTL_STALL_PARAMS = dict((
+    ('window_size', 400), ('threshold', 100),
+    ('edge_buffer', 50), ('min_consecutive_obs', 200),
+    ('lower_pctl', 5), ('upper_pctl', 95)))
+MEAN_STALL_PARAMS = dict((
+    ('window_size', 7 * 50), ('threshold', 40),
+    ('edge_buffer', 100),  ('min_consecutive_obs', 200),
+    ('n_windows', 7), ('mini_window_size', 50)))
+STALL_PARAMS = MEAN_STALL_PARAMS
+
+# mapping start clipped bases parameters th.startClipParams
+START_CLIP_PARAMS = (1000, 200)
 
 
 ############################
@@ -70,16 +101,16 @@ MIN_EVENT_TO_SEQ_RATIO = 1.1
 ############################
 
 LLR_THRESH = {
-    'DNA':(-1.5, 2.5),
-    'RNA':(-2.5, 2.5),
+    DNA_SAMP_TYPE:(-1.5, 2.5),
+    RNA_SAMP_TYPE:(-2.5, 2.5),
 }
 SAMP_COMP_THRESH = {
-    'DNA':(0.15, 0.5),
-    'RNA':(0.05, 0.4),
+    DNA_SAMP_TYPE:(0.15, 0.5),
+    RNA_SAMP_TYPE:(0.05, 0.4),
 }
 DE_NOVO_THRESH = {
-    'DNA':(0.15, 0.5),
-    'RNA':(0.05, 0.4),
+    DNA_SAMP_TYPE:(0.15, 0.5),
+    RNA_SAMP_TYPE:(0.05, 0.4),
 }
 
 # outlier corrected likelihood ratio parameters
@@ -97,6 +128,12 @@ DE_NOVO_THRESH = {
 OCLLHR_SCALE = 4.0
 OCLLHR_HEIGHT = 1.0
 OCLLHR_POWER = 0.2
+
+FM_OFFSET_DEFAULT = 1
+
+# default constants for posterior estimation of control sample reference means
+MEAN_PRIOR_CONST = 5
+SD_PRIOR_CONST = 40
 
 
 #####################################
@@ -131,7 +168,7 @@ NUM_READS_FOR_SCALE = 1000
 # sequence-based scaling thresholds for iterative re-squiggle
 SHIFT_CHANGE_THRESH = 0.1
 SCALE_CHANGE_THRESH = 0.1
-MAX_SCALING_ITERS=3
+MAX_SCALING_ITERS = 3
 
 # number of reads to adjust model
 NUM_READS_TO_ADJUST_MODEL = 5000
@@ -151,3 +188,15 @@ NANOPOLISH_CENTRAL_POS = 2
 
 # default values for dampened fraction computations
 COV_DAMP_COUNTS = [2, 0.5]
+
+# store N arrays during stat computation before re-computing the
+# most significant array
+MOST_SIGNIF_NUM_BATCHES_DEFAULT = 10
+
+# trim values for plotting per-read stats
+PLOT_PVAL_MAX, PLOT_LLR_MAX = 4, 4
+
+
+if __name__ == '__main__':
+    sys.stderr.write('This is a module. See commands with `tombo -h`')
+    sys.exit(1)

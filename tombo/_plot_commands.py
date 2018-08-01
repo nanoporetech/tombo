@@ -27,7 +27,8 @@ if sys.version_info[0] > 2:
 from . import tombo_stats as ts
 from . import tombo_helper as th
 
-from ._default_parameters import SMALLEST_PVAL
+from ._default_parameters import SMALLEST_PVAL, PLOT_PVAL_MAX, PLOT_LLR_MAX
+
 
 VERBOSE = False
 
@@ -43,9 +44,10 @@ REV_STRAND = 'Reverse Strand'
 try:
     from rpy2 import robjects as r
     from rpy2.robjects.packages import importr
+    _R_DF = r.DataFrame(())
 except:
-    # pass here and raise error when main functions are actually called
-    # in order to give specific error message
+    # pass here and print detailed error when main functions are actually called
+    # in  to give specific error message
     pass
 
 _PROFILE_PLOT_MAX = False
@@ -55,160 +57,45 @@ _PROFILE_PLOT_MAX = False
 #### ROC Curves ####
 ####################
 
-def parse_motif_descs(stat_motif_descs):
-    parsed_motif_descs = []
-    try:
-        for motif_desc in stat_motif_descs.split('::'):
-            raw_motif, mod_pos, mod_name = motif_desc.split(':')
-            motif = th.TomboMotif(raw_motif, int(mod_pos))
-            parsed_motif_descs.append((motif, mod_name))
-    except:
-        th._error_message_and_exit(
-            'Invalid motif decriptions format. Format descriptions as: ' +
-            '"motif:mod_pos:name[::motif2:mod_pos2:name2...]".')
-
-    return parsed_motif_descs
-
-def plot_roc(stats_fns, motif_descs, fasta_fn, min_reads, pdf_fn,
-             cov_damp_counts):
+def plot_roc(
+        stats_fns, motif_descs, fasta_fn, pdf_fn, stats_per_block,
+        total_stats_limit):
     if len(motif_descs) != len(stats_fns):
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must provide exactly one set of motif descriptions for ' +
             'each statistics file.')
 
-    if VERBOSE: th._status_message('Parsing motifs.')
-    motif_descs = [parse_motif_descs(stat_motif_descs)
+    if VERBOSE: th.status_message('Parsing motifs.')
+    motif_descs = [th.parse_motif_descs(stat_motif_descs)
                    for stat_motif_descs in motif_descs]
     mod_names = [mod_name for stat_mds in motif_descs
                  for _, mod_name in stat_mds]
     if len(mod_names) != len(set(mod_names)):
-        th._error_message_and_exit('Modified base names are not unique.')
+        th.error_message_and_exit('Modified base names are not unique.')
 
-    if VERBOSE: th._status_message('Parsing genome.')
+    if VERBOSE: th.status_message('Parsing genome.')
     genome_index = th.Fasta(fasta_fn)
 
-    if VERBOSE: th._status_message('Computing accuracy statistics.')
-    tp_rates, fp_rates, precisions, mod_names_for_r = [], [], [], []
-    for stats_fn, stat_motif_descs in zip(stats_fns, motif_descs):
-        if not os.path.isfile(stats_fn):
-            th._warning_message('Statistics file does not exist. Skipping: ' +
-                                stats_fn)
-            continue
-        stats = ts.TomboStats(stats_fn)
-        stats.filter_coverage(min_reads)
-        if stats.is_empty():
-            th._warning_message(
-                'No locations pass coverage threshold. Skipping: ' + stats_fn)
-            continue
-        stats.order_by_frac(cov_damp_counts)
-
-        for motif, mod_name in stat_motif_descs:
-            if (stats.stat_type == ts.ALT_MODEL_TXT and
-                next(stats.iter_stat_seqs(
-                    genome_index, motif.mod_pos - 1,
-                    motif.motif_len - motif.mod_pos))[
-                        motif.mod_pos - 1] != motif.mod_base):
-                th._warning_message(
-                    'Cannot assess modified base accuracy with alternative ' +
-                    'model testing to another canonical base. Skipping: ' +
-                    mod_name)
-                continue
-            mod_tp_rate, mod_fp_rate, mod_precision = ts.get_motif_stats(
-                motif, stats, genome_index)
-            # print auc and average precision
-            auc = np.sum(mod_tp_rate[:-1] *
-                         (mod_fp_rate[1:] - mod_fp_rate[:-1]))
-            # TODO compute precision recall summary stat
-            if VERBOSE: sys.stderr.write('\t'.join((
-                    '', mod_name.ljust(30), 'AUC:',
-                    '{:.4f}'.format(auc))) + '\n')
-            tp_rates.extend(mod_tp_rate)
-            fp_rates.extend(mod_fp_rate)
-            precisions.extend(mod_precision)
-            mod_names_for_r.extend(repeat(mod_name, len(mod_tp_rate)))
-
-    if VERBOSE: th._status_message('Plotting.')
-    rocDat = r.DataFrame({
-        'TP':r.FloatVector(tp_rates),
-        'FP':r.FloatVector(fp_rates),
-        'Precision':r.FloatVector(precisions),
-        'Comparison':r.StrVector(mod_names_for_r)})
-    r.r(resource_string(__name__, 'R_scripts/plotROC.R').decode())
-    r.r('pdf("' + pdf_fn + '", height=4, width=6)')
-    r.globalenv[str('plotROC')](rocDat)
-    r.r('dev.off()')
-
-    return
-
-def plot_per_read_roc(
-        pr_stats_fns, motif_descs, fasta_fn, pdf_fn,
-        stats_per_block, total_stats_limit):
-    if len(motif_descs) != len(pr_stats_fns):
-        th._error_message_and_exit(
-            'Must provide exactly one set of motif descriptions for ' +
-            'each statistics file.')
-
-    if VERBOSE: th._status_message('Parsing motifs.')
-    motif_descs = [parse_motif_descs(stat_motif_descs)
-                   for stat_motif_descs in motif_descs]
-    mod_names = [mod_name for stat_mds in motif_descs
-                 for _, mod_name in stat_mds]
-    if len(mod_names) != len(set(mod_names)):
-        th._error_message_and_exit('Modified base names are not unique.')
-
-    if VERBOSE: th._status_message('Parsing genome.')
-    genome_index = th.Fasta(fasta_fn)
-
-    if VERBOSE: th._status_message('Extracting per-read statistics.')
     all_motif_stats = {}
     all_motif_stats_for_r = {}
-    for pr_stats_fn, stat_motif_descs in zip(pr_stats_fns, motif_descs):
-        if not os.path.isfile(pr_stats_fn):
-            th._warning_message('Statistics file does not exist. Skipping: ' +
-                                pr_stats_fn)
+    for stats_fn, stat_motif_descs in zip(stats_fns, motif_descs):
+        if not os.path.isfile(stats_fn):
+            th.warning_message('Statistics file does not exist. Skipping: ' +
+                                stats_fn)
             continue
-        pr_stats = ts.PerReadStats(pr_stats_fn)
-        for motif, mod_name in stat_motif_descs:
-            all_motif_stats[mod_name] = []
-        before_bases = max((motif.mod_pos for motif, _ in stat_motif_descs)) - 1
-        after_bases = max((motif.motif_len - motif.mod_pos
-                           for motif, _ in stat_motif_descs))
-        total_num_stats = 0
-        for chrm, strand, start, end, block_stats in pr_stats:
-            if strand == '+':
-                seq_start = max(start - before_bases, 0)
-                seq_end = end + after_bases
-            else:
-                seq_start = max(start - after_bases, 0)
-                seq_end = end + before_bases
-
-            reg_seq = genome_index.get_seq(chrm, seq_start, seq_end)
-            # randomly sub-sample per-read stats here
-            if block_stats.shape[0] > stats_per_block:
-                block_stats = block_stats[np.random.choice(
-                    block_stats.shape[0], stats_per_block, replace=False)]
-            total_num_stats += block_stats.shape[0]
-            for r_pos_stat in block_stats:
-                # extract position sequence
-                if strand == '+':
-                    r_pos_seq = reg_seq[
-                        r_pos_stat['pos'] - seq_start - before_bases:
-                            r_pos_stat['pos'] - seq_start + after_bases + 1]
-                else:
-                    r_pos_seq = th.rev_comp(reg_seq[
-                            r_pos_stat['pos'] - seq_start - after_bases:
-                            r_pos_stat['pos'] - seq_start + before_bases + 1])
-
-                # add statistic and whether the sequence matches each motif
-                for motif, mod_name in stat_motif_descs:
-                    if r_pos_seq[before_bases] != motif.mod_base: continue
-                    all_motif_stats[mod_name].append((
-                        r_pos_stat['stat'],
-                        bool(motif.motif_pat.match(
-                            r_pos_seq[before_bases - motif.mod_pos + 1:]))))
-
-            if total_num_stats >= total_stats_limit:
-                break
+        try:
+            stats = ts.TomboStats(stats_fn)
+        except Exception as e:
+            th.warning_message(
+                'Unexpected error parsing ' + stats_fn + '. Continuing ' +
+                'without processing this file. \n\tError code:\n\t\t' +
+                str(e) + '\n')
+            continue
+        for mod_name, mod_stats in stats.compute_motif_stats(
+                stat_motif_descs, genome_index, stats_per_block,
+                total_stats_limit).items():
+            all_motif_stats[mod_name] = mod_stats
+        stats.close()
 
         for mod_name, stats in all_motif_stats.items():
             unzip_stats = list(zip(*stats))
@@ -224,17 +111,113 @@ def plot_per_read_roc(
         all_motif_stats_for_r = conv_all_motif_stats_for_r
     all_motif_stats_for_r = r.ListVector(all_motif_stats_for_r)
 
-    if VERBOSE: th._status_message('Computing accuracy statistics.')
+    if VERBOSE: th.status_message('Computing accuracy statistics.')
     tp_rates, fp_rates, precisions, mod_names_for_r = [], [], [], []
+    if VERBOSE:
+        sys.stderr.write('      {:<30}{:<6}    {:<6}\n'.format(
+            'Statistic Type', 'AUC', 'mean AP'))
+        sys.stderr.write('      {:<30}{:<6}    {:<6}\n'.format(
+            '--------------', '---', '-------'))
     for mod_name, mod_stats in all_motif_stats.items():
+        # extract motif_match (bool) ordered by stat values
         ordered_mod_tf = list(zip(*sorted(mod_stats)))[1]
         mod_tp_rate, mod_fp_rate, mod_precision = ts.compute_accuracy_rates(
             ordered_mod_tf)
-        auc = np.sum(mod_tp_rate[:-1] * (mod_fp_rate[1:] - mod_fp_rate[:-1]))
-        # TODO compute precision recall summary stat
-        if VERBOSE: sys.stderr.write('\t'.join((
-                '', mod_name.ljust(30), 'AUC:',
-                '{:.4f}'.format(auc))) + '\n')
+        auc = ts.compute_auc(mod_tp_rate, mod_fp_rate)
+        mean_ap = ts.compute_mean_avg_precison(mod_tp_rate, mod_precision)
+        if VERBOSE:
+            sys.stderr.write('      {:<30}{:6.4f}    {:6.4f}\n'.format(
+                mod_name, auc, mean_ap))
+        tp_rates.extend(mod_tp_rate)
+        fp_rates.extend(mod_fp_rate)
+        precisions.extend(mod_precision)
+        mod_names_for_r.extend(repeat(mod_name, len(mod_tp_rate)))
+
+    if VERBOSE: th.status_message('Plotting.')
+    rocDat = r.DataFrame({
+        'TP':r.FloatVector(tp_rates),
+        'FP':r.FloatVector(fp_rates),
+        'Precision':r.FloatVector(precisions),
+        'Comparison':r.StrVector(mod_names_for_r)})
+    r.r(resource_string(__name__, 'R_scripts/plotROC.R').decode())
+    r.r('pdf("' + pdf_fn + '", height=4, width=6)')
+    r.globalenv[str('plotROC')](rocDat)
+    r.r('dev.off()')
+
+    return
+
+def plot_per_read_roc(
+        pr_stats_fns, motif_descs, fasta_fn, pdf_fn, stats_per_block,
+        total_stats_limit):
+    if len(motif_descs) != len(pr_stats_fns):
+        th.error_message_and_exit(
+            'Must provide exactly one set of motif descriptions for ' +
+            'each statistics file.')
+
+    if VERBOSE: th.status_message('Parsing motifs.')
+    motif_descs = [th.parse_motif_descs(stat_motif_descs)
+                   for stat_motif_descs in motif_descs]
+    mod_names = [mod_name for stat_mds in motif_descs
+                 for _, mod_name in stat_mds]
+    if len(mod_names) != len(set(mod_names)):
+        th.error_message_and_exit('Modified base names are not unique.')
+
+    if VERBOSE: th.status_message('Parsing genome.')
+    genome_index = th.Fasta(fasta_fn)
+
+    if VERBOSE: th.status_message('Extracting per-read statistics.')
+    all_motif_stats = {}
+    all_motif_stats_for_r = {}
+    for pr_stats_fn, stat_motif_descs in zip(pr_stats_fns, motif_descs):
+        if not os.path.isfile(pr_stats_fn):
+            th.warning_message('Statistics file does not exist. Skipping: ' +
+                                pr_stats_fn)
+            continue
+        try:
+            pr_stats = ts.PerReadStats(pr_stats_fn)
+        except Exception as e:
+            th.warning_message(
+                'Unexpected error parsing ' + pr_stats_fn + '. Continuing ' +
+                'without processing this file. \n\tError code:\n\t\t' +
+                str(e) + '\n')
+            continue
+        for mod_name, mod_stats in pr_stats.compute_motif_stats(
+            stat_motif_descs, genome_index, stats_per_block,
+                total_stats_limit).items():
+            all_motif_stats[mod_name] = mod_stats
+        pr_stats.close()
+
+        for mod_name, stats in all_motif_stats.items():
+            unzip_stats = list(zip(*stats))
+            all_motif_stats_for_r[mod_name] = r.DataFrame({
+                'stat':r.FloatVector(unzip_stats[0]),
+                'motif_match':r.BoolVector(unzip_stats[1])})
+
+    # python2 rpy2 ListVector can't take unicode keys
+    if sys.version_info[0] < 3:
+        conv_all_motif_stats_for_r = {}
+        for k, v in all_motif_stats_for_r.items():
+            conv_all_motif_stats_for_r[k.encode()] = v
+        all_motif_stats_for_r = conv_all_motif_stats_for_r
+    all_motif_stats_for_r = r.ListVector(all_motif_stats_for_r)
+
+    if VERBOSE: th.status_message('Computing accuracy statistics.')
+    tp_rates, fp_rates, precisions, mod_names_for_r = [], [], [], []
+    if VERBOSE:
+        sys.stderr.write('      {:<30}{:<6}    {:<6}\n'.format(
+            'Statistic Type', 'AUC', 'mean AP'))
+        sys.stderr.write('      {:<30}{:<6}    {:<6}\n'.format(
+            '--------------', '---', '-------'))
+    for mod_name, mod_stats in all_motif_stats.items():
+        # extract motif_match (bool) ordered by stat values
+        ordered_mod_tf = list(zip(*sorted(mod_stats)))[1]
+        mod_tp_rate, mod_fp_rate, mod_precision = ts.compute_accuracy_rates(
+            ordered_mod_tf)
+        auc = ts.compute_auc(mod_tp_rate, mod_fp_rate)
+        mean_ap = ts.compute_mean_avg_precison(mod_tp_rate, mod_precision)
+        if VERBOSE:
+            sys.stderr.write('      {:<30}{:6.4f}    {:6.4f}\n'.format(
+                mod_name, auc, mean_ap))
         tp_rates.extend(mod_tp_rate)
         fp_rates.extend(mod_fp_rate)
         precisions.extend(mod_precision)
@@ -246,7 +229,7 @@ def plot_per_read_roc(
         'Precision':r.FloatVector(precisions),
         'Comparison':r.StrVector(mod_names_for_r)})
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotROCPerRead.R').decode())
     r.r('pdf("' + pdf_fn + '", height=4, width=6)')
     r.globalenv[str('plotROCPerRead')](rocDat, all_motif_stats_for_r)
@@ -260,20 +243,19 @@ def plot_per_read_roc(
 ###################################
 
 def plot_kmer_dist(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        read_mean, upstrm_bases, dnstrm_bases, kmer_thresh, num_reads,
-        r_struct_fn, dont_plot):
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, read_mean,
+        upstrm_bases, dnstrm_bases, kmer_thresh, num_reads, r_struct_fn,
+        dont_plot):
     kmer_width = upstrm_bases + dnstrm_bases + 1
     reads_added = 0
     all_kmers = defaultdict(list)
 
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    if VERBOSE: th._status_message('Extracting read levels.')
-    files = [r_data for cs_r_data in raw_read_coverage.values()
-             for r_data in cs_r_data]
-    np.random.shuffle(files)
-    for r_data in files:
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+
+    if VERBOSE: th.status_message('Extracting read levels.')
+    all_reads = list(reads_index.iter_reads())
+    np.random.shuffle(all_reads)
+    for r_data in all_reads:
         r_means, r_seq = th.get_multiple_slots_read_centric(
             r_data, ['norm_mean', 'base'])
         if r_means is None: continue
@@ -304,17 +286,18 @@ def plot_kmer_dist(
             break
 
     if reads_added in (0,1):
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'No valid reads present.\n\t\tCheck that [--corrected-group] ' +
-            'matches value used in resquiggle.\n\t\tAlso consider lowering ' +
-            '[--num-kmer-threshold] especially for k-mer lengths greater than 4.')
+            'matches value used in resquiggle.\n\t\tAlso consider ' +
+            'lowering [--num-kmer-threshold] especially for k-mer lengths ' +
+            'greater than 4.')
     if reads_added < num_reads:
-        th._warning_message(
+        th.warning_message(
             'Fewer valid reads present than requested.\n\tConsider ' +
             'lowering [--num-kmer-threshold] especially for k-mer lengths ' +
             'greater than 4.')
 
-    if VERBOSE: th._status_message('Preparing plot data.')
+    if VERBOSE: th.status_message('Preparing plot data.')
     kmer_levels = [kmer for means, kmer in sorted([
         (np.mean(list(map(itemgetter(0), means))), kmer)
         for kmer, means in all_kmers.items()])]
@@ -345,7 +328,7 @@ def plot_kmer_dist(
                 i - upstrm_bases for kmer in kmer_levels
                 for i in range(kmer_width)])})
     except:
-        th._warning_message(
+        th.warning_message(
             'Install R package `gridExtra` for ' +
             'visual kmer display. Using text kmer display.')
         baseDat = r.NA_Character
@@ -356,7 +339,7 @@ def plot_kmer_dist(
         r_struct_fn = r.StrVector([r_struct_fn,])
     dont_plot_r = r.BoolVector([dont_plot,])
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotKmerDist.R').decode())
     if not dont_plot: r.r('pdf("' + pdf_fn + '", height=7, width=10)')
     if read_mean:
@@ -366,6 +349,82 @@ def plot_kmer_dist(
         r.globalenv[str('plotKmerDist')](
             kmerDat, baseDat, r_struct_fn, dont_plot_r)
     if not dont_plot: r.r('dev.off()')
+
+    return
+
+
+
+##########################
+#### Plot Single Read ####
+##########################
+
+def plot_single_read(
+        read_data=None, fast5_fn=None, norm_type='median', scale_values=None,
+        add_vlines=False, png_fn='single_read_raw_signal.png',
+        corr_grp='RawGenomeCorrected_000', rna=False, manual_vlines=None,
+        num_obs=None, highlight_pos=None, highlight_ranges=None,
+        second_track_data=None):
+    vlineDat = r.DataFrame({'Position':r.IntVector([]),})
+    if read_data is not None:
+        fast5_fn = read_data.fn
+        corr_grp = read_data.corr_group
+        rna = read_data.rna
+
+    import h5py
+    with h5py.File(fast5_fn, 'r') as fast5_data:
+        raw_signal = th.get_raw_read_slot(fast5_data)['Signal'][:]
+        if num_obs is not None:
+            raw_signal = raw_signal[:num_obs]
+        if add_vlines:
+            corr_subgrp = fast5_data['/Analyses/' + corr_grp]
+            event_starts = corr_subgrp['Events']['start']
+            events_end = event_starts[-1] + corr_subgrp['Events']['length'][-1]
+            raw_start = corr_subgrp['Events'].attrs.get('read_start_rel_to_raw')
+            raw_end = raw_start + events_end
+            if rna:
+                tmp_raw_end = raw_signal.shape[0] - raw_start
+                raw_start = raw_signal.shape[0] - raw_end
+                raw_end = tmp_raw_end
+            vlineDat = r.DataFrame({'Position':r.IntVector([
+                raw_start, raw_end]),})
+        elif manual_vlines is not None:
+            vlineDat = r.DataFrame({'Position':r.IntVector(manual_vlines),})
+
+    norm_signal, _ = ts.normalize_raw_signal(
+        raw_signal, norm_type=norm_type, scale_values=scale_values)
+    sigDat = r.DataFrame({
+        'Position':r.IntVector(range(norm_signal.shape[0])),
+        'Signal':r.FloatVector(norm_signal)})
+
+    hDat = r.r('NULL')
+    if highlight_pos is not None:
+        if num_obs is not None:
+            highlight_pos = highlight_pos[highlight_pos < num_obs]
+        hDat = r.DataFrame({
+            'Position':r.IntVector(highlight_pos),
+            'Signal':r.FloatVector(norm_signal[highlight_pos])})
+    hrDat = r.r('NULL')
+    if highlight_ranges is not None:
+        if num_obs is not None:
+            highlight_ranges = highlight_ranges[highlight_ranges[:,1] < num_obs,]
+        hrDat = r.DataFrame({
+            'Position':r.IntVector(highlight_ranges[:,0]),
+            'PositionEnd':r.IntVector(highlight_ranges[:,1])})
+
+    stDat = r.r('NULL')
+    if second_track_data is not None:
+        importr(str('cowplot'))
+        if num_obs is not None:
+            second_track_data = second_track_data[:num_obs]
+        stDat = r.DataFrame({
+            'Position':r.IntVector(range(len(second_track_data))),
+            'Value':r.FloatVector(second_track_data)})
+
+    if VERBOSE: th.status_message('Plotting.')
+    r.r(resource_string(__name__, 'R_scripts/plotSingleRead.R').decode())
+    r.r('png("' + png_fn + '", width=3000, height=1400)')
+    r.globalenv[str('plotSingleRead')](sigDat, vlineDat, hDat, hrDat, stDat)
+    r.r('dev.off()')
 
     return
 
@@ -397,7 +456,7 @@ def get_read_correction_data(
     elif reg_type == 'random':
         reg_start = np.random.randint(0, events_end - num_obs)
     else:
-        raise NotImplementedError(
+        raise th.TomboError(
             'Invalid reg_type (int or str) to extract read correction data')
 
     norm_reg_signal, _ = ts.normalize_raw_signal(
@@ -516,52 +575,6 @@ def get_read_correction_data(
 
     return old_dat, new_dat, sig_dat, diff_dat
 
-def get_read_reg_events(r_data, int_start, int_end):
-    r_means = th.get_single_slot_genome_centric(r_data, 'norm_mean')
-    if r_means is None: return None
-    if r_data.start > int_start and r_data.end < int_end:
-        # handle reads that are contained in a region
-        start_overlap = int_end - r_data.start
-        end_overlap = r_data.end - int_start
-        # create region with nan values
-        region_means = np.empty(int_end - int_start)
-        region_means[:] = np.NAN
-        region_means[-start_overlap:end_overlap] = r_means[
-            -end_overlap:start_overlap]
-    elif r_data.start > int_start:
-        # handle reads that start in middle of region
-        start_overlap = int_end - r_data.start
-        # create region with nan values
-        region_means = np.empty(int_end - int_start)
-        region_means[:] = np.NAN
-        region_means[-start_overlap:] = r_means[:start_overlap]
-    elif r_data.end < int_end:
-        # handle reads that end inside region
-        end_overlap = r_data.end - int_start
-        # create region with nan values
-        region_means = np.empty(int_end - int_start)
-        region_means[:] = np.NAN
-        region_means[:end_overlap] = r_means[-end_overlap:]
-    else:
-        region_means = r_means[
-            int_start - r_data.start:int_end - r_data.start]
-
-    return region_means
-
-def get_reg_events(reg_reads, int_start, int_end, strand,
-                   read_rows=False, num_reads=None):
-    reg_events = [
-        get_read_reg_events(r_data, int_start, int_end)
-        for r_data in reg_reads if strand is None or r_data.strand == strand]
-    reg_events = [r_means for r_means in reg_events
-                  if r_means is not None]
-    if num_reads is not None:
-        reg_events = reg_events[:num_reads]
-
-    if read_rows:
-        return np.row_stack(reg_events)
-    return np.column_stack(reg_events)
-
 def get_r_event_data(
         all_reg_data, plot_types, overplot_thresh, group_num='Group1'):
     Position, Signal, Strand, Region = [], [], [], []
@@ -572,8 +585,7 @@ def get_r_event_data(
             if sum(r_data.strand == strand
                    for r_data in reg_data.reads) == 0:
                 continue
-            reg_events = get_reg_events(
-                reg_data.reads, reg_data.start, reg_data.end, strand)
+            reg_events = reg_data.get_base_levels()
             for pos, base_read_means in enumerate(reg_events):
                 # skip bases with zero or 1 read as ggplot won't
                 # be able to estimate the density
@@ -611,8 +623,7 @@ def get_r_boxplot_data(
             if sum(r_data.strand == strand
                    for r_data in reg_data.reads) == 0:
                 continue
-            reg_events = get_reg_events(
-                reg_data.reads, reg_data.start, reg_data.end, strand)
+            reg_events = reg_data.get_base_levels()
             for pos, base_read_means in enumerate(reg_events):
                 # skip regions with no coverage
                 if sum(~np.isnan(base_read_means)) == 0:
@@ -655,8 +666,7 @@ def get_r_quant_data(
             if sum(r_data.strand == strand
                    for r_data in reg_data.reads) == 0:
                 continue
-            reg_events = get_reg_events(
-                reg_data.reads, reg_data.start, reg_data.end, strand)
+            reg_events = reg_data.get_base_levels()
             for pos, base_read_means in enumerate(reg_events):
                 # skip regions with no coverage
                 if sum(~np.isnan(base_read_means)) == 0:
@@ -687,7 +697,8 @@ def get_r_quant_data(
         'Group':r.StrVector(list(repeat(group_num, len(Position))))})
 
 def get_r_raw_signal_data(
-        all_reg_data, plot_types, overplot_thresh, group_num='Group1'):
+        all_reg_data, plot_types, overplot_thresh, group_num='Group1',
+        genome_centric=True):
     not_warned = True
     Position, Signal, Read, Strand, Region = [], [], [], [], []
     for reg_plot_sig, reg_data in zip(plot_types, all_reg_data):
@@ -709,20 +720,30 @@ def get_r_raw_signal_data(
             reg_reads = plus_reads + minus_reads
         for r_num, r_data in enumerate(reg_reads):
             try:
+                # only extract the signal that overlaps this region
                 (r_sig, overlap_seg_data, start_offset,
                  scale_vals) = th.get_raw_signal(
-                    r_data, reg_data.start, reg_data.end)
+                     r_data, reg_data.start, reg_data.end)
                 r_sig, _ = ts.normalize_raw_signal(
                     r_sig, 0, r_sig.shape[0], scale_values=scale_vals)
             except:
                 if not_warned:
                     not_warned = False
-                    th._warning_message(
+                    th.warning_message(
                         'Genome resolved raw signal could not be retrieved ' +
                         'for some reads. Ensure that reads have been ' +
                         're-squiggled and that all data slot corresponding ' +
                         'accordingly.')
                 continue
+
+            if not genome_centric and r_data.strand == "-":
+                r_sig = r_sig[::-1]
+                overlap_seg_data = (
+                    overlap_seg_data[::-1] * -1) + overlap_seg_data[-1]
+                if len(overlap_seg_data) < reg_data.end - reg_data.start:
+                    start_offset = reg_data.end - reg_data.start  - len(
+                        overlap_seg_data) - start_offset
+
             for base_i, (b_start, b_end) in enumerate(zip(
                     overlap_seg_data[:-1], overlap_seg_data[1:])):
                 Position.extend(
@@ -755,7 +776,8 @@ def get_plot_types_data(plot_args, quant_offset=0):
 
     return SignalData, QuantData, BoxData, EventData
 
-def get_base_r_data(all_reg_data, zero_start=False, is_rna=False):
+def get_base_r_data(
+        all_reg_data, zero_start=False, is_rna=False, genome_centric=True):
     BaseStart, Bases, BaseRegion, BaseStrand = [], [], [], []
     for reg_data in all_reg_data:
         # skip regions without sequence data
@@ -777,10 +799,18 @@ def get_base_r_data(all_reg_data, zero_start=False, is_rna=False):
                 base = base.translate(th.COMP_BASES)
                 if is_rna and base == 'T':
                     base = 'U'
-                if zero_start:
-                    BaseStart.append(unicode(i))
+                if genome_centric:
+                    if zero_start:
+                        BaseStart.append(unicode(i))
+                    else:
+                        BaseStart.append(unicode(i + reg_data.start))
                 else:
-                    BaseStart.append(unicode(i + reg_data.start))
+                    if zero_start:
+                        BaseStart.append(unicode(
+                            reg_data.end - reg_data.start - i - 1))
+                    else:
+                        BaseStart.append(unicode(
+                            reg_data.end - i - 1))
                 Bases.append(base)
                 BaseRegion.append(reg_data.reg_id)
                 BaseStrand.append(REV_STRAND)
@@ -794,7 +824,7 @@ def get_base_r_data(all_reg_data, zero_start=False, is_rna=False):
             ordered=True, levels=r.StrVector((FWD_STRAND, REV_STRAND)))})
 
 
-def get_model_r_data(all_reg_model_data):
+def get_model_r_data(all_reg_model_data, genome_centric=True):
     Position, Strand, Mean, SD, Region = [], [], [], [], []
     for reg_id, strand, fwd_model_data, rev_model_data in all_reg_model_data:
         if strand == '+' or strand is None:
@@ -805,12 +835,21 @@ def get_model_r_data(all_reg_model_data):
                 SD.append(base_model_sd)
                 Region.append(reg_id)
         if strand == '-' or strand is None:
-            for pos, base_model_mean, base_model_sd in rev_model_data:
-                Position.append(pos)
-                Strand.append(REV_STRAND)
-                Mean.append(base_model_mean)
-                SD.append(base_model_sd)
-                Region.append(reg_id)
+            if genome_centric:
+                for pos, base_model_mean, base_model_sd in rev_model_data:
+                    Position.append(pos)
+                    Strand.append(REV_STRAND)
+                    Mean.append(base_model_mean)
+                    SD.append(base_model_sd)
+                    Region.append(reg_id)
+            else:
+                start_pos, end_pos = rev_model_data[0][0], rev_model_data[-1][0]
+                for pos, base_model_mean, base_model_sd in rev_model_data:
+                    Position.append(start_pos + end_pos - pos)
+                    Strand.append(REV_STRAND)
+                    Mean.append(base_model_mean)
+                    SD.append(base_model_sd)
+                    Region.append(reg_id)
 
     return r.DataFrame({
         'Position':r.FloatVector(Position),
@@ -821,14 +860,17 @@ def get_model_r_data(all_reg_model_data):
         'SD':r.FloatVector(SD),
         'Region':r.StrVector(Region)})
 
-def get_reg_r_stats(all_reg_stats, are_pvals=True):
+def get_reg_r_stats(all_reg_stats, are_pvals=False):
     Stats, Position, Read, Region = [], [], [], []
     OrdRead, OrdRegion = [], []
-    for reg_id, reg_stats in all_reg_stats:
-        if are_pvals:
-            reg_stats = -np.log10(reg_stats)
+    for reg_id, reg_strand, reg_stats in all_reg_stats:
+        # -log if p-values and trim/winsorize stats before clustering here
+        reg_stats = ts.transform_and_trim_stats(
+            reg_stats, are_pvals, PLOT_PVAL_MAX if are_pvals else PLOT_LLR_MAX)
         OrdRead.extend(ts.order_reads(reg_stats))
         OrdRegion.extend(repeat(reg_id, reg_stats.shape[0]))
+        if reg_strand == '-':
+            reg_stats = reg_stats[:,::-1]
         for read_i, read_stats in enumerate(reg_stats):
             for pos, pos_stat in enumerate(read_stats):
                 Stats.append(pos_stat)
@@ -853,17 +895,14 @@ def get_reg_r_stats(all_reg_stats, are_pvals=True):
 ###########################################################################
 
 def plot_corrections(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        reg_type, num_obs, num_reads):
-    th._warning_message('The plot_correction command may be deprecated in ' +
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, reg_type, num_obs,
+        num_reads):
+    th.warning_message('The plot_correction command may be deprecated in ' +
                         'future versions of Tombo.')
-    if VERBOSE: th._status_message('Preparing plot data.')
+    if VERBOSE: th.status_message('Preparing plot data.')
     OldSegDat, NewSegDat, SigDat, DiffDat = [], [], [], []
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    files = [r_data for cs_r_data in raw_read_coverage.values()
-             for r_data in cs_r_data]
-    for r_data in files:
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+    for r_data in reads_index.iter_reads():
         old_dat, new_dat, signal_dat, diff_dat = get_read_correction_data(
             r_data, reg_type, num_obs)
         if old_dat is None:
@@ -877,22 +916,22 @@ def plot_corrections(
         if len(OldSegDat) >= num_reads:
             break
     if len(OldSegDat) == 0:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'No reads were able to be processed. This command is ' +
             'only applicable to reads processed with event_resquiggle. ' +
             'Also check that --corrected-group and --basecall-subgroup ' +
             'match the event_resquiggle command.')
     if VERBOSE and len(OldSegDat) < num_reads:
-        th._warning_message(
+        th.warning_message(
             'Fewer reads than requested were able to ' +
             'be processed. Likely too few reads provided or ' +
             'those provided were not corrected.')
-    OldSegDat = r.DataFrame.rbind(*OldSegDat)
-    NewSegDat = r.DataFrame.rbind(*NewSegDat)
-    SigDat = r.DataFrame.rbind(*SigDat)
-    DiffDat = r.DataFrame.rbind(*DiffDat)
+    OldSegDat = _R_DF.rbind(*OldSegDat)
+    NewSegDat = _R_DF.rbind(*NewSegDat)
+    SigDat = _R_DF.rbind(*SigDat)
+    DiffDat = _R_DF.rbind(*DiffDat)
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotReadCorr.R').decode())
     r.r('pdf("' + pdf_fn + '", height=7, width=11)')
     r.globalenv[str('plotReadCorr')](OldSegDat, NewSegDat, SigDat, DiffDat)
@@ -901,19 +940,17 @@ def plot_corrections(
     return
 
 def plot_multi_corrections(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        num_reads_per_plot, num_regions, num_obs, include_orig_bcs, genome_locs):
-    th._warning_message('The plot_multi_correction command may be deprecated ' +
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, num_reads_per_plot,
+        num_regions, num_obs, include_orig_bcs, genome_locs):
+    th.warning_message('The plot_multi_correction command may be deprecated ' +
                         'in future versions of Tombo.')
     num_regions = num_regions if num_regions % 2 == 0 else \
                   num_regions + 1
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    read_coverage = th.get_coverage(raw_read_coverage)
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
 
     if genome_locs is None:
         coverage_regions = []
-        for (chrm, strand), cs_coverage in read_coverage.items():
+        for (chrm, strand), cs_coverage in reads_index.iter_cs_coverage():
             reg_covs, reg_lens = zip(*[
                 (x, len(list(y))) for x, y in groupby(cs_coverage)])
             coverage_regions.extend(zip(
@@ -931,40 +968,38 @@ def plot_multi_corrections(
             ['{:03d}'.format(rn) for rn in range(num_regions)],
             coverage_regions[:num_regions]))
         if len(plot_locs) < num_regions:
-            th._warning_message(
+            th.warning_message(
                 'Fewer regions contain minimum ' +
                 'number of reads than requested.')
     else:
-        if VERBOSE: th._status_message('Parsing genome locations.')
+        if VERBOSE: th.status_message('Parsing genome locations.')
         parsed_locs = th.parse_genome_locations(genome_locs, default_strand='+')
         plot_locs = [
-            ('{:03d}'.format(i), (chrm, int(pos) - 1, strand))
+            ('{:03d}'.format(i), (chrm, pos, strand))
             for i, (chrm, pos, strand) in enumerate(parsed_locs)]
         # filter regions with no coverage
         plot_locs = [
             (reg_i, (chrm, start, strand))
             for (reg_i, (chrm, start, strand)) in plot_locs
-            if (chrm, strand) in read_coverage and
-            read_coverage[(chrm, strand)][start] > 0]
+            if reads_index.get_coverage(chrm, start, strand) > 0]
         if len(plot_locs) < len(parsed_locs):
-            th._warning_message(
+            th.warning_message(
                 'Some regions did not contain read coverage.')
 
     if len(plot_locs) == 0:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'No regions contain minimum number of reads.')
 
-    if VERBOSE: th._status_message('Preparing plot data.')
+    if VERBOSE: th.status_message('Preparing plot data.')
     OldSegDat, NewSegDat, SigDat = [], [], []
     for reg_i, (chrm, reg_center, strand) in plot_locs:
         reg_num_reads = 0
-        ## get num_reads_per_region reads from this region
-        reg_reads = [
-            r_data for r_data in raw_read_coverage[(chrm, strand)]
-            if r_data.start <= reg_center - (num_obs / 2.0) and
-            r_data.end > reg_center + (num_obs / 2.0) and
-            r_data.strand == strand]
-        for r_data in reg_reads:
+        ## get num_reads_per_plot reads from this region
+        for r_data in (
+                rd for rd in reads_index.get_cs_reads(chrm, strand)
+                if rd.start <= reg_center - (num_obs / 2.0) and
+                rd.end > reg_center + (num_obs / 2.0) and
+                rd.strand == strand):
             try:
                 old_dat, new_dat, signal_dat, diff_dat \
                     = get_read_correction_data(
@@ -985,16 +1020,17 @@ def plot_multi_corrections(
             if reg_num_reads >= num_reads_per_plot:
                 break
         if reg_num_reads < num_reads_per_plot:
-            # TODO: figure out if we should warn here
+            th.warning_message(
+                'Fewer reads found than requested for this region.')
             pass
     try:
-        OldSegDat = r.DataFrame.rbind(*OldSegDat)
+        OldSegDat = _R_DF.rbind(*OldSegDat)
     except:
         OldSegDat = None
-    NewSegDat = r.DataFrame.rbind(*NewSegDat)
-    SigDat = r.DataFrame.rbind(*SigDat)
+    NewSegDat = _R_DF.rbind(*NewSegDat)
+    SigDat = _R_DF.rbind(*SigDat)
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotMultiReadCorr.R').decode())
     r.r('pdf("' + pdf_fn + '", height=5, width=11)')
     if include_orig_bcs and OldSegDat is not None:
@@ -1010,8 +1046,9 @@ def plot_multi_corrections(
 #### Base plotting linker functions ####
 ########################################
 
-def get_plots_titles(all_reg_data, all_reg_data2, overplot_type,
-                     overplot_thresh, model_plot=False):
+def get_plots_titles(
+        all_reg_data, all_reg_data2, overplot_type, overplot_thresh,
+        model_plot=False, include_chrm=True, include_cov=True):
     strand_cov = []
     for reg_i in range(len(all_reg_data)):
         reg_cov1 = [
@@ -1039,40 +1076,49 @@ def get_plots_titles(all_reg_data, all_reg_data2, overplot_type,
 
     titles = []
     for int_i, r_cov, r_ovp in zip(all_reg_data, strand_cov, dnspl_stars):
+        reg_title = int_i.chrm if include_chrm else ''
         if all_reg_data2 is None:
             if int_i.strand is None:
-                reg_title = int_i.chrm + ' ' + int_i.reg_text + \
-                        " ::: Coverage: " + unicode(r_cov[0]) + r_ovp[0] + \
-                        " + " + unicode(r_cov[1]) + r_ovp[1] + " -"
+                reg_title += '  ' + int_i.reg_text
+                if include_cov:
+                    reg_title += (
+                        "  Coverage: " + unicode(r_cov[0]) + r_ovp[0] + " + " +
+                        unicode(r_cov[1]) + r_ovp[1] + " -")
             else:
-                cov_str = unicode(r_cov[0]) + r_ovp[0] if int_i.strand == '+' \
-                          else unicode(r_cov[1]) + r_ovp[1]
-                reg_title = int_i.chrm + (
-                    ":" + int_i.strand if int_i.strand else '') + \
-                    ' ' + int_i.reg_text + " ::: Coverage: " + cov_str
+                if include_chrm:
+                    reg_title += ':' + int_i.strand
+                reg_title += '  ' + int_i.reg_text
+                if include_cov:
+                    cov_str = (
+                        unicode(r_cov[0]) + r_ovp[0] if int_i.strand == '+'
+                        else unicode(r_cov[1]) + r_ovp[1])
+                    reg_title += "  Coverage: " + cov_str
             if model_plot and overplot_type in (
                     'Density', 'Quantile', 'Boxplot'):
-                reg_title += ' (Model in Black)'
-            titles.append(reg_title)
+                reg_title += '  (Model in Black)'
         else:
             if int_i.strand is None:
-                titles.append(
-                    int_i.chrm + ' ' + int_i.reg_text +
-                    " ::: Coverage: Sample (Red): " +
-                    unicode(r_cov[0]) + r_ovp[0] + " + " +
-                    unicode(r_cov[1]) + r_ovp[1] + " -; Control (Black): " +
-                    unicode(r_cov[2]) + r_ovp[2] + " + " +
-                    unicode(r_cov[3]) + r_ovp[3] + " -")
+                reg_title += '  ' + int_i.reg_text
+                if include_cov:
+                    reg_title += (
+                        "  Coverage: Sample (Red): " +
+                        unicode(r_cov[0]) + r_ovp[0] + " + " +
+                        unicode(r_cov[1]) + r_ovp[1] + " -; Control (Black): " +
+                        unicode(r_cov[2]) + r_ovp[2] + " + " +
+                        unicode(r_cov[3]) + r_ovp[3] + " -")
             else:
-                cov_str = (
-                    'Sample (Red): ' + unicode(r_cov[0]) + r_ovp[0] +
-                    '; Control (Black): ' + unicode(r_cov[2]) + r_ovp[2]
-                ) if int_i.strand == '+' else (
-                    'Sample (Red): ' + unicode(r_cov[1]) + r_ovp[1] +
-                    '; Control (Black): ' + unicode(r_cov[3]) + r_ovp[3])
-                titles.append(
-                    int_i.chrm + ":" + int_i.strand + ' ' + int_i.reg_text +
-                    " ::: Coverage: " + cov_str)
+                if include_chrm:
+                    reg_title += ":" + int_i.strand
+                reg_title += '  ' + int_i.reg_text
+                if include_cov:
+                    cov_str = (
+                        'Sample (Red): ' + unicode(r_cov[0]) + r_ovp[0] +
+                        '; Control (Black): ' + unicode(r_cov[2]) + r_ovp[2]
+                    ) if int_i.strand == '+' else (
+                        'Sample (Red): ' + unicode(r_cov[1]) + r_ovp[1] +
+                        '; Control (Black): ' + unicode(r_cov[3]) + r_ovp[3])
+                    reg_title += "  Coverage: " + cov_str
+        titles.append(reg_title)
 
     Titles = r.DataFrame({
         'Title':r.StrVector(titles),
@@ -1081,24 +1127,23 @@ def get_plots_titles(all_reg_data, all_reg_data2, overplot_type,
     return Titles, plot_types
 
 def plot_single_sample(
-        plot_intervals, raw_read_coverage, overplot_thresh,
-        overplot_type, pdf_fn):
-    if VERBOSE: th._status_message('Preparing plot data.')
-    all_reg_data = th.get_region_reads(plot_intervals, raw_read_coverage)
-    if len(all_reg_data) == 0:
-        th._error_message_and_exit('No reads in any selected regions.')
-    if len(all_reg_data) < len(plot_intervals):
-        th._warning_message('Some selected regions contain no reads.')
-    rna = th.is_rna(raw_read_coverage)
+        plot_intervals, reads_index, overplot_thresh, overplot_type, pdf_fn,
+        title_include_chrm=True, title_include_cov=True):
+    if VERBOSE: th.status_message('Preparing plot data.')
+    for p_int in plot_intervals:
+        p_int.add_reads(reads_index).add_seq()
+    plot_intervals = th.filter_empty_regions(plot_intervals)
+    rna = th.is_sample_rna(reads_index=reads_index)
 
     Titles, plot_types = get_plots_titles(
-        all_reg_data, None, overplot_type, overplot_thresh)
+        plot_intervals, None, overplot_type, overplot_thresh,
+        include_chrm=title_include_chrm, include_cov=title_include_cov)
 
-    BasesData = get_base_r_data(all_reg_data, is_rna=rna)
+    BasesData = get_base_r_data(plot_intervals, is_rna=rna)
     SignalData, QuantData, BoxData, EventData = get_plot_types_data(
-        (all_reg_data, plot_types, overplot_thresh, 'Group1'))
+        (plot_intervals, plot_types, overplot_thresh, 'Group1'))
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotSingleRun.R').decode())
     r.r('pdf("' + pdf_fn + '", height=5, width=11)')
     r.globalenv[str('plotSingleRun')](SignalData, QuantData, BoxData,
@@ -1107,12 +1152,12 @@ def plot_single_sample(
 
     return
 
-def filter_and_merge_group_regs(g1_data, g2_data):
+def filter_and_merge_regs(g1_data, g2_data):
     filt_g1, filt_g2, merged_reg_data, both_no_cov = [], [], [], []
     for r1, r2 in zip(g1_data, g2_data):
-        both_reads = r1.reads + r2.reads
-        if len(both_reads) > 0:
-            merged_reg_data.append(r1._replace(reads=both_reads))
+        merged_reg = r1.merge(r2)
+        if len(merged_reg.reads) > 0:
+            merged_reg_data.append(merged_reg.add_seq())
             filt_g1.append(r1)
             filt_g2.append(r2)
         else:
@@ -1121,34 +1166,33 @@ def filter_and_merge_group_regs(g1_data, g2_data):
                 r1.strand))))
 
     if len(both_no_cov) > 0 and VERBOSE:
-        th._warning_message(
+        th.warning_message(
             'Some regions include no reads: ' + '\t'.join(both_no_cov))
 
     if len(merged_reg_data) == 0:
-        th._error_message_and_exit('No reads in any selected regions.')
+        th.error_message_and_exit('No reads in any selected regions.')
 
     return merged_reg_data, filt_g1, filt_g2
 
 def plot_two_samples(
-        plot_intervals, raw_read_coverage1, raw_read_coverage2,
-        overplot_thresh, overplot_type, pdf_fn, seqs_fn=None):
-    if VERBOSE: th._status_message('Preparing plot data.')
+        plot_intervals, reads_index, ctrl_reads_index, overplot_thresh,
+        overplot_type, pdf_fn, seqs_fn=None, title_include_chrm=True,
+        title_include_cov=True):
+    if VERBOSE: th.status_message('Preparing plot data.')
     # get reads overlapping each region
-    all_reg_data1 = th.get_region_reads(
-        plot_intervals, raw_read_coverage1, filter_no_cov=False, add_seq=False)
-    all_reg_data2 = th.get_region_reads(
-        plot_intervals, raw_read_coverage2, filter_no_cov=False, add_seq=False)
+    all_reg_data1 = [p_int.copy().add_reads(reads_index)
+                     for p_int in plot_intervals]
+    all_reg_data2 = [p_int.copy().add_reads(ctrl_reads_index)
+                     for p_int in plot_intervals]
 
     # filter regions with no coverage in either read group
-    merged_reg_data, all_reg_data1, all_reg_data2 = filter_and_merge_group_regs(
+    merged_reg_data, all_reg_data1, all_reg_data2 = filter_and_merge_regs(
         all_reg_data1, all_reg_data2)
-    if len(merged_reg_data) < len(plot_intervals):
-        th._warning_message('Some selected regions contain no reads.')
 
     Titles, plot_types = get_plots_titles(
-        all_reg_data1, all_reg_data2, overplot_type, overplot_thresh)
+        all_reg_data1, all_reg_data2, overplot_type, overplot_thresh,
+        include_chrm=title_include_chrm, include_cov=title_include_cov)
 
-    merged_reg_data = th.add_reg_seq(merged_reg_data)
     BasesData = get_base_r_data(merged_reg_data)
 
     # get plotting data for either quantiles of raw signal
@@ -1157,19 +1201,19 @@ def plot_two_samples(
     SignalData2, QuantData2, BoxData2, EventData2 = get_plot_types_data(
         (all_reg_data2, plot_types, overplot_thresh, 'Group2'), 0.5)
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotGroupComp.R').decode())
     r.r('pdf("' + pdf_fn + '", height=5, width=11)')
     r.globalenv[str('plotGroupComp')](
-        r.DataFrame.rbind(SignalData1, SignalData2),
-        r.DataFrame.rbind(QuantData1, QuantData2),
-        r.DataFrame.rbind(BoxData1, BoxData2),
-        r.DataFrame.rbind(EventData1, EventData2),
+        _R_DF.rbind(SignalData1, SignalData2),
+        _R_DF.rbind(QuantData1, QuantData2),
+        _R_DF.rbind(BoxData1, BoxData2),
+        _R_DF.rbind(EventData1, EventData2),
         BasesData, Titles, 0.4)
     r.r('dev.off()')
 
     if seqs_fn is not None:
-        if VERBOSE: th._status_message('Outputting region seqeuences.')
+        if VERBOSE: th.status_message('Outputting region seqeuences.')
         with io.open(seqs_fn, 'wt') as seqs_fp:
             for int_i in merged_reg_data:
                 # get the interval from the base data struct
@@ -1181,48 +1225,42 @@ def plot_two_samples(
 
     return
 
-def get_reg_kmers(tb_model_fn, plot_intervals, raw_read_coverage,
-                  min_reg_overlap=None, alt_model_fn=None):
+def get_reg_kmers(
+        std_ref, plot_intervals, reads_index,
+        min_reg_overlap=None, alt_ref=None):
     def get_reg_reads(reads, int_start, int_end):
         """ Filter reads obtained from expanded interval
         """
         return [r_data for r_data in reads
                 if not (r_data.start >= int_end or r_data.end <= int_start)]
-    std_ref = ts.TomboModel(tb_model_fn)
     # compute kmer values to make strand specific calculations easier
     dnstrm_bases = std_ref.kmer_width - std_ref.central_pos - 1
     expand_width = max(std_ref.central_pos, dnstrm_bases)
     filt_width = expand_width if min_reg_overlap is None else \
                  expand_width + min_reg_overlap
-    if alt_model_fn is not None:
-        alt_ref = ts.TomboModel(alt_model_fn)
+    if alt_ref is not None:
         if (alt_ref.central_pos != std_ref.central_pos or
             alt_ref.kmer_width != alt_ref.kmer_width):
-            th._error_message_and_exit(
+            th.error_message_and_exit(
                 'Standard model not based on the same kmer position ' +
                 'as alternative model.')
 
-    # expand regions to get kmers at first and last positions
-    expanded_intervals = [p_int._replace(start=p_int.start - expand_width,
-                                         end=p_int.end + expand_width)
-                          for p_int in plot_intervals]
-    # get reads and region sequence
-    expanded_intervals = th.get_region_reads(
-        expanded_intervals, raw_read_coverage)
-    expand_seqs = [int_i.seq for int_i in expanded_intervals]
-    rev_expand_seqs = [th.rev_comp(int_i.seq) for int_i in expanded_intervals]
+    # expand regions to get kmers at first and last positions,
+    # add reads and region sequence
+    for p_int in plot_intervals:
+        p_int.expand_interval(expand_width).add_reads(reads_index).add_seq()
+    expand_seqs = [p_int.seq for p_int in plot_intervals]
+    rev_expand_seqs = [th.rev_comp(p_int.seq) for p_int in plot_intervals]
     # convert back to original plot_intervals with seq from exanded intervals
-    all_reg_data = [
-        int_i._replace(start=int_i.start + expand_width,
-                       end=int_i.end - expand_width,
-                       reads=get_reg_reads(int_i.reads, int_i.start + filt_width,
-                                           int_i.end - filt_width),
-                       seq=int_i.seq[expand_width:-expand_width])
-        for int_i in expanded_intervals]
+    for p_int in plot_intervals:
+        p_int.expand_interval(-expand_width)
+        p_int.update(reads=get_reg_reads(p_int.reads, p_int.start + filt_width,
+                                         p_int.end - filt_width),
+                     seq=p_int.seq[expand_width:-expand_width])
 
     all_reg_model_data, all_reg_alt_model_data = [], []
     for reg_data, reg_seq, rev_seq in zip(
-            all_reg_data, expand_seqs, rev_expand_seqs):
+            plot_intervals, expand_seqs, rev_expand_seqs):
         clipped_reg_seq = reg_seq
         clipped_rev_seq = rev_seq
         if std_ref.central_pos > dnstrm_bases:
@@ -1246,7 +1284,7 @@ def get_reg_kmers(tb_model_fn, plot_intervals, raw_read_coverage,
               std_ref.sds[kmer]) for pos, kmer in enumerate(rev_kmers)
              if not th.invalid_seq(kmer)]))
         # if alternative model is supplied add info
-        if alt_model_fn is not None:
+        if alt_ref is not None:
             all_reg_alt_model_data.append((
                 reg_data.reg_id, reg_data.strand,
                 [(reg_data.start + pos, alt_ref.means[kmer],
@@ -1258,54 +1296,54 @@ def get_reg_kmers(tb_model_fn, plot_intervals, raw_read_coverage,
                  for pos, kmer in enumerate(rev_kmers)
                  if not th.invalid_seq(kmer)]))
 
-    return all_reg_data, all_reg_model_data, all_reg_alt_model_data
+    return all_reg_model_data, all_reg_alt_model_data
 
 def plot_motif_centered_with_stats(
-        raw_read_coverage1, raw_read_coverage2, plot_intervals,
-        stat_locs, overplot_thresh, pdf_fn, tb_model_fn, alt_model_fn=None):
-    if VERBOSE: th._status_message('Preparing plot data.')
+        reads_index, ctrl_reads_index, plot_intervals, stat_locs,
+        overplot_thresh, pdf_fn, std_ref, alt_ref=None):
+    if VERBOSE: th.status_message('Preparing plot data.')
 
+    # note all genome_centric options so that plots are all read direction-centric
     ModelData = r.r('NULL')
-    if raw_read_coverage2 is None:
-        if tb_model_fn is None:
-            merged_reg_data = th.get_region_reads(
-                plot_intervals, raw_read_coverage1, filter_no_cov=False)
-            plot_types = ['Downsample' for _ in merged_reg_data]
-            SignalData, _, _, _ = get_plot_types_data(
-                (merged_reg_data, plot_types, overplot_thresh, 'Group1'))
+    plot_types = ['Downsample' for _ in plot_intervals]
+    if ctrl_reads_index is None:
+        if std_ref is None:
+            for p_int in plot_intervals:
+                p_int.add_reads(reads_index).add_seq()
+            SignalData = get_r_raw_signal_data(
+                plot_intervals, plot_types, overplot_thresh, 'Group1',
+                genome_centric=False)
         else:
-            (merged_reg_data, all_reg_model_data,
-             all_reg_alt_model_data) = get_reg_kmers(
-                 tb_model_fn, plot_intervals, raw_read_coverage1,
-                 alt_model_fn=alt_model_fn)
-            plot_types = ['Downsample' for _ in merged_reg_data]
-            SignalData, _, _, _ = get_plot_types_data(
-                (merged_reg_data, plot_types, overplot_thresh, 'Group1'))
-            ModelData = get_model_r_data(all_reg_model_data)
-            if alt_model_fn is not None:
-                AltModelData = get_model_r_data(all_reg_alt_model_data)
-    else:
-        all_reg_data1 = th.get_region_reads(
-            plot_intervals, raw_read_coverage1, filter_no_cov=False,
-            add_seq=False)
-        all_reg_data2 = th.get_region_reads(
-            plot_intervals, raw_read_coverage2, filter_no_cov=False,
-            add_seq=False)
+            all_reg_model_data, all_reg_alt_model_data = get_reg_kmers(
+                 std_ref, plot_intervals, reads_index, alt_ref=alt_ref)
+            SignalData = get_r_raw_signal_data(
+                plot_intervals, plot_types, overplot_thresh, 'Group1',
+                genome_centric=False)
 
-        (merged_reg_data, all_reg_data1,
-         all_reg_data2) = filter_and_merge_group_regs(
-             all_reg_data1, all_reg_data2)
-        plot_types = ['Downsample' for _ in merged_reg_data]
-        merged_reg_data = th.add_reg_seq(merged_reg_data)
+            ModelData = get_model_r_data(all_reg_model_data, genome_centric=False)
+            if alt_ref is not None:
+                AltModelData = get_model_r_data(
+                    all_reg_alt_model_data, genome_centric=False)
+    else:
+        all_reg_data = [p_int.copy().add_reads(reads_index)
+                         for p_int in plot_intervals]
+        ctrl_reg_data = [p_int.copy().add_reads(ctrl_reads_index)
+                         for p_int in plot_intervals]
+
+        plot_intervals, all_reg_data, ctrl_reg_data = filter_and_merge_regs(
+            all_reg_data, ctrl_reg_data)
 
         # sigDat lists
-        SignalData1, _, _, _ = get_plot_types_data(
-            (all_reg_data1, plot_types, overplot_thresh, 'Group1'))
-        SignalData2, _, _, _ = get_plot_types_data(
-            (all_reg_data2, plot_types, overplot_thresh, 'Group2'))
-        SignalData = r.DataFrame.rbind(SignalData1, SignalData2)
+        plot_types = ['Downsample' for _ in plot_intervals]
+        SignalData = get_r_raw_signal_data(
+            all_reg_data, plot_types, overplot_thresh, 'Group1',
+            genome_centric=False)
+        CtrlSignalData = get_r_raw_signal_data(
+            ctrl_reg_data, plot_types, overplot_thresh, 'Group2',
+            genome_centric=False)
+        SignalData = _R_DF.rbind(SignalData, CtrlSignalData)
 
-    BasesData = get_base_r_data(merged_reg_data)
+    BasesData = get_base_r_data(plot_intervals, genome_centric=False)
 
     plot_poss, plot_stats = zip(*stat_locs)
     # stat lists
@@ -1313,10 +1351,10 @@ def plot_motif_centered_with_stats(
         'Position':r.FloatVector(plot_poss),
         'Stat':r.FloatVector(plot_stats)})
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotMotifStats.R').decode())
     r.r('pdf("' + pdf_fn + '", height=5, width=8)')
-    if alt_model_fn is None:
+    if alt_ref is None:
         r.globalenv[str('plotMotifStats')](
             SignalData, BasesData, StatsData, ModelData)
     else:
@@ -1327,32 +1365,30 @@ def plot_motif_centered_with_stats(
     return
 
 def plot_model_single_sample(
-        plot_intervals, raw_read_coverage, tb_model_fn,
-        overplot_type, overplot_thresh, pdf_fn, alt_model_fn=None, seqs_fn=None):
-    if VERBOSE: th._status_message('Preparing plot data.')
+        plot_intervals, reads_index, std_ref, overplot_type, overplot_thresh,
+        pdf_fn, alt_ref=None, seqs_fn=None, title_include_chrm=True,
+        title_include_cov=True):
+    if VERBOSE: th.status_message('Preparing plot data.')
     # get reads overlapping each region along with all kmers
-    all_reg_data, all_reg_model_data, all_reg_alt_model_data = get_reg_kmers(
-        tb_model_fn, plot_intervals, raw_read_coverage,
-        alt_model_fn=alt_model_fn)
-    if len(all_reg_data) == 0:
-        th._error_message_and_exit('No reads in any selected regions.')
-    if len(all_reg_data) < len(plot_intervals):
-        th._warning_message('Some selected regions contain no reads.')
-    rna = th.is_rna(raw_read_coverage)
+    all_reg_model_data, all_reg_alt_model_data = get_reg_kmers(
+        std_ref, plot_intervals, reads_index, alt_ref=alt_ref)
+    plot_intervals = th.filter_empty_regions(plot_intervals)
+    rna = th.is_sample_rna(reads_index=reads_index)
 
     Titles, plot_types = get_plots_titles(
-        all_reg_data, None, overplot_type, overplot_thresh, True)
+        plot_intervals, None, overplot_type, overplot_thresh, True,
+        include_chrm=title_include_chrm, include_cov=title_include_cov)
     ModelData = get_model_r_data(all_reg_model_data)
-    if alt_model_fn is not None:
+    if alt_ref is not None:
         AltModelData = get_model_r_data(all_reg_alt_model_data)
-    BasesData = get_base_r_data(all_reg_data, is_rna=rna)
+    BasesData = get_base_r_data(plot_intervals, is_rna=rna)
     SignalData, QuantData, BoxData, EventData = get_plot_types_data(
-        (all_reg_data, plot_types, overplot_thresh, 'Group1'))
+        (plot_intervals, plot_types, overplot_thresh, 'Group1'))
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotModelComp.R').decode())
     r.r('pdf("' + pdf_fn + '", height=5, width=11)')
-    if alt_model_fn is None:
+    if alt_ref is None:
         r.globalenv[str('plotModelComp')](
             SignalData, QuantData, BoxData, EventData,
             BasesData, Titles, ModelData)
@@ -1363,9 +1399,9 @@ def plot_model_single_sample(
     r.r('dev.off()')
 
     if seqs_fn is not None:
-        if VERBOSE: th._status_message('Outputting region seqeuences.')
+        if VERBOSE: th.status_message('Outputting region seqeuences.')
         with io.open(seqs_fn, 'wt') as seqs_fp:
-            for int_i in all_reg_data:
+            for int_i in plot_intervals:
                 reg_seq = int_i.seq if int_i.strand == '+' else th.rev_comp(
                     int_i.seq)
                 seqs_fp.write('>{0}::{1:d}::{2} {3}\n{4}\n'.format(
@@ -1375,12 +1411,13 @@ def plot_model_single_sample(
     return
 
 def plot_per_read_modification(
-        all_reg_data, all_reg_stats, are_pvals, box_center, pdf_fn):
-    if VERBOSE: th._status_message('Preparing plot data.')
+        plot_intervals, all_reg_stats, are_pvals, box_center, pdf_fn):
+    if VERBOSE: th.status_message('Preparing plot data.')
     StatData, OrdData = get_reg_r_stats(all_reg_stats, are_pvals)
-    BasesData = get_base_r_data(all_reg_data, zero_start=True)
+    BasesData = get_base_r_data(
+        plot_intervals, zero_start=True, genome_centric=False)
 
-    if VERBOSE: th._status_message('Plotting.')
+    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotPerReadStats.R').decode())
     r.r('pdf("' + pdf_fn + '", height=5, width=11)')
     r.globalenv[str('plotPerReadStats')](
@@ -1394,77 +1431,65 @@ def plot_per_read_modification(
 #### Plot processing methods ####
 #################################
 
-def get_valid_model_fns(
-        tb_model_fn, plot_default_stnd, alt_model_fn,
-        plot_default_alt, raw_read_coverage, f5_dirs2=None):
-    # if no model was requested
-    if (tb_model_fn is None and not plot_default_stnd and
-        alt_model_fn is None and not plot_default_alt):
-        return None, None
-
-    if tb_model_fn is None:
-        tb_model_fn, _ = ts.get_default_standard_ref(raw_read_coverage)
-    if alt_model_fn is None and plot_default_alt is not None:
-        alt_model_fn, _ = ts.get_default_alt_ref(
-            plot_default_alt, raw_read_coverage)
-
-    if f5_dirs2 is not None and tb_model_fn is not None:
-        th._warning_message(
-            'Both a second set of FAST5s and a tombo model were ' +
-            'provided. Two samples with model plotting is not ' +
-            'currently available. Models requested will be ignored.')
-
-    return tb_model_fn, alt_model_fn
-
 def plot_max_coverage(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        f5_dirs2, num_regions, num_bases, overplot_thresh, overplot_type,
-        tb_model_fn, alt_model_fn, plot_default_stnd, plot_default_alt):
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, ctrl_fast5s_dirs,
+        num_regions, num_bases, overplot_thresh, overplot_type, tb_model_fn,
+        alt_model_fn, plot_default_stnd, plot_default_alt, uniq_intervals=True):
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
 
-    tb_model_fn, alt_model_fn = get_valid_model_fns(
+    std_ref, alt_ref = ts.load_valid_models(
         tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
-        raw_read_coverage, f5_dirs2)
-    if f5_dirs2 is None:
+        reads_index, ctrl_fast5s_dirs)
+    if ctrl_fast5s_dirs is None:
         coverage_regions = []
-        for chrm, strand, cs_cov, cs_cov_starts in th.get_coverage_regions(
-                raw_read_coverage):
+        for (chrm, strand, cs_cov,
+             cs_cov_starts) in reads_index.iter_coverage_regions():
             coverage_regions.extend(zip(
                 cs_cov, cs_cov_starts, repeat(chrm), repeat(strand)))
 
         # max coverage plots both strands coverage
-        plot_intervals = [
-            th.intervalData('{:03d}'.format(rn), chrm, start, start + num_bases)
-            for rn, (stat, start, chrm, strand) in
-            enumerate(sorted(coverage_regions, reverse=True)[:num_regions])]
+        if uniq_intervals:
+            plot_intervals = [
+                th.intervalData(chrm=chrm, start=start, end=start + num_bases,
+                                reg_id='{:03d}'.format(rn))
+                for rn, (stat, start, chrm, strand) in
+                enumerate(sorted(coverage_regions, reverse=True)[:(
+                    num_regions * 20)])]
+            plot_intervals = th.get_unique_intervals(
+                plot_intervals, num_regions=num_regions)
+        else:
+            plot_intervals = [
+                th.intervalData(chrm=chrm, start=start, end=start + num_bases,
+                                reg_id='{:03d}'.format(rn))
+                for rn, (stat, start, chrm, strand) in
+                enumerate(sorted(coverage_regions, reverse=True)[:num_regions])]
 
-        if tb_model_fn is None:
+        if std_ref is None:
             plot_single_sample(
-                plot_intervals, raw_read_coverage, overplot_thresh,
+                plot_intervals, reads_index, overplot_thresh,
                 overplot_type, pdf_fn)
         else:
             plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
+                plot_intervals, reads_index, std_ref,
+                overplot_type, overplot_thresh, pdf_fn, alt_ref)
     else:
-        raw_read_coverage2 = th.parse_fast5s(
-            f5_dirs2, corrected_group, basecall_subgroups)
+        ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps)
         coverage_regions = []
         # only process chromosomes in both read groups
-        for chrm, strand, cs_cov, cs_cov_starts in th.get_coverage_regions(
-                raw_read_coverage, raw_read_coverage2):
+        for (chrm, strand, cs_cov,
+             cs_cov_starts) in reads_index.iter_coverage_regions(
+                 ctrl_reads_index):
             coverage_regions.extend(zip(
                 cs_cov, cs_cov_starts, repeat(chrm), repeat(strand)))
 
         # max coverage plots both strands coverage
         plot_intervals = [
-            th.intervalData('{:03d}'.format(rn), chrm, start, start + num_bases)
+            th.intervalData(chrm=chrm, start=start, end=start + num_bases,
+                            reg_id='{:03d}'.format(rn))
             for rn, (stat, start, chrm, strand) in
             enumerate(sorted(coverage_regions, reverse=True)[:num_regions])]
-
         plot_two_samples(
-            plot_intervals, raw_read_coverage, raw_read_coverage2,
+            plot_intervals, reads_index, ctrl_reads_index,
             overplot_thresh, overplot_type, pdf_fn)
 
     return
@@ -1473,86 +1498,81 @@ if _PROFILE_PLOT_MAX:
     _plot_max_wrapper = plot_max_coverage
     def plot_max_coverage(*args, **kwargs):
         import cProfile
-        cProfile.runctx('_plot_max_wrapper(*args, **kwargs)', globals(), locals(),
+        cProfile.runctx('_plot_max_wrapper(*args, **kwargs)',
+                        globals(), locals(),
                         filename='plot_max_cov.prof')
         return
 
 def plot_genome_locations(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        f5_dirs2, num_bases, overplot_thresh, overplot_type,
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn,
+        ctrl_fast5s_dirs, num_bases, overplot_thresh, overplot_type,
         genome_locs, tb_model_fn, alt_model_fn, plot_default_stnd,
         plot_default_alt):
-    if VERBOSE: th._status_message('Parsing genome locations.')
+    if VERBOSE: th.status_message('Parsing genome locations.')
     # minus one here as all python internal coords are 0-based, but
     # genome is generally 1-based
     plot_intervals = []
     for i, (chrm, pos, strand) in enumerate(th.parse_genome_locations(
             genome_locs)):
-        int_start = max(
-            0, int(int(pos) - np.floor(num_bases / 2.0) - 1))
+        int_start = max(0, int(pos - np.floor(num_bases / 2.0)))
         plot_intervals.append(th.intervalData(
-            '{:03d}'.format(i), chrm, int_start, int_start + num_bases, strand))
+            chrm=chrm, start=int_start, end=int_start + num_bases, strand=strand,
+            reg_id='{:03d}'.format(i)))
 
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    tb_model_fn, alt_model_fn = get_valid_model_fns(
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+    std_ref, alt_ref = ts.load_valid_models(
         tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
-        raw_read_coverage, f5_dirs2)
+        reads_index, ctrl_fast5s_dirs)
 
-    if f5_dirs2 is None:
-        if tb_model_fn is None:
+    if ctrl_fast5s_dirs is None:
+        if std_ref is None:
             plot_single_sample(
-                plot_intervals, raw_read_coverage, overplot_thresh,
+                plot_intervals, reads_index, overplot_thresh,
                 overplot_type, pdf_fn)
         else:
             plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
+                plot_intervals, reads_index, std_ref, overplot_type,
+                overplot_thresh, pdf_fn, alt_ref)
     else:
-        raw_read_coverage2 = th.parse_fast5s(
-            f5_dirs2, corrected_group, basecall_subgroups)
+        ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps)
         plot_two_samples(
-            plot_intervals, raw_read_coverage, raw_read_coverage2,
+            plot_intervals, reads_index, ctrl_reads_index,
             overplot_thresh, overplot_type, pdf_fn)
 
     return
 
 def plot_per_read_mods_genome_location(
-        f5_dirs, corrected_group, basecall_subgroups, pdf_fn,
-        per_read_stats_fn, genome_locs, num_bases, num_reads, box_center,
-        fasta_fn):
-    if VERBOSE: th._status_message('Parsing genome locations.')
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, per_read_stats_fn,
+        genome_locs, num_bases, num_reads, box_center, fasta_fn):
+    if VERBOSE: th.status_message('Parsing genome locations.')
     plot_intervals = []
     for i, (chrm, pos, strand) in enumerate(th.parse_genome_locations(
             genome_locs, default_strand='+')):
-        int_start = max(
-            0, int(int(pos) - np.floor(num_bases / 2.0) - 1) + 1)
+        int_start = max(0, int(pos - np.floor(num_bases / 2.0)))
         plot_intervals.append(th.intervalData(
-            '{:03d}'.format(i), chrm, int_start, int_start + num_bases, strand))
+            chrm=chrm, start=int_start, end=int_start + num_bases,
+            strand=strand, reg_id='{:03d}'.format(i)))
 
     # add sequence to each region if fast5s or fasta are provided
     if fasta_fn is not None:
         genome_index = th.Fasta(fasta_fn)
-        plot_intervals_w_seq = []
         for int_data in plot_intervals:
-            plot_intervals_w_seq.append(
-                int_data._replace(seq=genome_index.get_seq(
-                    int_data.chrm, int_data.start, int_data.end)))
-        plot_intervals = plot_intervals_w_seq
-    elif f5_dirs is not None:
-        raw_read_coverage = th.parse_fast5s(
-            f5_dirs, corrected_group, basecall_subgroups)
-        plot_intervals = th.get_region_reads(plot_intervals, raw_read_coverage)
+            int_data.add_seq(genome_index)
+    elif fast5s_dirs is not None:
+        reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+        for p_int in plot_intervals:
+            p_int.add_reads(reads_index).add_seq()
     else:
-        th._warning_message(
+        th.warning_message(
             'No read FAST5 directory or genome FASTA file provided. ' +
             'Plotting without sequence.')
 
-    if VERBOSE: th._status_message('Parsing per read statistics.')
+    if VERBOSE: th.status_message('Parsing per read statistics.')
     per_read_stats = ts.PerReadStats(per_read_stats_fn)
     interval_stats = []
     for int_data in plot_intervals:
-        int_stats = per_read_stats.get_region_per_read_stats(int_data, num_reads)
+        int_stats = per_read_stats.get_region_per_read_stats(
+            int_data, num_reads)
         if int_stats is not None:
             # convert long form stats to matrix form (so they can be clustered)
             # regular sort doesn't seem to work for string (object) types
@@ -1561,7 +1581,7 @@ def plot_per_read_mods_genome_location(
             # use interval data instead of stats dimensions since regDat is
             # used to compute some window distances in R, so it must be full
             # matrix for the region with NAs
-            int_len = int_data.end - int_data.start + 1
+            int_len = int_data.end - int_data.start
             all_read_stats = np.split(
                 int_stats, np.where(int_stats['read_id'][:-1] !=
                                     int_stats['read_id'][1:])[0] + 1)
@@ -1572,7 +1592,8 @@ def plot_per_read_mods_genome_location(
                 np.put(read_stats_mat[read_i,:],
                        read_int_stats['pos'] - int_data.start,
                        read_int_stats['stat'])
-            interval_stats.append((int_data.reg_id, read_stats_mat))
+            interval_stats.append((
+                int_data.reg_id, int_data.strand, read_stats_mat))
 
     are_pvals = per_read_stats.are_pvals
     per_read_stats.close()
@@ -1583,11 +1604,11 @@ def plot_per_read_mods_genome_location(
     return
 
 def plot_motif_centered(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        f5_dirs2, num_regions, num_bases, overplot_thresh, overplot_type,
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, ctrl_fast5s_dirs,
+        num_regions, num_bases, overplot_thresh, overplot_type,
         motif, fasta_fn, deepest_coverage, tb_model_fn, alt_model_fn,
         plot_default_stnd, plot_default_alt):
-    if VERBOSE: th._status_message('Identifying genomic k-mer locations.')
+    if VERBOSE: th.status_message('Identifying genomic k-mer locations.')
     genome_index = th.Fasta(fasta_fn)
     motif = th.TomboMotif(motif)
 
@@ -1605,10 +1626,10 @@ def plot_motif_centered(
                     motif_locs.append((chrm, motif_loc.start(), '-'))
 
         if len(motif_locs) == 0:
-            th._error_message_and_exit(
+            th.error_message_and_exit(
                 'Motif (' + motif.raw_motif + ') not found in genome.')
         elif len(motif_locs) < num_regions:
-            th._warning_message(
+            th.warning_message(
                 'Motif (' + motif.raw_motif + ') only found ' +
                 unicode(len(motif_locs)) + ' times in genome.')
             num_region = len(motif_locs)
@@ -1616,16 +1637,12 @@ def plot_motif_centered(
 
         return motif_locs
 
-    def get_pos_cov(chrm, pos, strand, read_coverage, read_coverage2=None):
+    def get_pos_cov(chrm, pos, strand, reads_index, ctrl_reads_index):
+        """Compute minimum coverage between the 2 samples
+        """
         def get_strand_cov(cov_strand):
-            try:
-                if read_coverage2 is None:
-                    return read_coverage[(chrm, cov_strand)][pos]
-                else:
-                    return min(read_coverage[(chrm, cov_strand)][pos],
-                               read_coverage2[(chrm, cov_strand)][pos])
-            except (IndexError, KeyError):
-                return 0
+            return min(reads_index.get_coverage(chrm, pos, cov_strand),
+                       ctrl_reads_index.get_coverage(chrm, pos, cov_strand))
 
         # if strand is not specified get max coverage over both strands
         if strand is None:
@@ -1634,24 +1651,20 @@ def plot_motif_centered(
         return get_strand_cov(strand)
 
 
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    tb_model_fn, alt_model_fn = get_valid_model_fns(
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+    std_ref, alt_ref = ts.load_valid_models(
         tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
-        raw_read_coverage, f5_dirs2)
+        reads_index, ctrl_fast5s_dirs)
 
-    if deepest_coverage:
-        read_coverage = th.get_coverage(raw_read_coverage)
-    if f5_dirs2 is None:
-        covered_chrms = set(map(itemgetter(0), raw_read_coverage))
+    if ctrl_fast5s_dirs is None:
+        covered_chrms = set(map(itemgetter(0), reads_index.get_all_cs()))
         # filter out motif_locs to chromosomes not covered
         motif_locs = get_motif_locs(covered_chrms)
 
         if deepest_coverage:
-            if VERBOSE: th._status_message('Finding deepest coverage regions.')
+            if VERBOSE: th.status_message('Finding deepest coverage regions.')
             motif_locs_cov = sorted([
-                (get_pos_cov(chrm, pos, strand, read_coverage),
-                 chrm, pos, strand)
+                (reads_index.get_coverage(chrm, pos, strand), chrm, pos, strand)
                 for chrm, pos, strand in motif_locs], reverse=True)
             plot_intervals = []
             for i, (cov, chrm, pos, strand) in enumerate(motif_locs_cov):
@@ -1659,57 +1672,48 @@ def plot_motif_centered(
                     0, pos - int((num_bases - motif.motif_len + 1) / 2.0))
                 int_end = int_start + num_bases
                 plot_intervals.append(th.intervalData(
-                    '{:03d}'.format(i), chrm, int_start, int_end, strand))
+                    chrm=chrm, start=int_start, end=int_end, strand=strand,
+                    reg_id='{:03d}'.format(i)))
                 if len(plot_intervals) >= num_regions: break
         # plot random covered regions
         else:
             # iterate over regions and check if they have any coverage
             plot_intervals = []
             for i, (chrm, pos, strand) in enumerate(motif_locs):
-                int_start = max(
-                    0, pos - int((num_bases - motif.motif_len + 1) / 2.0))
-                int_end = int_start + num_bases
-                if strand is None and any(
-                        ((chrm, s) in raw_read_coverage and
-                         any(r_data.start < pos < r_data.end
-                             for r_data in raw_read_coverage[(chrm, s)]))
-                        for s in ('+', '-')):
+                if reads_index.get_coverage(chrm, pos, strand) > 0:
+                    int_start = max(
+                        0, pos - int((num_bases - motif.motif_len + 1) / 2.0))
                     plot_intervals.append(th.intervalData(
-                        '{:03d}'.format(i), chrm, int_start, int_end, strand))
-                elif ((chrm, strand) in raw_read_coverage and
-                      any(r_data.start < pos < r_data.end
-                          for r_data in raw_read_coverage[(chrm, strand)])):
-                    plot_intervals.append(th.intervalData(
-                        '{:03d}'.format(i), chrm, int_start, int_end, strand))
+                        chrm=chrm, start=int_start, end=int_start + num_bases,
+                        strand=strand, reg_id='{:03d}'.format(i)))
                 if len(plot_intervals) >= num_regions: break
 
-        if tb_model_fn is None:
+        if std_ref is None:
             plot_single_sample(
-                plot_intervals, raw_read_coverage, overplot_thresh,
+                plot_intervals, reads_index, overplot_thresh,
                 overplot_type, pdf_fn)
         else:
             plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
+                plot_intervals, reads_index, std_ref, overplot_type,
+                overplot_thresh, pdf_fn, alt_ref)
     # two sample plot
     else:
-        raw_read_coverage2 = th.parse_fast5s(
-            f5_dirs2, corrected_group, basecall_subgroups)
+        ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps)
 
-        covered_chrms = set(map(itemgetter(0), raw_read_coverage)).intersection(
-            map(itemgetter(0), raw_read_coverage2))
+        covered_chrms = set(
+            map(itemgetter(0), reads_index.get_all_cs())).intersection(
+                map(itemgetter(0), ctrl_reads_index.get_all_cs()))
         # filter out motif_locs to chromosomes not covered
         motif_locs = get_motif_locs(covered_chrms)
 
         if deepest_coverage:
-            read_coverage2 = th.get_coverage(raw_read_coverage2)
-            if VERBOSE: th._status_message('Finding deepest coverage regions.')
+            if VERBOSE: th.status_message('Finding deepest coverage regions.')
             motif_locs_cov = sorted([
-                (get_pos_cov(chrm, pos, strand, read_coverage, read_coverage2),
+                (get_pos_cov(chrm, pos, strand, reads_index, ctrl_reads_index),
                  chrm, pos, strand)
                 for chrm, pos, strand in motif_locs], reverse=True)
             if motif_locs_cov[0][0] == 0:
-                th._error_message_and_exit(
+                th.error_message_and_exit(
                     'Motif not covered by both groups at any positions.')
 
             plot_intervals = []
@@ -1717,160 +1721,120 @@ def plot_motif_centered(
                 int_start = max(
                     0, pos - int((num_bases - motif.motif_len + 1) / 2.0))
                 plot_intervals.append(th.intervalData(
-                    '{:03d}'.format(i), chrm, int_start,
-                    int_start + num_bases, strand))
+                    chrm=chrm, start=int_start, end=int_start + num_bases,
+                    strand=strand, reg_id='{:03d}'.format(i)))
                 if len(plot_intervals) >= num_regions: break
         # plot random covered regions
         else:
             # iterate over regions and check if they have any coverage
             plot_intervals = []
             for i, (chrm, pos, strand) in enumerate(motif_locs):
-                int_start = max(
-                    0, pos - int((num_bases - motif.motif_len + 1) / 2.0))
-                int_end = int_start + num_bases
-                if strand is None and any((
-                        (chrm, s) in raw_read_coverage and
-                        (chrm, s) in raw_read_coverage2 and
-                        any(r_data.start < pos < r_data.end
-                            for r_data in raw_read_coverage[(chrm, s)]) and
-                        any(r_data2.start < pos < r_data2.end
-                            for r_data2 in raw_read_coverage2[(chrm, s)]))
-                                          for s in ('+', '-')):
+                if get_pos_cov(chrm, pos, strand,
+                               reads_index, ctrl_reads_index) > 0:
+                    int_start = max(
+                        0, pos - int((num_bases - motif.motif_len + 1) / 2.0))
                     plot_intervals.append(th.intervalData(
-                        '{:03d}'.format(i), chrm, int_start, int_end, strand))
-                elif ((chrm, strand) in raw_read_coverage and
-                      (chrm, strand) in raw_read_coverage2 and
-                      any(r_data.start < pos < r_data.end
-                          for r_data in raw_read_coverage[(chrm, strand)]) and
-                      any(r_data2.start < pos < r_data2.end
-                          for r_data2 in raw_read_coverage2[(chrm, strand)])):
-                    plot_intervals.append(th.intervalData(
-                        '{:03d}'.format(i), chrm, int_start, int_end, strand))
-
-                if len(plot_intervals) >= num_regions: break
+                        chrm=chrm, start=int_start, end=int_start + num_bases,
+                        strand=strand, reg_id='{:03d}'.format(i)))
+                    if len(plot_intervals) >= num_regions: break
 
             if len(plot_intervals) == 0:
-                th._error_message_and_exit(
+                th.error_message_and_exit(
                     'Motif not covered by both groups at any positions.')
 
         plot_two_samples(
-            plot_intervals, raw_read_coverage, raw_read_coverage2,
+            plot_intervals, reads_index, ctrl_reads_index,
             overplot_thresh, overplot_type, pdf_fn)
 
     return
 
 def plot_max_diff(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        f5_dirs2, num_regions, num_bases, overplot_thresh, overplot_type,
-        seqs_fn):
-    raw_read_coverage1 = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    raw_read_coverage2 = th.parse_fast5s(
-        f5_dirs2, corrected_group, basecall_subgroups)
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, ctrl_fast5s_dirs,
+        num_regions, num_bases, overplot_thresh, overplot_type, seqs_fn):
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+    ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps)
 
-    if VERBOSE: th._status_message('Getting largest mean signal differences.')
+    if VERBOSE: th.status_message('Getting largest mean signal differences.')
     plot_intervals = [
         th.intervalData(
-            '{:03d}'.format(rn), chrm, start, start + num_bases, strand,
-            '(Mean diff: {:.2f})'.format(stat))
+            chrm=chrm, start=start, end=start + num_bases, strand=strand,
+            reg_id='{:03d}'.format(rn),
+            reg_text='(Mean diff: {:.2f})'.format(stat))
         for rn, (stat, start, chrm, strand) in
         enumerate(th.get_largest_signal_differences(
-            raw_read_coverage1, raw_read_coverage2, num_regions, num_bases))]
+            reads_index, ctrl_reads_index, num_regions, num_bases))]
 
     plot_two_samples(
-        plot_intervals, raw_read_coverage1, raw_read_coverage2,
-        overplot_thresh, overplot_type, pdf_fn, seqs_fn)
+        plot_intervals, reads_index, ctrl_reads_index, overplot_thresh,
+        overplot_type, pdf_fn, seqs_fn)
 
     return
 
 def plot_most_signif(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        f5_dirs2, num_regions, overplot_thresh, seqs_fn, num_bases,
-        overplot_type, stats_fn, tb_model_fn, alt_model_fn,
-        plot_default_stnd, plot_default_alt, cov_damp_counts):
-    if VERBOSE: th._status_message('Loading statistics from file.')
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, ctrl_fast5s_dirs,
+        num_regions, overplot_thresh, seqs_fn, num_bases, overplot_type,
+        stats_fn, tb_model_fn, alt_model_fn,
+        plot_default_stnd, plot_default_alt):
+    if VERBOSE: th.status_message('Loading statistics from file.')
     plot_intervals = ts.TomboStats(stats_fn).get_most_signif_regions(
-        num_bases, num_regions, cov_damp_counts=cov_damp_counts)
+        num_bases, num_regions, prepend_loc_to_text=True)
 
-    raw_read_coverage = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    tb_model_fn, alt_model_fn = get_valid_model_fns(
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+    std_ref, alt_ref = ts.load_valid_models(
         tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
-        raw_read_coverage, f5_dirs2)
+        reads_index, ctrl_fast5s_dirs)
 
-    if f5_dirs2 is None:
-        if tb_model_fn is None:
+    if ctrl_fast5s_dirs is None:
+        if std_ref is None:
             plot_single_sample(
-                plot_intervals, raw_read_coverage, overplot_thresh,
-                overplot_type, pdf_fn)
+                plot_intervals, reads_index, overplot_thresh,
+                overplot_type, pdf_fn, title_include_chrm=False)
         else:
             plot_model_single_sample(
-                plot_intervals, raw_read_coverage, tb_model_fn,
-                overplot_type, overplot_thresh, pdf_fn, alt_model_fn)
+                plot_intervals, reads_index, std_ref, overplot_type,
+                overplot_thresh, pdf_fn, alt_ref,
+                title_include_chrm=False)
     else:
-        raw_read_coverage2 = th.parse_fast5s(
-            f5_dirs2, corrected_group, basecall_subgroups)
+        ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps)
         plot_two_samples(
-            plot_intervals, raw_read_coverage, raw_read_coverage2,
-            overplot_thresh, overplot_type, pdf_fn, seqs_fn)
+            plot_intervals, reads_index, ctrl_reads_index,
+            overplot_thresh, overplot_type, pdf_fn, seqs_fn,
+            title_include_chrm=False)
 
     return
 
-def get_unique_intervals(plot_intervals, covered_poss=None, num_regions=None):
-    # unique genomic regions filter
-    uniq_p_intervals = []
-    used_intervals = defaultdict(set)
-    for int_i in plot_intervals:
-        # could have significant region immediately next to
-        # beginning/end of reads
-        interval_poss = list(range(int_i.start, int_i.end))
-        if int_i.start not in used_intervals[(int_i.chrm, int_i.strand)] and (
-                covered_poss is None or all(
-                    pos in covered_poss[(int_i.chrm, int_i.strand)]
-                    for pos in interval_poss)):
-            uniq_p_intervals.append(int_i)
-            used_intervals[(int_i.chrm, int_i.strand)].update(interval_poss)
-        if num_regions is not None and len(uniq_p_intervals) >= num_regions:
-            break
-
-    return uniq_p_intervals
-
 def plot_motif_centered_signif(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        f5_dirs2, num_regions, overplot_thresh, motif, stats_fn,
-        context_width, num_stats, tb_model_fn, alt_model_fn,
-        plot_default_stnd, plot_default_alt, fasta_fn, cov_damp_counts):
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, ctrl_fast5s_dirs,
+        num_regions, overplot_thresh, motif, stats_fn, context_width,
+        num_stats, tb_model_fn, alt_model_fn,
+        plot_default_stnd, plot_default_alt, fasta_fn):
     try:
         importr(str('gridExtra'))
     except:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must have R packge `gridExtra` installed in order to ' +
             'create motif centered plots.')
 
     motif = th.TomboMotif(motif)
     genome_index = th.Fasta(fasta_fn)
 
-    if VERBOSE: th._status_message('Loading statistics from file.')
+    if VERBOSE: th.status_message('Loading statistics from file.')
     all_stats = ts.TomboStats(stats_fn)
-    if VERBOSE: th._status_message('Sorting statistics.')
-    all_stats.order_by_frac(cov_damp_counts)
 
-    raw_read_coverage1 = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    raw_read_coverage2 = th.parse_fast5s(
-        f5_dirs2, corrected_group, basecall_subgroups) \
-        if f5_dirs2 is not None else None
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+    ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps) \
+                       if ctrl_fast5s_dirs is not None else None
 
-    tb_model_fn, alt_model_fn = get_valid_model_fns(
+    std_ref, alt_ref = ts.load_valid_models(
         tb_model_fn, plot_default_stnd, alt_model_fn, plot_default_alt,
-        raw_read_coverage1, f5_dirs2)
+        reads_index, ctrl_fast5s_dirs)
 
-    if VERBOSE: th._status_message('Finding most signficant regions with motif.')
+    if VERBOSE: th.status_message('Finding most signficant regions with motif.')
     motif_regions_data = []
     search_width = ((context_width + motif.motif_len) * 2) - 1
     for reg_seq, chrm, strand, start, end in all_stats.iter_stat_seqs(
             genome_index, motif.motif_len + context_width - 1,
-            motif.motif_len + context_width - 1, include_pos=True):
+            motif.motif_len + context_width - 1):
         reg_match = motif.motif_pat.search(reg_seq)
         if reg_match:
             offset = reg_match.start()
@@ -1886,11 +1850,12 @@ def plot_motif_centered_signif(
             break
 
     if len(motif_regions_data) == 0:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'No covered and tested sites contain motif of interest.')
     if len(motif_regions_data) < num_stats:
-        th._warning_message(
-            'Fewer covered and tested motif sites found than requested.')
+        th.warning_message(
+            'Fewer covered and tested motif sites found than requested. ' +
+            'Proceeding with ' + str(len(motif_regions_data)) + ' regions.')
 
     plot_width = motif.motif_len + (context_width * 2)
     def get_stat_pos(start, chrm, strand):
@@ -1906,84 +1871,79 @@ def plot_motif_centered_signif(
 
         return reg_pos_fracs
 
-    if VERBOSE: th._status_message('Getting all regions statistics.')
+    if VERBOSE: th.status_message('Getting all regions statistics.')
     stat_locs = [
         loc_stat for motif_loc in motif_regions_data
         for loc_stat in get_stat_pos(*motif_loc)]
 
-    # TODO: Fix so that negative strand reads are plotted too.
-    # requires adding "don't reverse signal" option in getting plot data
     plot_intervals = []
     for i, (reg_start, chrm, strand) in enumerate(motif_regions_data):
-        if strand == '-': continue
         plot_intervals.append(th.intervalData(
-            '{:03d}'.format(i), chrm, reg_start, reg_start + plot_width,
-            strand))
+            chrm=chrm, start=reg_start, end=reg_start + plot_width,
+            strand=strand, reg_id='{:03d}'.format(i)))
         if len(plot_intervals) >= num_regions:
             break
 
     plot_motif_centered_with_stats(
-        raw_read_coverage1, raw_read_coverage2, plot_intervals,
-        stat_locs, overplot_thresh, pdf_fn, tb_model_fn, alt_model_fn)
+        reads_index, ctrl_reads_index, plot_intervals,
+        stat_locs, overplot_thresh, pdf_fn, std_ref, alt_ref)
 
     return
 
 def cluster_most_signif(
-        f5_dirs1, corrected_group, basecall_subgroups, pdf_fn,
-        f5_dirs2, num_regions, num_bases,
-        r_struct_fn, num_processes, fasta_fn, stats_fn, slide_span):
-    if VERBOSE: th._status_message('Loading statistics from file.')
+        fast5s_dirs, corr_grp, bc_subgrps, pdf_fn, ctrl_fast5s_dirs,
+        num_regions, num_bases, r_struct_fn, num_processes, fasta_fn,
+        stats_fn, slide_span):
+    if VERBOSE: th.status_message('Loading statistics from file.')
     plot_intervals = ts.TomboStats(stats_fn).get_most_signif_regions(
         num_bases + (slide_span * 2), num_regions)
 
-    raw_read_coverage1 = th.parse_fast5s(
-        f5_dirs1, corrected_group, basecall_subgroups)
-    raw_read_coverage2 = th.parse_fast5s(
-        f5_dirs2, corrected_group, basecall_subgroups)
+    reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+    ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps)
 
     # calculate positions covered by at least one read in both sets
-    read_coverage1 = th.get_coverage(raw_read_coverage1)
-    read_coverage2 = th.get_coverage(raw_read_coverage2)
-    covered_poss = dict(
-        (chrm_strand, set(
-            np.where(read_coverage1[chrm_strand] > 0)[0]).intersection(
-                np.where(read_coverage2[chrm_strand] > 0)[0]))
-        for chrm_strand in set(read_coverage1).intersection(
-                read_coverage2))
+    covered_poss = {}
+    for chrm_strand in set(reads_index.get_all_cs()).intersection(
+            ctrl_reads_index.get_all_cs()):
+        covered_poss[chrm_strand] = set(
+            np.where(reads_index.get_cs_coverage(
+                *chrm_strand) > 0)[0]).intersection(
+                    np.where(ctrl_reads_index.get_cs_coverage(
+                        *chrm_strand) > 0)[0])
 
     # unique genomic regions filter
-    plot_intervals = get_unique_intervals(plot_intervals, covered_poss)
+    plot_intervals = th.get_unique_intervals(plot_intervals, covered_poss)
 
     # get region data if outputting R data structure
     if r_struct_fn is not None:
-        if VERBOSE: th._status_message('Getting sequences.')
+        if VERBOSE: th.status_message('Getting sequences.')
         # expand regions for getting sequence by N in case motif is
         # the exact range found
         expand_pos = 2
-        seq_intervals = [
-            int_i._replace(
-                start=int_i.start - expand_pos,
-                end=int_i.start + expand_pos + num_bases + (slide_span * 2))
-            for int_i in plot_intervals]
+        seq_intervals = []
+        for p_int in plot_intervals:
+            seq_intervals.append(p_int.copy().update(
+                start=p_int.start - expand_pos,
+                end=p_int.start + expand_pos + num_bases + (slide_span * 2)))
         if fasta_fn is None:
             # add region sequences to column names for saved dist matrix
-            reg_seqs = [reg_data.seq for reg_data in th.get_region_sequences(
-                seq_intervals, raw_read_coverage1, raw_read_coverage2)]
+            reg_seqs = [
+                seq_int.copy().add_reads(reads_index).merge(
+                    seq_int.copy().add_reads(reads_index)).add_seq().seq
+                for seq_int in seq_intervals]
         else:
             genome_index = th.Fasta(fasta_fn)
-            reg_seqs = [
-                genome_index.get_seq(int_i.chrm, int_i.start, int_i.end)
-                for int_i in seq_intervals]
+            reg_seqs = [int_i.add_seq(genome_index).seq
+                        for int_i in seq_intervals]
 
-    if VERBOSE: th._status_message('Getting region signal differences.')
-    signal_diffs = th.get_signal_differences(
-        raw_read_coverage1, raw_read_coverage2)
+    if VERBOSE: th.status_message('Getting region signal differences.')
+    signal_diffs = th.get_signal_differences(reads_index, ctrl_reads_index)
     slide_span_val = slide_span if slide_span else 0
-    reg_sig_diffs = [signal_diffs[(int_i.chrm, int_i.strand)][
-        int_i.start:int_i.start+num_bases+(slide_span_val*2)]
-                     for int_i in plot_intervals]
+    reg_sig_diffs = [signal_diffs[(p_int.chrm, p_int.strand)][
+        p_int.start:p_int.start+num_bases+(slide_span_val*2)]
+                     for p_int in plot_intervals]
 
-    if VERBOSE: th._status_message('Getting distance between signals.')
+    if VERBOSE: th.status_message('Getting distance between signals.')
     manager = mp.Manager()
     index_q = manager.Queue()
     dists_q = manager.Queue()
@@ -2019,14 +1979,15 @@ def cluster_most_signif(
         ncol=len(reg_sig_diffs), byrow=True)
 
     if r_struct_fn is not None:
+        # add one for 1-based coordinates
         reg_sig_diff_dists.colnames = r.StrVector(
-            ['::'.join((seq, int_i.chrm, int_i.strand, unicode(int_i.start)))
-             for seq, int_i in zip(reg_seqs, plot_intervals)])
+            ['::'.join((seq, p_int.chrm, p_int.strand, unicode(p_int.start + 1)))
+             for seq, p_int in zip(reg_seqs, plot_intervals)])
         r_struct_fn = r.StrVector([r_struct_fn,])
     else:
         r_struct_fn = r.NA_Character
 
-    if VERBOSE: th._status_message('Plotting (and saving data).')
+    if VERBOSE: th.status_message('Plotting (and saving data).')
     r.r(resource_string(__name__, 'R_scripts/plotSigMDS.R').decode())
     r.r('pdf("' + pdf_fn + '", height=7, width=7)')
     r.globalenv[str('plotSigMDS')](reg_sig_diff_dists, r_struct_fn)
@@ -2039,12 +2000,12 @@ def cluster_most_signif(
 #### Test rpy2 install ####
 ###########################
 
-def test_r_install():
+def test_r_imports():
     # first check for simple rpy2 install
     try:
         import rpy2
     except:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must have rpy2 installed in order to plot. Run ' +
             '`python -c "import rpy2"` to identify installation issues.')
 
@@ -2054,7 +2015,7 @@ def test_r_install():
         r
         importr
     except NameError:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'R and rpy2 must be linked during installation.\n\t\tRun ' +
             '`python -c "from rpy2 import robjects; from ' +
             'rpy2.robjects.packages import importr` to identify ' +
@@ -2066,7 +2027,7 @@ def test_r_install():
     try:
         importr(str('ggplot2'))
     except:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must have R package ggplot2 installed in order to plot. ' +
             'Run `python -c "from rpy2.robjects.packages import importr; ' +
             'importr(str(\'ggplot2\'));"` to identify installation issues.')
@@ -2078,13 +2039,13 @@ def test_r_install():
 #### Main plotting function ####
 ################################
 
-def _plot_main(args):
+def plot_main(args):
     global VERBOSE
     VERBOSE = not args.quiet
     th.VERBOSE = VERBOSE
     ts.VERBOSE = VERBOSE
 
-    test_r_install()
+    test_r_imports()
 
     # roc plotting doesn't use read dirs
     try:
@@ -2108,7 +2069,7 @@ def _plot_main(args):
                   if 'num_reads' in args else None),]
     glocs_opt = [('genome_locs', args.genome_locations
                   if 'genome_locations' in args else None),]
-    f5dirs2_opt = [('f5_dirs2', args.control_fast5_basedirs
+    ctrldirs_opt = [('ctrl_fast5s_dirs', args.control_fast5_basedirs
                     if 'control_fast5_basedirs' in args else None),]
     rdata_opt = [('r_struct_fn', args.r_data_filename
                   if 'r_data_filename' in args else None),]
@@ -2127,42 +2088,40 @@ def _plot_main(args):
                   if 'sequences_filename' in args else None),]
     statfn_opt = [('stats_fn', args.statistics_filename
                    if 'statistics_filename' in args else None),]
-    covdamp_opt = [('cov_damp_counts', args.coverage_dampen_counts
-                    if 'coverage_dampen_counts' in args else None),]
 
     if args.action_command == 'max_coverage':
-        kwargs = dict(f5dirs2_opt + nreg_opt + nbase_opt + genome_opts +
+        kwargs = dict(ctrldirs_opt + nreg_opt + nbase_opt + genome_opts +
                       tbmod_opt + atbmod_opt + dtbmod_opt + datbmod_opt)
         plot_max_coverage(*base_args, **kwargs)
     elif args.action_command == 'genome_locations':
-        kwargs = dict(f5dirs2_opt + nbase_opt + genome_opts + glocs_opt +
+        kwargs = dict(ctrldirs_opt + nbase_opt + genome_opts + glocs_opt +
                       tbmod_opt + atbmod_opt + dtbmod_opt + datbmod_opt)
         plot_genome_locations(*base_args, **kwargs)
     elif args.action_command == 'motif_centered':
-        kwargs = dict(f5dirs2_opt + nreg_opt + nbase_opt + genome_opts +
+        kwargs = dict(ctrldirs_opt + nreg_opt + nbase_opt + genome_opts +
                       fasta_opt + motif_opt + tbmod_opt + atbmod_opt +
                       dtbmod_opt + datbmod_opt +
                       [('deepest_coverage', args.deepest_coverage),])
         plot_motif_centered(*base_args, **kwargs)
     elif args.action_command == 'max_difference':
-        kwargs = dict(f5dirs2_opt + nreg_opt + nbase_opt + genome_opts +
+        kwargs = dict(ctrldirs_opt + nreg_opt + nbase_opt + genome_opts +
                       seqfn_opt)
         plot_max_diff(*base_args, **kwargs)
     elif args.action_command == 'most_significant':
-        kwargs = dict(f5dirs2_opt + nreg_opt + nbase_opt + genome_opts +
+        kwargs = dict(ctrldirs_opt + nreg_opt + nbase_opt + genome_opts +
                       seqfn_opt + statfn_opt + tbmod_opt + atbmod_opt +
-                      dtbmod_opt + datbmod_opt + covdamp_opt)
+                      dtbmod_opt + datbmod_opt)
         plot_most_signif(*base_args, **kwargs)
     elif args.action_command == 'motif_with_stats':
-        kwargs = dict(f5dirs2_opt + nreg_opt + motif_opt + statfn_opt +
+        kwargs = dict(ctrldirs_opt + nreg_opt + motif_opt + statfn_opt +
                       tbmod_opt + atbmod_opt + dtbmod_opt + datbmod_opt +
-                      fasta_opt + covdamp_opt +
+                      fasta_opt +
                       [('overplot_thresh', args.overplot_threshold),
                        ('context_width', args.num_context),
                        ('num_stats', args.num_statistics)])
         plot_motif_centered_signif(*base_args, **kwargs)
     elif args.action_command == 'cluster_most_significant':
-        kwargs = dict(f5dirs2_opt + nreg_opt + nbase_opt +
+        kwargs = dict(ctrldirs_opt + nreg_opt + nbase_opt +
                       fasta_opt + statfn_opt + rdata_opt +
                       [('num_processes', args.processes),
                        ('slide_span', args.slide_span)])
@@ -2182,11 +2141,12 @@ def _plot_main(args):
                        ('dont_plot', args.dont_plot)])
         plot_kmer_dist(*base_args, **kwargs)
     elif args.action_command == 'roc':
-        kwargs = dict(fasta_opt + covdamp_opt +
+        kwargs = dict(fasta_opt +
                       [('pdf_fn', args.pdf_filename),
                        ('motif_descs', args.motif_descriptions),
                        ('stats_fns', args.statistics_filenames),
-                       ('min_reads', args.minimum_test_reads)])
+                       ('stats_per_block', args.statistics_per_block),
+                       ('total_stats_limit', args.total_statistics_limit)])
         plot_roc(**kwargs)
     elif args.action_command == 'per_read_roc':
         kwargs = dict(fasta_opt +
@@ -2197,12 +2157,12 @@ def _plot_main(args):
                        ('total_stats_limit', args.total_statistics_limit)])
         plot_per_read_roc(**kwargs)
     else:
-        th._error_message_and_exit('Invalid tombo sub-command entered. ' +
+        th.error_message_and_exit('Invalid tombo sub-command entered. ' +
                                    'Should have been caught by argparse.')
 
     return
 
 
 if __name__ == '__main__':
-    raise NotImplementedError(
-        'This is a module. See commands with `tombo -h`')
+    sys.stderr.write('This is a module. See commands with `tombo -h`')
+    sys.exit(1)

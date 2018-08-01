@@ -22,16 +22,41 @@ VERBOSE = False
 
 OUT_HEADER='track type={0} name="{1}_{2}_{3}{4}" ' + \
     'description="{1} {2} {3}{5}"\n'
-OUT_TYPES = {'wig':'wiggle_0', 'bedgraph':'bedGraph'}
-GROUP1_NAME='sample'
-GROUP2_NAME='control'
+BG_TYPE = 'bedgraph'
+WIG_TYPE = 'wig'
+OUT_TYPES = {WIG_TYPE:'wiggle_0', BG_TYPE:'bedGraph'}
+GROUP_NAME='sample'
+CTRL_NAME='control'
+
+COV_WIG_TYPE = 'coverage'
+
+# event table slot values
+SIG_SLOT = 'norm_mean'
+SD_SLOT = 'norm_stdev'
+DWELL_SLOT = 'length'
+SIG_WIG_TYPE = 'signal'
+DIFF_WIG_TYPE = 'difference'
+SD_WIG_TYPE = 'signal_sd'
+DWELL_WIG_TYPE = 'dwell'
+
+# stat table slot values
+POS_SLOT = 'pos'
+FRAC_SLOT = 'frac'
+DFRAC_SLOT = 'damp_frac'
+VCOV_SLOT = 'valid_cov'
+FRAC_WIG_TYPE = 'fraction'
+DFRAC_WIG_TYPE = 'dampened_fraction'
+VCOV_WIG_TYPE = 'valid_coverage'
+FRAC_WIG_NAME = 'fraction_modified_reads'
+DFRAC_WIG_NAME = 'dampened_fraction_modified_reads'
+VCOV_WIG_NAME = 'valid_coverage'
 
 
 ########################
 ###### WIG Output ######
 ########################
 
-def open_browser_files(wig_base, group_text, type_name, out_type='wig'):
+def open_browser_files(wig_base, group_text, type_name, out_type=WIG_TYPE):
     group_w_dot = '' if group_text == '' else '.' + group_text
     group_w_us = '' if group_text == '' else '_' + group_text
     group_w_space = '' if group_text == '' else ' ' + group_text
@@ -63,61 +88,66 @@ def _write_cs_int_data(wig_fp, chrm, cs_poss, cs_vals):
     return
 
 def write_frac_wigs(all_stats, wig_base, do_frac, do_damp, do_valid_cov):
-    if VERBOSE: th._status_message(
-            'Parsing and outputting statistics wiggles.')
+    if VERBOSE: th.status_message('Parsing and outputting statistics wiggles.')
     if do_frac:
         plus_frac_fp, minus_frac_fp = open_browser_files(
-            wig_base, '', 'fraction_modified_reads')
+            wig_base, '', FRAC_WIG_NAME)
     if do_damp:
         plus_damp_fp, minus_damp_fp = open_browser_files(
-            wig_base, '', 'dampened_fraction_modified_reads')
+            wig_base, '', DFRAC_WIG_NAME)
     if do_valid_cov:
         plus_vcov_fp, minus_vcov_fp = open_browser_files(
-            wig_base, '', 'valid_coverage')
+            wig_base, '', VCOV_WIG_NAME)
 
     (curr_chrm, curr_strand, curr_poss, curr_fracs, curr_damp_fracs,
      curr_valid_cov) = (None, None, [], [], [], [])
-    all_stats.order_by_pos()
-    for chrm, strand, pos, frac, damp_frac, valid_cov in all_stats.iter_fracs():
+    for chrm, strand, start, end, block_stats in all_stats:
         if chrm != curr_chrm or strand != curr_strand:
             if len(curr_poss) > 0:
+                curr_poss = np.concatenate(curr_poss)
                 # write current chrm/strand data
                 if do_frac:
                     wig_fp = plus_frac_fp if curr_strand == '+' else minus_frac_fp
-                    _write_cs_data(wig_fp, curr_chrm, curr_poss, curr_fracs)
+                    _write_cs_data(wig_fp, curr_chrm, curr_poss,
+                                   np.concatenate(curr_fracs))
                 if do_damp:
                     wig_fp = plus_damp_fp if curr_strand == '+' else minus_damp_fp
-                    _write_cs_data(wig_fp, curr_chrm, curr_poss, curr_damp_fracs)
+                    _write_cs_data(wig_fp, curr_chrm, curr_poss,
+                                   np.concatenate(curr_damp_fracs))
                 if do_valid_cov:
                     wig_fp = plus_vcov_fp if curr_strand == '+' else minus_vcov_fp
-                    _write_cs_int_data(
-                        wig_fp, curr_chrm, curr_poss, curr_valid_cov)
+                    _write_cs_int_data(wig_fp, curr_chrm, curr_poss,
+                                       np.concatenate(curr_valid_cov))
 
             # set new chrm and strand and empty lists
             curr_chrm, curr_strand = chrm, strand
             curr_poss, curr_fracs, curr_damp_fracs, curr_valid_cov = (
                 [], [], [], [])
 
-        # store position statistics
-        curr_poss.append(pos)
+        # store block statistics
+        curr_poss.append(block_stats[POS_SLOT])
         if do_frac:
-            curr_fracs.append(1 - frac)
+            curr_fracs.append(1 - block_stats[FRAC_SLOT])
         if do_damp:
-            curr_damp_fracs.append(1 - damp_frac)
+            curr_damp_fracs.append(1 - block_stats[DFRAC_SLOT])
         if do_valid_cov:
-            curr_valid_cov.append(valid_cov)
+            curr_valid_cov.append(block_stats[VCOV_SLOT])
 
     # write last chrm/strand data
     if len(curr_poss) > 0:
+        curr_poss = np.concatenate(curr_poss)
         if do_frac:
             wig_fp = plus_frac_fp if curr_strand == '+' else minus_frac_fp
-            _write_cs_data(wig_fp, curr_chrm, curr_poss, curr_fracs)
+            _write_cs_data(wig_fp, curr_chrm, curr_poss,
+                           np.concatenate(curr_fracs))
         if do_damp:
             wig_fp = plus_damp_fp if curr_strand == '+' else minus_damp_fp
-            _write_cs_data(wig_fp, curr_chrm, curr_poss, curr_damp_fracs)
+            _write_cs_data(wig_fp, curr_chrm, curr_poss,
+                           np.concatenate(curr_damp_fracs))
         if do_valid_cov:
             wig_fp = plus_vcov_fp if curr_strand == '+' else minus_vcov_fp
-            _write_cs_int_data(wig_fp, curr_chrm, curr_poss, curr_valid_cov)
+            _write_cs_int_data(wig_fp, curr_chrm, curr_poss,
+                               np.concatenate(curr_valid_cov))
 
     if do_frac:
         plus_frac_fp.close()
@@ -136,31 +166,13 @@ def filter_cs_nans(cs_vals):
     valid_vals = cs_vals[valid_poss]
     return valid_poss, valid_vals
 
-def write_length_wig(
-        raw_read_coverage, chrm_sizes, wig_base, group_name):
-    if VERBOSE: th._status_message('Parsing and outputting ' + group_name +
-                                   ' dwell times.')
-    plus_dwell_fp, minus_dwell_fp = open_browser_files(
-        wig_base, group_name, 'dwell')
+def write_slot_mean_wig(
+        reads_index, chrm_sizes, wig_base, group_name, wig_type, slot_name):
+    if VERBOSE: th.status_message(
+            'Parsing and outputting ' + group_name + ' ' + wig_type + '.')
+    plus_sd_fp, minus_sd_fp = open_browser_files(wig_base, group_name, wig_type)
     for chrm, strand, cs_vals in th.iter_mean_slot_values(
-            raw_read_coverage, chrm_sizes, 'length'):
-        dwell_fp = plus_dwell_fp if strand == '+' else minus_dwell_fp
-        cs_poss, cs_vals = filter_cs_nans(cs_vals)
-        _write_cs_data(dwell_fp, chrm, cs_poss, cs_vals)
-
-    plus_dwell_fp.close()
-    minus_dwell_fp.close()
-
-    return
-
-def write_signal_sd_wig(
-        raw_read_coverage, chrm_sizes, wig_base, group_name):
-    if VERBOSE: th._status_message('Parsing and outputting ' + group_name +
-                                   ' signal SDs.')
-    plus_sd_fp, minus_sd_fp = open_browser_files(
-        wig_base, group_name, 'signal_sd')
-    for chrm, strand, cs_vals in th.iter_mean_slot_values(
-            raw_read_coverage, chrm_sizes, 'norm_stdev'):
+            reads_index, chrm_sizes, slot_name):
         sd_fp = plus_sd_fp if strand == '+' else minus_sd_fp
         cs_poss, cs_vals = filter_cs_nans(cs_vals)
         _write_cs_data(sd_fp, chrm, cs_poss, cs_vals)
@@ -171,25 +183,25 @@ def write_signal_sd_wig(
     return
 
 def write_signal_and_diff_wigs(
-        raw_read_coverage1, raw_read_coverage2, chrm_sizes,
-        wig_base, group1_name, write_sig, write_diff):
-    if VERBOSE: th._status_message(
+        reads_index, ctrl_reads_index, chrm_sizes,
+        wig_base, group_name, write_sig, write_diff):
+    if VERBOSE: th.status_message(
             'Parsing and outputting signal means and differences.')
     # open all file pointers
     if write_sig:
         plus_sig1_fp, minus_sig1_fp = open_browser_files(
-            wig_base, group1_name, 'signal')
-        if raw_read_coverage2 is not None:
+            wig_base, group_name, SIG_WIG_TYPE)
+        if ctrl_reads_index is not None:
             plus_sig2_fp, minus_sig2_fp = open_browser_files(
-                wig_base, GROUP2_NAME, 'signal')
+                wig_base, CTRL_NAME, SIG_WIG_TYPE)
     if write_diff:
         plus_diff_fp, minus_diff_fp = open_browser_files(
-            wig_base, '', 'difference')
+            wig_base, '', DIFF_WIG_TYPE)
 
     # iterate over mean signal values for all chrm/strand combinations with
     # coverage in either sample. None returned if one sample is not covered
     for chrm, strand, cs_sig_means1, cs_sig_means2 in th.iter_mean_slot_values(
-            raw_read_coverage1, chrm_sizes, 'norm_mean', raw_read_coverage2):
+            reads_index, chrm_sizes, SIG_SLOT, ctrl_reads_index):
         # compute valid positions since it will either be used here for signal
         # output or for diff below
         # note small wasted effort for diff only output when second sample
@@ -219,13 +231,13 @@ def write_signal_and_diff_wigs(
 
     return
 
-def write_cov_wig(raw_read_coverage, out_base, group_text):
-    if VERBOSE: th._status_message('Getting and writing ' + group_text +
-                                   ' coverage bedgraphs.')
+def write_cov_wig(reads_index, out_base, group_text):
+    if VERBOSE: th.status_message('Getting and writing ' + group_text +
+                                  ' coverage bedgraphs.')
     plus_bg_fp, minus_bg_fp = open_browser_files(
-        out_base, group_text, 'coverage', 'bedgraph')
-    for chrm, strand, cs_cov, cs_cov_starts in th.get_coverage_regions(
-            raw_read_coverage):
+        out_base, group_text, COV_WIG_TYPE, BG_TYPE)
+    for (chrm, strand, cs_cov,
+         cs_cov_starts) in reads_index.iter_coverage_regions():
         # extract only values from each region and convert to str
         cs_cov = np.char.mod('%d', cs_cov)
         cs_cov_starts = np.char.mod('%d', cs_cov_starts)
@@ -242,62 +254,60 @@ def write_cov_wig(raw_read_coverage, out_base, group_text):
     return
 
 def write_all_browser_files(
-        f5_dirs1, f5_dirs2, corr_grp, bc_subgrps,
-        stats_fn, wig_base, wig_types, cov_damp_counts):
-    if f5_dirs1 is not None:
-        raw_read_coverage1 = th.parse_fast5s(
-            f5_dirs1, corr_grp, bc_subgrps, sample_name='sample')
-        if len(raw_read_coverage1) == 0:
-            th._error_message_and_exit(
-                'No reads present in --fast5-basedirs.')
+        fast5s_dirs, ctrl_fast5s_dirs, corr_grp, bc_subgrps,
+        stats_fn, wig_base, wig_types):
+    if fast5s_dirs is not None:
+        reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+        if reads_index.is_empty():
+            th.error_message_and_exit('No reads present in --fast5-basedirs.')
 
-    group1_name = '' if f5_dirs2 is None else GROUP1_NAME
-    if f5_dirs2 is not None:
-        raw_read_coverage2 = th.parse_fast5s(
-            f5_dirs2, corr_grp, bc_subgrps, sample_name='control')
-        chrm_sizes = th.get_chrm_sizes(
-            raw_read_coverage1, raw_read_coverage2)
+    group_name = '' if ctrl_fast5s_dirs is None else GROUP_NAME
+    if ctrl_fast5s_dirs is not None:
+        ctrl_reads_index = th.TomboReads(ctrl_fast5s_dirs, corr_grp, bc_subgrps)
+        chrm_sizes = th.get_chrm_sizes(reads_index, ctrl_reads_index)
 
-        if 'coverage' in wig_types:
-            write_cov_wig(raw_read_coverage2, wig_base, GROUP2_NAME)
-        if 'signal_sd' in wig_types:
-            write_signal_sd_wig(
-                raw_read_coverage2, chrm_sizes, wig_base, GROUP2_NAME)
-        if 'dwell' in wig_types:
-            write_length_wig(raw_read_coverage2, chrm_sizes,
-                             wig_base, GROUP2_NAME)
+        if COV_WIG_TYPE in wig_types:
+            write_cov_wig(ctrl_reads_index, wig_base, CTRL_NAME)
+        if SD_WIG_TYPE in wig_types:
+            write_slot_mean_wig(
+                ctrl_reads_index, chrm_sizes, wig_base, CTRL_NAME,
+                SD_WIG_TYPE, SD_SLOT)
+        if DWELL_WIG_TYPE in wig_types:
+            write_slot_mean_wig(
+                ctrl_reads_index, chrm_sizes, wig_base, CTRL_NAME,
+                DWELL_WIG_TYPE, DWELL_SLOT)
 
         # need to do signal and difference call once either with or
         # w/o second set of files (unlike coverage, sds and length
-        if 'signal' in wig_types or 'difference' in wig_types:
+        if SIG_WIG_TYPE in wig_types or DIFF_WIG_TYPE in wig_types:
             write_signal_and_diff_wigs(
-                raw_read_coverage1, raw_read_coverage2, chrm_sizes,
-                wig_base, group1_name, 'signal' in wig_types,
-                'difference' in wig_types)
-    elif f5_dirs1 is not None:
-        chrm_sizes = th.get_chrm_sizes(raw_read_coverage1)
-        if 'signal' in wig_types:
+                reads_index, ctrl_reads_index, chrm_sizes,
+                wig_base, group_name, SIG_WIG_TYPE in wig_types,
+                DIFF_WIG_TYPE in wig_types)
+    elif fast5s_dirs is not None:
+        chrm_sizes = th.get_chrm_sizes(reads_index)
+        if SIG_WIG_TYPE in wig_types:
             write_signal_and_diff_wigs(
-                raw_read_coverage1, None, chrm_sizes, wig_base,
-                group1_name, 'signal' in wig_types, False)
+                reads_index, None, chrm_sizes, wig_base,
+                group_name, SIG_WIG_TYPE in wig_types, False)
 
-    if 'coverage' in wig_types:
-        write_cov_wig(raw_read_coverage1, wig_base, group1_name)
-    if 'signal_sd' in wig_types:
-        write_signal_sd_wig(
-            raw_read_coverage1, chrm_sizes, wig_base, group1_name)
-    if 'dwell' in wig_types:
-        write_length_wig(raw_read_coverage1, chrm_sizes, wig_base, group1_name)
+    if COV_WIG_TYPE in wig_types:
+        write_cov_wig(reads_index, wig_base, group_name)
+    if SD_WIG_TYPE in wig_types:
+        write_slot_mean_wig(
+            reads_index, chrm_sizes, wig_base, CTRL_NAME, SD_WIG_TYPE, SD_SLOT)
+    if DWELL_WIG_TYPE in wig_types:
+        write_slot_mean_wig(
+            reads_index, chrm_sizes, wig_base, CTRL_NAME,
+            DWELL_WIG_TYPE, DWELL_SLOT)
     if any(wig_type in wig_types for wig_type in (
-            'fraction', 'dampened_fraction', 'valid_coverge')):
-        if VERBOSE: th._status_message('Loading statistics from file.')
+            FRAC_WIG_TYPE, DFRAC_WIG_TYPE, VCOV_WIG_TYPE)):
+        if VERBOSE: th.status_message('Loading statistics from file.')
         all_stats = ts.TomboStats(stats_fn)
-        if 'dampened_fraction' in wig_types:
-            all_stats.calc_damp_fraction(cov_damp_counts)
         write_frac_wigs(all_stats, wig_base,
-                        'fraction' in wig_types,
-                        'dampened_fraction' in wig_types,
-                        'valid_coverage' in wig_types)
+                        FRAC_WIG_TYPE in wig_types,
+                        DFRAC_WIG_TYPE in wig_types,
+                        VCOV_WIG_TYPE in wig_types)
 
     return
 
@@ -307,33 +317,28 @@ def write_all_browser_files(
 ##########################
 
 def write_most_signif(
-        f5_dirs, fasta_fn, num_regions, corr_grp, bc_subgrps, seqs_fn,
-        num_bases, stats_fn, cov_damp_counts):
-    if VERBOSE: th._status_message('Loading statistics from file.')
+        fast5s_dirs, fasta_fn, num_regions, corr_grp, bc_subgrps, seqs_fn,
+        num_bases, stats_fn):
+    if VERBOSE: th.status_message('Loading statistics from file.')
     plot_intervals = ts.TomboStats(stats_fn).get_most_signif_regions(
-        num_bases, num_regions, cov_damp_counts=cov_damp_counts)
+        num_bases, num_regions, prepend_loc_to_text=True)
 
     # get each regions sequence either from reads or fasta index
     if fasta_fn is None:
-        raw_read_coverage = th.parse_fast5s(f5_dirs, corr_grp, bc_subgrps)
-        all_reg_data = th.get_region_sequences(
-            plot_intervals, raw_read_coverage)
+        reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
+        for p_int in plot_intervals:
+            p_int.add_reads(reads_index).add_seq()
     else:
         genome_index = th.Fasta(fasta_fn)
-        all_reg_data = [
-            int_i._replace(
-                seq=genome_index.get_seq(int_i.chrm, int_i.start, int_i.end))
-            for int_i in plot_intervals if int_i.chrm in genome_index]
+        for p_int in plot_intervals:
+            p_int.add_seq(genome_index)
 
-    if VERBOSE: th._status_message('Outputting region seqeuences.')
+    if VERBOSE: th.status_message('Outputting region seqeuences.')
     with io.open(seqs_fn, 'wt') as seqs_fp:
-        for int_i in all_reg_data:
-            reg_seq = int_i.seq
-            if int_i.strand == '-':
-                reg_seq = th.rev_comp(reg_seq)
-            seqs_fp.write('>{0}:{1:d}:{2} {3}\n{4}\n'.format(
-                int_i.chrm, int(int_i.start + (num_bases // 2)),
-                int_i.strand, int_i.reg_text, ''.join(reg_seq)))
+        for p_int in plot_intervals:
+            reg_seq = (p_int.seq if p_int.strand == '+' else
+                       th.rev_comp(p_int.seq))
+            seqs_fp.write('>{0}\n{1}\n'.format(p_int.reg_text, ''.join(reg_seq)))
 
     return
 
@@ -349,39 +354,33 @@ def _browser_files_main(args):
     ts.VERBOSE = VERBOSE
 
     if (any(data_type in args.file_types
-            for data_type in ['signal', 'difference', 'coverage',
-                              'signal_sd', 'dwell']) and
+            for data_type in [SIG_WIG_TYPE, DIFF_WIG_TYPE, COV_WIG_TYPE,
+                              SD_WIG_TYPE, DWELL_WIG_TYPE]) and
         args.fast5_basedirs is None):
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must provide a fast5 basedir to output signal, difference, ' +
             'coverage, signal_sd and/or length browser files.')
     if (any(wig_type in args.file_types for wig_type in (
-            'fraction', 'dampened_fraction', 'valid_coverage')) and
+            FRAC_WIG_TYPE, DFRAC_WIG_TYPE, VCOV_WIG_TYPE)) and
         args.statistics_filename is None):
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must provide a statistics filename to output ' +
             'fraction or valid coverage browser files.')
-    if ('difference' in args.file_types and
+    if (DIFF_WIG_TYPE in args.file_types and
         args.control_fast5_basedirs is None):
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must provide two sets of FAST5s ' + \
             'to output difference wiggle files.')
     if (args.control_fast5_basedirs is not None and
         args.fast5_basedirs is None):
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Cannot provide a control FAST5 set of directories ' +
             'without a sample set of FAST5 directories.')
-    if (args.coverage_dampen_counts is None and
-        'dampened_fraction' in args.file_types):
-        th._error_message_and_exit(
-            'Cannot compute dampened fractions without ' +
-            '--coverage-dampened-counts values.')
 
     write_all_browser_files(
         args.fast5_basedirs, args.control_fast5_basedirs, args.corrected_group,
         args.basecall_subgroups, args.statistics_filename,
-        args.browser_file_basename, args.file_types,
-        args.coverage_dampen_counts)
+        args.browser_file_basename, args.file_types)
 
     return
 
@@ -392,17 +391,17 @@ def _write_signif_diff_main(args):
     ts.VERBOSE = VERBOSE
 
     if args.fast5_basedirs is None and args.genome_fasta is None:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must provide either FAST5 directory(ies) or a fasta file.')
 
     write_most_signif(
         args.fast5_basedirs, args.genome_fasta, args.num_regions,
         args.corrected_group, args.basecall_subgroups, args.sequences_filename,
-        args.num_bases, args.statistics_filename, args.coverage_dampen_counts)
+        args.num_bases, args.statistics_filename)
 
     return
 
 
 if __name__ == '__main__':
-    raise NotImplementedError(
-        'This is a module. See commands with `tombo -h`')
+    sys.stderr.write('This is a module. See commands with `tombo -h`')
+    sys.exit(1)

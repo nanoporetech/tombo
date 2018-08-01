@@ -1,3 +1,5 @@
+cimport cython
+
 import numpy as np
 cimport numpy as np
 
@@ -7,10 +9,15 @@ ctypedef np.float64_t DTYPE_t
 DTYPE_INT = np.int64
 ctypedef np.int64_t DTYPE_INT_t
 
+DTYPE_INT16 = np.int16
+ctypedef np.int16_t DTYPE_INT16_t
+
 from libc.math cimport log, exp
 
 cdef extern from "math.h":
     double sqrt(double m)
+
+from itertools import combinations
 
 def c_mean_std(np.ndarray[DTYPE_t] values):
     """
@@ -106,7 +113,7 @@ def c_valid_cpts_w_cap(
                 cand_pos - min_base_obs + 1, cand_pos + min_base_obs))
         cand_idx += 1
         if cand_idx >= num_cands:
-            raise NotImplementedError, 'Fewer changepoints found than requested'
+            raise NotImplementedError('Fewer changepoints found than requested')
 
     return cpts
 
@@ -187,14 +194,87 @@ def c_valid_cpts_w_cap_t_test(
                 cand_pos - min_base_obs + 1, cand_pos + min_base_obs))
         cand_idx += 1
         if cand_idx >= num_cands:
-            raise NotImplementedError, 'Fewer changepoints found than requested.'
+            raise NotImplementedError('Fewer changepoints found than requested')
 
     return cpts
 
+@cython.wraparound(False)
+@cython.boundscheck(False)
+cdef DTYPE_INT_t _c_searchsorted(
+    np.ndarray[DTYPE_INT16_t] sorted_arr, DTYPE_INT16_t value):
+    cdef DTYPE_INT_t low, mid, high
+    low = 0
+    high = sorted_arr.shape[0] - 1
+    while (low <= high):
+        mid = (low + high) / 2
+        if (sorted_arr[mid] >= value):
+            high = mid - 1
+        else:
+            low = mid + 1
+    return low
+
+@cython.wraparound(False)
+@cython.boundscheck(False)
+def c_compute_running_pctl_diffs(
+        np.ndarray[DTYPE_INT16_t] arr, DTYPE_INT_t window_size,
+        DTYPE_t lower_pctl, DTYPE_t upper_pctl):
+    cdef DTYPE_INT_t lower_pctl_index = np.int32(
+        (window_size - 1) * lower_pctl / 100.0)
+    cdef DTYPE_INT_t upper_pctl_index = np.int32(
+        (window_size - 1) * upper_pctl / 100.0)
+
+    # store values in rolling circle fashion that are within the current
+    # window in order to get the value to be removed. the curr_index
+    # indicates the current start position within the rolling array
+    cdef DTYPE_INT_t curr_index = 0
+    cdef np.ndarray[DTYPE_INT16_t] rolling_arr = arr[:window_size].copy()
+    # sorted array to be maintained at each iteration
+    cdef np.ndarray[DTYPE_INT16_t] sorted_arr = rolling_arr.copy()
+    sorted_arr.sort()
+
+    cdef np.ndarray[DTYPE_INT16_t] running_pctl_diffs = np.empty(
+        arr.shape[0] - window_size + 1, dtype=DTYPE_INT16)
+    running_pctl_diffs[:] = np.NAN
+    running_pctl_diffs[0] = (sorted_arr[upper_pctl_index] -
+                             sorted_arr[lower_pctl_index])
+
+    cdef DTYPE_INT16_t pop_val, push_val
+    cdef DTYPE_INT_t i, pop_index, push_index, arr_i, rolling_i
+    for arr_i in range(window_size, arr.shape[0]):
+        push_val = arr[arr_i]
+        # get value to be removed from running array
+        rolling_i = curr_index % window_size
+        pop_val = rolling_arr[rolling_i]
+        # if pop and push values are equal skip to pclt diff comp
+        if pop_val != push_val:
+            # find indices for push and pop in sorted array
+            pop_index = _c_searchsorted(sorted_arr, pop_val)
+            push_index = _c_searchsorted(sorted_arr, push_val)
+            # shift apporiate values within the sorted array and
+            # add push value
+            if pop_index == push_index:
+                sorted_arr[push_index] = push_val
+            elif pop_index > push_index:
+                for i in reversed(range(push_index, pop_index)):
+                    sorted_arr[i + 1] = sorted_arr[i]
+                sorted_arr[push_index] = push_val
+            else:
+                for i in range(pop_index, push_index - 1):
+                    sorted_arr[i] = sorted_arr[i + 1]
+                sorted_arr[push_index - 1] = push_val
+            # replace pop value with push value in rolling array
+            rolling_arr[rolling_i] = push_val
+
+        curr_index += 1
+        running_pctl_diffs[curr_index] = (sorted_arr[upper_pctl_index] -
+                                          sorted_arr[lower_pctl_index])
+
+    return running_pctl_diffs
+
 def c_calc_llh_ratio(
         np.ndarray[DTYPE_t] reg_means,
-        np.ndarray[DTYPE_t] reg_ref_means, np.ndarray[DTYPE_t] reg_ref_vars,
-        np.ndarray[DTYPE_t] reg_alt_means, np.ndarray[DTYPE_t] reg_alt_vars):
+        np.ndarray[DTYPE_t] reg_ref_means, np.ndarray[DTYPE_t] reg_alt_means,
+        np.ndarray[DTYPE_t] reg_ref_vars, np.ndarray[DTYPE_t] reg_alt_vars):
     cdef DTYPE_t ref_z_sum, ref_log_var_sum, alt_z_sum, alt_log_var_sum
     ref_z_sum, ref_log_var_sum, alt_z_sum, alt_log_var_sum = 0.0, 0.0 ,0.0 ,0.0
     cdef DTYPE_t ref_diff, alt_diff, log_lh_ratio
@@ -272,3 +352,22 @@ def c_calc_scaled_llh_ratio_const_var(
                     density_height_factor)
 
     return running_scaled_lhr
+
+@cython.wraparound(False)
+@cython.boundscheck(False)
+def c_compute_slopes(
+        np.ndarray[DTYPE_t] r_event_means, np.ndarray[DTYPE_t] r_model_means,
+        DTYPE_t max_slope=1000.0):
+    cdef DTYPE_INT_t s_i, i, j, n_events
+    n_events = r_event_means.shape[0]
+    assert r_model_means.shape[0] == n_events
+    cdef np.ndarray[DTYPE_t] slopes = np.empty(
+        (n_events * (n_events - 1) / 2), dtype=DTYPE)
+    for s_i, (i, j) in enumerate(combinations(range(n_events), 2)):
+        if r_event_means[i] == r_event_means[j]:
+            slopes[s_i] = max_slope
+        else:
+            slopes[s_i] = (
+                r_model_means[i] - r_model_means[j]) / (
+                    r_event_means[i] - r_event_means[j])
+    return slopes

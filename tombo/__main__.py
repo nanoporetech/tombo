@@ -8,8 +8,7 @@ from ._version import TOMBO_VERSION
 import argparse
 class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
     def _format_action(self, action):
-        parts = super(
-            argparse.RawDescriptionHelpFormatter, self)._format_action(action)
+        parts = super(SubcommandHelpFormatter, self)._format_action(action)
         if action.nargs == argparse.PARSER:
             parts = "\n".join(parts.split("\n")[1:])
         return parts
@@ -168,6 +167,7 @@ def main(args=None):
         save_args = args
         args = parser.parse_args(args)
     except:
+        # catch for re-squiggle advanced args printing
         import re
         if any(re.match(rsqgl_help[0][0], val) for val in args) and any(
                 re.match(_option_parsers.printadv_opt[0], val)
@@ -179,7 +179,7 @@ def main(args=None):
 
     if args.service_command is None:
         parser.print_help()
-        sys.stderr.write('\ntombo error: Must provide a tombo command group.\n')
+        sys.stderr.write('\nTombo error: Must provide a tombo command group.\n')
         sys.exit(2)
 
     # if no second level parser is provided print that command groups help
@@ -192,8 +192,8 @@ def main(args=None):
         resquiggle._resquiggle_main(args)
 
     elif args.action_command == 'annotate_raw_with_fastqs':
-        from . import tombo_helper
-        tombo_helper._annotate_reads_with_fastq_main(args)
+        from . import _preprocess
+        _preprocess.annotate_reads_with_fastq_main(args)
 
     elif args.service_command == 'detect_modifications':
         from . import tombo_stats
@@ -219,8 +219,8 @@ def main(args=None):
                 'Invalid Tombo build_model command.')
 
     elif args.service_command == 'filter':
-        from . import tombo_helper
-        tombo_helper._filter_main(args)
+        from . import _filter_reads
+        _filter_reads.filter_main(args)
 
     elif args.service_command == 'text_output':
         from . import _text_output_commands
@@ -230,16 +230,16 @@ def main(args=None):
             _text_output_commands._write_signif_diff_main(args)
         else:
             from . import tombo_helper
-            tombo_helper._error_message_and_exitI(
+            tombo_helper._error_message_and_exit(
                 'Invalid Tombo text_output command.')
 
     elif args.service_command == 'plot':
-        from . import plot_commands
-        plot_commands._plot_main(args)
+        from . import _plot_commands
+        _plot_commands.plot_main(args)
 
     else:
         from . import tombo_helper
-        tombo_helper._error_message_and_exitI('Invalid Tombo command.')
+        tombo_helper._error_message_and_exit('Invalid Tombo command.')
 
     return
 

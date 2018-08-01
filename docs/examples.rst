@@ -10,22 +10,25 @@ Re-squiggle (Raw Signal Genomic Alignment)
 
 The re-squiggle algorithm aligns raw signal (electric current nanopore measurements) to genomic/transcriptomic sequence.
 
+One of the major assumptions of the re-squiggle algorithm is that the provided reference sequence is correct. Thus for poorly assembled genomes or divergent samples, an assembly polishing step (possibly from the same data/sample) may improve results.
+
 The ``resquiggle`` command will add infomation (the mapped genomic location and the raw signal to sequence assignment) to the read files provided (in FAST5 format), as well as producing an index file for more efficient file access in downstream commands.
 
 .. important::
-   
+
    The ``resquiggle`` command must be run before any further processing by Tombo commands.
 
-**Note**: Tombo currenly includes default canonical models for both DNA or RNA data (including R9.4 and R9.5; 1D and 1D^2; R9.*.1 chemistries). Analysis of other nanopore data types is not supported at this time (e.g. R7 data). If DNA or RNA sample type is not explicitly specified (via ``--dna`` or ``--rna`` options) the sample type will be detected automatically from the raw read files.
+**Note**: Tombo currenly includes default canonical models for both DNA or RNA data (supporting R9.4 and R9.5; 1D and 1D^2; R9.*.1 chemistries). Analysis of other nanopore data types is not supported at this time (e.g. R7 data). If DNA or RNA sample type is not explicitly specified (via ``--dna`` or ``--rna`` options) the sample type will be detected automatically from the raw read files.
 
 For more details see the :doc:`re-squiggle documentation </resquiggle>`.
 
 .. code-block:: bash
 
-    # annotate raw FAST5s with FASTQ files produced from the same reads if the raw files do not contain FASTQ information
+    # annotate raw FAST5s with FASTQ files produced from the same reads
+    # skip this step if raw read files already contain basecalls
     tombo annotate_raw_with_fastqs --fast5-basedir <fast5s-base-directory> --fastq-filenames <reads.fastq>
 
-    tombo resquiggle <fast5s-base-directory> <reference-fasta> --processes 4
+    tombo resquiggle <fast5s-base-directory> <reference-fasta> --processes 4 --num-most-common-errors 5
 
 -----------------------
 Modified Base Detection
@@ -33,9 +36,18 @@ Modified Base Detection
 
 Tombo provides three methods for the investigation of modified bases (within the ``detect_modifications`` command group). Each method has different advantages and requirements.
 
-All modified base detection methods poduce per-read, per-genomic position test statistics (which can be saved via the ``--per-read-statistics-basename`` option). A threshold is then applied to these statistics to produce a fraction of reads that appear modified at each genomic locaiton.
+----
 
-1. Specific alternative base detection
+.. figure::  _images/testing_method_comparison.png
+   :align: center
+
+   Tombo modified base testing methods.
+
+----
+
+All modified base detection methods poduce per-read, per-genomic position test statistics (which can be saved via the ``--per-read-statistics-basename`` option). A threshold is then applied to these statistics to produce an estimate for the fraction of reads that appear modified at each genomic location.
+
+1. **Specific alternative base detection (recommended)**
 
   - Run using ``tombo detect_modifications alternative_model`` command.
   - This method identifies signal that deviates from the canonical base expected signal level while matching a specific alternative base expected signal level.
@@ -43,13 +55,13 @@ All modified base detection methods poduce per-read, per-genomic position test s
   - Alternative DNA models are currently available for 5-methylcytosine (5mC) and N6-methyladenosine (6mA) in all sequence contexts.
   - An alternative RNA model is available for 5mC.
 
-2. *De novo* canonical model comparison
+2. **De novo canonical model comparison**
 
   - Run using ``tombo detect_modifications de_novo`` command.
   - This method compares re-squiggled signal to the default canonical model.
   - While this method may produce significant false positive and negative results per-read, it produces the best results for many statistical measures per-genomic location (fraction of modified bases across a set of reads).
 
-3. Canonical (control) sample comparison
+3. **Canonical (control) sample comparison**
 
   - Run using ``tombo detect_modifications sample_compare`` command.
   - This method performs a hypothesis test against the distribution estimated from the control sample at each base.
@@ -58,16 +70,6 @@ All modified base detection methods poduce per-read, per-genomic position test s
 ..
 
     Both the control sample comparison and the *de novo* methods may not identify the exact modified base location (as the shifted signal does not always center on a modified base) and gives no information as to the identity of a modified base.
-
-----
-
-.. figure::  _images/testing_method_comparison.png
-   :align: center
-   :scale: 30%
-   
-   Tombo modified base testing methods.
-
-----
 
 The result of all ``detect_modifications`` calls will be a binary statistics file(s), which can be passed to other Tombo commands.
 
@@ -104,12 +106,14 @@ Canonical Sample Comparison Method
 
 In order to execute the canonical sample comparison method, use the ``detect_modifications sample_compare`` command.
 
-This will perform a hypothesis test against the signal level observed from the control sample (provided via ``--control-fast5-basedirs`` option) at each genomic position. This method currently performs the worst, but future updates to this method may increase the accuracy of this method. This method (like the ``de_novo`` method) does not always identify the exact modified base position.
+This will perform a hypothesis test against the signal level observed from the control sample (provided via ``--control-fast5-basedirs`` option) at each genomic position. This method (like the ``de_novo`` method) does not always identify the exact modified base position.
+
+As of version 1.4, this method uses the canonical base model as a prior for control sample distribution estimation drastically improving results, particularly for low coverage samples. To test only against the canonical sample use the ``--sample-only-estimates`` flag. The prior weights for the estimated mean and standard deviation can be set using the ``--model-prior-weights`` option.
 
 .. code-block:: bash
 
     tombo detect_modifications sample_compare --fast5-basedirs <fast5s-base-directory> \
-        --control-fast5-basedirs <control-fast5s-base-directory>  \
+        --control-fast5-basedirs <control-fast5s-base-directory> \
         --statistics-file-basename sample_canonical_compare
 
 -----------
@@ -123,7 +127,7 @@ In order to output the results of re-squiggling and statistical testing in a gen
 
 .. code-block:: bash
 
-    tombo text_output genome_browser --fast5-basedirs <fast5s-base-directory> \
+    tombo text_output browser_files --fast5-basedirs <fast5s-base-directory> \
         --statistics-filename sample_alt_model.5mC.tombo.stats \
          --browser-file-basename sample_alt_model --file-types dampened_fraction coverage
 
@@ -148,7 +152,7 @@ Example `meme <http://meme-suite.org/doc/meme.html>`_ command line modified base
 .. code-block:: bash
 
    ./meme -oc motif_output.meme -dna -mod zoops sample_alt_model.6mA.most_signif.fasta
-    
+
 For more details see the :doc:`text output documentation </text_output>`.
 
 -----------------
@@ -164,15 +168,39 @@ Each genome anchored plotting command allows for the selection of genomic positi
 .. code-block:: bash
 
     tombo plot max_coverage --fast5-basedirs <fast5s-base-directory> --plot-standard-model
-    
+
     tombo plot motif_centered --fast5-basedirs <fast5s-base-directory> --motif AWC \
         --genome-fasta genome.fasta --control-fast5-basedirs <control-fast5s-base-directory>
-    
+
     tombo plot per_read --per-read-statistics-filename <per_read_statistics.tombo.stats> \
         --genome-locations chromosome:1000 chromosome:2000:- \
         --genome-fasta genome.fasta
 
 For more details see the :doc:`plotting documentation </plotting>`.
+
+--------------
+Read Filtering
+--------------
+
+Read filtering commands can be useful to extract the most out out of a set of reads for modified base detection. Read filtering commands effect only the Tombo index file, and so filters can be cleared or applied iteratively without re-running the re-squiggle command. Five filters are currently made available (``genome_locations``, ``raw_signal_matching``, ``q_score``, ``level_coverage`` and ``stuck``).
+
+.. code-block:: bash
+
+    # filter reads to a specific genomic location
+    tombo filter genome_locations --fast5-basedirs path/to/native/rna/fast5s/ \
+        --include-regions chr1:0-10000000
+
+    # apply a more strigent observed to expected signal score (default: 1.1 for DNA reads)
+    tombo filter raw_signal_matching --fast5-basedirs path/to/native/rna/fast5s/ \
+        --signal-matching-score 1.0
+
+.. hint::
+
+    Hint: Save a set of filters for later use by copying the Tombo index file: ``cp path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index save.native.tombo.index``. To re-set to a set of saved filters after applying further filters simply replace the index file: ``cp save.native.tombo.index path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index``.
+
+..
+
+    For more read filtering commands see the `Tombo filter documentation here <https://nanoporetech.github.io/tombo/filtering.html>`_.
 
 .. tip::
 

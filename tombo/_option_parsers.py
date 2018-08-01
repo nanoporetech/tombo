@@ -11,7 +11,8 @@ if sys.version_info[0] > 2:
 from ._default_parameters import (
     SEG_PARAMS_TABLE, ALGN_PARAMS_TABLE, LLR_THRESH, SAMP_COMP_THRESH,
     DE_NOVO_THRESH, ALTERNATE_MODELS, MAX_SCALING_ITERS, ALT_EST_PCTL,
-    COV_DAMP_COUNTS, SIG_MATCH_THRESH)
+    COV_DAMP_COUNTS, SIG_MATCH_THRESH, FM_OFFSET_DEFAULT, OUTLIER_THRESH,
+    DNA_SAMP_TYPE, RNA_SAMP_TYPE, MEAN_PRIOR_CONST, SD_PRIOR_CONST)
 
 ALT_BASES = tuple(set(alt_name.split('_')[1] for alt_name in ALTERNATE_MODELS))
 
@@ -20,7 +21,7 @@ ALT_BASES = tuple(set(alt_name.split('_')[1] for alt_name in ALTERNATE_MODELS))
 ###### Positional arguments ######
 ##################################
 
-basedir_opt=('fast5_basedir', {
+basedir_opt=('fast5s_basedir', {
     'type':unicode,
     'help':'Directory containing fast5 files. All files ending in "fast5" ' +
     'found recursively within this base directory will be processed.'})
@@ -219,10 +220,12 @@ motifdesc_opt=('--motif-descriptions', {
 proc_opt=('--processes', {
     'type':int, 'help':'Number of processes. Default: %(default)d'})
 thrpp_opt=('--threads-per-process', {
-    'type':int,
+    'type':int, 'default':1,
     'help':'Number of file input/output and mapping threads per compute ' +
     'process [--processes]. This should likely be left at 1, but may ' +
     'improve performance on some systems. Default: %(default)d'})
+hidthrpp_opt=('--threads-per-process', {
+    'type':int, 'default':1, 'help':argparse.SUPPRESS})
 
 alignproc_opt=('--align-processes', {
     'type':int, 'default':1,
@@ -249,6 +252,12 @@ mpreg_opt=('--multiprocess-region-size', {
     'help':'Size of regions over which to multiprocesses statistic ' +
     'computation. For very deep samples a smaller value is recommmended ' +
     'in order to control memory consumption. Default: %(default)d'})
+mstsgnf_opt=('--num-most-significant-stored', {
+    'default':100000, 'type':int,
+    'help':'Number of the most significant sites to store for faster access. ' +
+    'If a longer list of most significant sites is required the list must be ' +
+    're-computed from all batches. Very large values can increase RAM usage. ' +
+    'Default: %(default)d'})
 
 timeout_opt=('--timeout', {
     'type':int, 'help':'Timeout in seconds for processing a single read. ' +
@@ -297,7 +306,7 @@ ovpltthresh_opt=('--overplot-threshold', {
     'instead of raw signal. Default: %(default)d'})
 
 fmo_opt=('--fishers-method-context', {
-    'type':int, 'default':1,
+    'type':int, 'default':FM_OFFSET_DEFAULT,
     'help':'Number of context bases up and downstream over which to compute ' +
     "Fisher's method combined p-values. Note: Not applicable " +
     "for alternative model likelihood ratio tests. Default: %(default)d."})
@@ -306,24 +315,33 @@ minreads_opt=('--minimum-test-reads', {
     'help':'Number of reads required at a position to perform significance ' +
     'testing or contribute to model estimation. Default: %(default)d'})
 
+allspb_opt=('--statistics-per-block', {
+    'type':int,
+    'help':'Number of randomly selected per-read, per-base statistics to ' +
+    'extract from each genomic block for plotting. Default: Include all stats'})
 spb_opt=('--statistics-per-block', {
-    'type':int, 'default':100000,
+    'type':int,
     'help':'Number of randomly selected per-read, per-base statistics to ' +
     'extract from each genomic block for plotting. Default: %(default)d'})
 tsl_opt=('--total-statistics-limit', {
-    'type':int, 'default':5000000,
+    'type':int,
     'help':'Total per-read statistics to be extracted for plotting. ' +
     'Avoids memory overflow for large runs. Default: %(default)d'})
 
+dynerr_opt=('--num-most-common-errors', {
+    'type':int, 'default':0,
+    'help':'Dynamically show this many most common errors so far through run. ' +
+    'Default: 0; Just show progress'})
 segpars_opt=('--segmentation-parameters', {
-    'type':int, 'nargs':3,
-    'help':'Specify the 3 parameters for segmentation 1) running neighboring ' +
+    'type':int, 'nargs':len(next(iter(SEG_PARAMS_TABLE.values()))),
+    'help':'Specify parameters for segmentation 1) running neighboring ' +
     'windows width 2) minimum raw observations per genomic base 3) mean raw ' +
     'observations per event. Sample type defaults: ' +
     ' || '.join((bst + ' : ' + ' '.join(map(str, params)))
                 for bst, params in SEG_PARAMS_TABLE.items())})
 hidsegpars_opt=('--segmentation-parameters', {
-    'type':int, 'nargs':3, 'help':argparse.SUPPRESS})
+    'type':int, 'nargs':len(next(iter(SEG_PARAMS_TABLE.values()))),
+    'help':argparse.SUPPRESS})
 segpars2_opt=('--segmentation-parameters', {
     'type':int, 'nargs':2,
     'help':'Specify the 2 parameters for segmentation 1) running neighboring ' +
@@ -400,6 +418,10 @@ stdllhr_opt=('--standard-log-likelihood-ratio', {
     'help':'Use a standard log likelihood ratio (LLR) statistic. Default ' +
     'is to use an outlier-robust LLR-like statistic. Detail in full ' +
     'online documentation.'})
+prtovlp_opt=('--include-partial-overlap', {
+    'default':False, 'action':'store_true',
+    'help':'Include reads that partially overlap the specified region. ' +
+    'Default: Only include reads completely contained in a specified region'})
 
 readmean_opt=('--read-mean', {
     'default':False, 'action':'store_true',
@@ -417,6 +439,11 @@ noplot_opt=('--dont-plot', {
 pstdmod_opt=('--plot-standard-model', {
     'default':False, 'action':'store_true',
     'help':"Add default standard model distribution to the plot."})
+samponly_opt=('--sample-only-estimates', {
+    'default':False, 'action':'store_true',
+    'help':"Only use canonical sample to estimate expected signal level and " +
+    "spread. Default: Use canonical model to improve estimtates (esp. for " +
+    "low coverage regions) using baysian posterior estimates."})
 
 quiet_opt=(('--quiet', '-q'), {
     'default':False, 'action':'store_true',
@@ -428,11 +455,11 @@ quiet_opt=(('--quiet', '-q'), {
 ##############################
 
 otlthresh_opt=('--outlier-threshold', {
-    'default':5, 'type':float,
+    'type':float, 'default':OUTLIER_THRESH,
     'help':'Windosrize the signal at this number of scale values. ' +
     'Negative value disables outlier clipping. Default: %(default)f'})
 hidotlthresh_opt=('--outlier-threshold', {
-    'default':5, 'type':float, 'help':argparse.SUPPRESS})
+    'type':float, 'default':OUTLIER_THRESH, 'help':argparse.SUPPRESS})
 
 snglrdthrsh_opt=('--single-read-threshold', {
     'type':float, 'nargs':'+',
@@ -495,8 +522,8 @@ qscr_opt=('--q-score', {
     'Default: %(default)f'})
 sms_opt=('--signal-matching-score', {
     'type':float,
-    'help':'Mean half normal z-score threshold for filtering reads with ' +
-    'poor raw to expected signal matching. Signal type defaults: ' +
+    'help':'Observed to expected signal matching score (higher score ' +
+    'indicates poor matching). Sample type defaults: ' +
     ' || '.join(bst + ' : ' + str(params)
                 for bst, params in SIG_MATCH_THRESH.items())})
 fxdscl_opt=('--fixed-scale', {
@@ -507,20 +534,27 @@ hidfxdscl_opt=('--fixed-scale', {
 cvgdmp_opt=('--coverage-dampen-counts', {
     'type':float, 'nargs':2, 'default':COV_DAMP_COUNTS,
     'help':'Dampen fraction modified estimates for low coverage sites. Two ' +
-    'parameters are unmodified and modified psuedo read counts. This is ' +
+    'parameters are unmodified and modified pseudo read counts. This is ' +
     'equivalent to a beta prior on the fraction estimate. Set to "0 0" to ' +
     'disable dampened fraction estimation. Default: %(default)s'})
+prwht_opt=('--model-prior-weights', {
+    'type':float, 'nargs':2, 'default':[MEAN_PRIOR_CONST, SD_PRIOR_CONST],
+    'help':'Prior weights (one each for mean and spread) applied to ' +
+    'canonical base model for estimating posterior model parameters for ' +
+    'sample comparison. Default: %(default)s'})
 
 sigapars_opt=('--signal-align-parameters', {
-    'type':float, 'nargs':5,
-    'help':'Specify the 4 parameters for signal to genome sequence alignment ' +
+    'type':float, 'nargs':len(next(iter(ALGN_PARAMS_TABLE.values()))),
+    'help':'Specify the parameters for signal to genome sequence alignment ' +
     'algorithm 1) match expected value 2) skip penalty 3) bandwidth 4) save ' +
     'bandwidth (if read fails with bandwith) 5) z-score winsorizing ' +
-    'threshold. Sample type defaults: ' + ' || '.join(
-        (bst + ' : ' + ' '.join(map(str, params)))
-        for bst, params in ALGN_PARAMS_TABLE.items())})
+    'threshold 6) bandwidth boundary threshold 7) start bandwidth 8) start ' +
+    'save bandwidth 9) start num bases. Sample type defaults: ' +
+    ' || '.join((bst + ' : ' + ' '.join(map(str, params)))
+                for bst, params in ALGN_PARAMS_TABLE.items())})
 hidsigapars_opt=('--signal-align-parameters', {
-    'type':float, 'nargs':5, 'help':argparse.SUPPRESS})
+    'type':float, 'nargs':len(next(iter(ALGN_PARAMS_TABLE.values()))),
+    'help':argparse.SUPPRESS})
 
 
 ##############################
@@ -566,11 +600,11 @@ ftypes_opt=('--file-types', {
     'Default: "coverage"'})
 
 dna_opt=('--dna', {
-    'dest':'bio_sample_type', 'action':'store_const', 'const':'DNA',
+    'dest':'seq_sample_type', 'action':'store_const', 'const':DNA_SAMP_TYPE,
     'help':'Explicitly select canonical DNA model. Default: Automatically ' +
     'determine from FAST5s'})
 rna_opt=('--rna', {
-    'dest':'bio_sample_type', 'action':'store_const', 'const':'RNA',
+    'dest':'seq_sample_type', 'action':'store_const', 'const':RNA_SAMP_TYPE,
     'help':'Explicitly select canonical RNA model. Default: Automatically ' +
     'determine from FAST5s'})
 
@@ -600,6 +634,7 @@ def add_misc_args(parser):
 def add_common_testing_args(parser):
     io_args = parser.add_argument_group('Output Argument')
     io_args.add_argument(prstatbn_opt[0], **prstatbn_opt[1])
+    io_args.add_argument(mstsgnf_opt[0], **mstsgnf_opt[1])
 
     multi_args = parser.add_argument_group('Multiprocessing Arguments')
     multi_args.add_argument(mpreg_opt[0], **mpreg_opt[1])
@@ -651,7 +686,7 @@ def get_resquiggle_parser():
 
     multi_args = parser.add_argument_group('Multiprocessing Arguments')
     multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
-    multi_args.add_argument(thrpp_opt[0], default=1, **thrpp_opt[1])
+    multi_args.add_argument(hidthrpp_opt[0], **hidthrpp_opt[1])
 
     fast5_args = parser.add_argument_group('FAST5 Data Arguments')
     fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
@@ -661,6 +696,7 @@ def get_resquiggle_parser():
 
     io_args = parser.add_argument_group('Input/Output Arguments')
     io_args.add_argument(failed_opt[0], **failed_opt[1])
+    io_args.add_argument(dynerr_opt[0], **dynerr_opt[1])
 
     hid_args = parser.add_argument_group('Advanced Arguments')
     hid_args.add_argument(printadv_opt[0], **printadv_opt[1])
@@ -696,6 +732,7 @@ def print_advanced_resquiggle():
     hid_args.add_argument(skpidx_opt[0], **skpidx_opt[1])
     hid_args.add_argument(incldsd_opt[0], **incldsd_opt[1])
     hid_args.add_argument(ignrlock_opt[0], **ignrlock_opt[1])
+    hid_args.add_argument(thrpp_opt[0], **thrpp_opt[1])
 
     hid_args.add_argument(*help_opt[0], **help_opt[1])
 
@@ -878,7 +915,7 @@ def get_estimate_scale_parser():
 def get_de_novo_test_signif_parser():
     parser = argparse.ArgumentParser(
         description='Test for significant shifts in raw nanopore signal ' +
-        'against either a canonical model.', add_help=False)
+        'awway from a canonical base expected signal model.', add_help=False)
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
@@ -892,6 +929,7 @@ def get_de_novo_test_signif_parser():
     test_args.add_argument(fmo_opt[0], **fmo_opt[1])
     test_args.add_argument(minreads_opt[0], default=1, **minreads_opt[1])
     test_args.add_argument(dnthresh_opt[0], **dnthresh_opt[1])
+    test_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
 
     io_args, multi_args = add_common_testing_args(parser)
     fast5_args, misc_args, parser = add_default_args(parser)
@@ -901,7 +939,7 @@ def get_de_novo_test_signif_parser():
 def get_alt_test_signif_parser():
     parser = argparse.ArgumentParser(
         description='Test for significant shifts in raw nanopore signal ' +
-        'which match a specific non-canonical base model.', add_help=False)
+        'specificly matching a non-canonical base model.', add_help=False)
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(fast5dir_opt[0], **fast5dir_opt[1])
     req_args.add_argument(statbsnm_opt[0], **statbsnm_opt[1])
@@ -918,6 +956,7 @@ def get_alt_test_signif_parser():
     test_args.add_argument(minreads_opt[0], default=1, **minreads_opt[1])
     test_args.add_argument(altthresh_opt[0], **altthresh_opt[1])
     test_args.add_argument(stdllhr_opt[0], **stdllhr_opt[1])
+    test_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
 
     io_args, multi_args = add_common_testing_args(parser)
     fast5_args, misc_args, parser = add_default_args(parser)
@@ -927,18 +966,26 @@ def get_alt_test_signif_parser():
 def get_samp_comp_test_signif_parser():
     parser = argparse.ArgumentParser(
         description='Test for significant shifts in raw nanopore signal ' +
-        'against either a model, a set of two models or another sequencing ' +
-        'sample.', add_help=False)
+        'away from a control/canonical base only sample (usually ' +
+        'PCR for DNA or IVT for RNA).', add_help=False)
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
     req_args.add_argument(
         ctrlfast5dir_opt[0], required=True, **ctrlfast5dir_opt[1])
 
+    alt_args = parser.add_argument_group('Model Prior Arguments')
+    alt_args.add_argument(samponly_opt[0], **samponly_opt[1])
+    alt_args.add_argument(prwht_opt[0], **prwht_opt[1])
+    alt_args.add_argument(dna_opt[0], **dna_opt[1])
+    alt_args.add_argument(rna_opt[0], **rna_opt[1])
+    alt_args.add_argument(hidden_tbmod_opt[0], **hidden_tbmod_opt[1])
+
     test_args = parser.add_argument_group('Significance Test Arguments')
     test_args.add_argument(fmo_opt[0], **fmo_opt[1])
     test_args.add_argument(minreads_opt[0], default=1, **minreads_opt[1])
     test_args.add_argument(scompthresh_opt[0], **scompthresh_opt[1])
+    test_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
 
     io_args, multi_args = add_common_testing_args(parser)
     fast5_args, misc_args, parser = add_default_args(parser)
@@ -951,11 +998,18 @@ def get_aggregate_per_read_parser():
         '(genomic base) statistics file.', add_help=False)
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(prstat_opt[0], required=True, **prstat_opt[1])
-    req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
+    req_args.add_argument(statfn_opt[0], required=True, **statfn_opt[1])
     req_args.add_argument(snglrdthrsh_opt[0], required=True, **snglrdthrsh_opt[1])
 
     test_args = parser.add_argument_group('Significance Test Arguments')
     test_args.add_argument(minreads_opt[0], default=1, **minreads_opt[1])
+    test_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
+
+    io_args = parser.add_argument_group('Output Argument')
+    io_args.add_argument(mstsgnf_opt[0], **mstsgnf_opt[1])
+
+    multi_args = parser.add_argument_group('Multiprocessing Arguments')
+    multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
 
     fast5_args, misc_args, parser = add_default_args(parser)
 
@@ -1055,7 +1109,10 @@ def get_filter_genome_pos_parser():
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(incldreg_opt[0], **incldreg_opt[1])
 
-    fast5_args = parser.add_argument_group('FAST5 Data Arguments')
+    filt_args = parser.add_argument_group('Filter Argument')
+    filt_args.add_argument(prtovlp_opt[0], **prtovlp_opt[1])
+
+    fast5_args = parser.add_argument_group('FAST5 Data Argument')
     fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
 
     misc_args, parser = add_misc_args(parser)
@@ -1306,14 +1363,12 @@ def get_roc_parser():
 
     out_args = parser.add_argument_group('Output Arguments')
     out_args.add_argument(pdf_opt[0],
-                         default=OUTPUT_BASE + '.roc.pdf',
-                         **pdf_opt[1])
+                          default=OUTPUT_BASE + '.roc.pdf',
+                          **pdf_opt[1])
 
-    filt_args = parser.add_argument_group('Filtering Arguments')
-    filt_args.add_argument(minreads_opt[0], default=1, **minreads_opt[1])
-
-    stat_args = parser.add_argument_group('Statistical Argument')
-    stat_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
+    limit_args = parser.add_argument_group('Down-sampling Arguments')
+    limit_args.add_argument(allspb_opt[0], **allspb_opt[1])
+    limit_args.add_argument(tsl_opt[0], default=5000000, **tsl_opt[1])
 
     misc_args, parser = add_misc_args(parser)
 
@@ -1329,8 +1384,8 @@ def get_per_read_roc_parser():
     req_args.add_argument(fasta_opt[0], required=True, **fasta_opt[1])
 
     limit_args = parser.add_argument_group('Down-sampling Arguments')
-    limit_args.add_argument(spb_opt[0], **spb_opt[1])
-    limit_args.add_argument(tsl_opt[0], **tsl_opt[1])
+    limit_args.add_argument(spb_opt[0], default=100000, **spb_opt[1])
+    limit_args.add_argument(tsl_opt[0], default=5000000, **tsl_opt[1])
 
     out_args = parser.add_argument_group('Output Arguments')
     out_args.add_argument(pdf_opt[0],
@@ -1391,9 +1446,6 @@ def get_browser_files_parser():
     out_args.add_argument(brsrfn_opt[0], **brsrfn_opt[1])
     out_args.add_argument(ftypes_opt[0], **ftypes_opt[1])
 
-    stat_args = parser.add_argument_group('Statistical Argument')
-    stat_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
-
     fast5_args, misc_args, parser = add_default_args(parser)
 
     return parser
@@ -1420,14 +1472,11 @@ def get_write_signif_diff_parser():
         seqs_opt[0], default=OUTPUT_BASE + '.significant_regions.fasta',
         **seqs_opt[1])
 
-    stat_args = parser.add_argument_group('Statistical Argument')
-    stat_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
-
     fast5_args, misc_args, parser = add_default_args(parser)
 
     return parser
 
 
 if __name__ == '__main__':
-    raise NotImplementedError(
-        'This is a module. See commands with `tombo -h`')
+    sys.stderr.write('This is a module. See commands with `tombo -h`')
+    sys.exit(1)

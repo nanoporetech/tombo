@@ -35,7 +35,9 @@ See :doc:`examples` for common workflows.
 Quick Start
 ===========
 
-Call 5mC and 6mA sites from raw nanopore read files. Then output genome browser `wiggle format file <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_ for 5mA calls and plot raw signal around most significant 6mA sites.
+Re-squiggle raw nanopore read files and call 5mC and 6mA sites.
+
+Then, for 5mA calls, output genome browser `wiggle format file <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_ and, for 6mA calls, plot raw signal around most significant locations.
 
 ::
 
@@ -44,13 +46,13 @@ Call 5mC and 6mA sites from raw nanopore read files. Then output genome browser 
        --fastq-filenames basecalls1.fastq basecalls2.fastq \
        --sequencing-summary-filenames seq_summary1.txt seq_summary2.txt \
        --processes 4
-   
+
    tombo resquiggle path/to/fast5s/ genome.fasta --processes 4
    tombo detect_modifications alternative_model --fast5-basedirs path/to/fast5s/ \
        --statistics-file-basename sample.alt_modified_base_detection \
        --per-read-statistics-basename sample.alt_modified_base_detection \
        --alternate-bases 5mC 6mA --processes 4
-   
+
    # produces "estimated fraction of modified reads" genome browser files
    # for 5mC testing
    tombo text_output browser_files --statistics-filename sample.alt_modified_base_detection.5mC.tombo.stats \
@@ -59,8 +61,8 @@ Call 5mC and 6mA sites from raw nanopore read files. Then output genome browser 
    tombo text_output browser_files --statistics-filename sample.alt_modified_base_detection.6mA.tombo.stats \
        --fast5-basedirs path/to/fast5s/  --file-types dampened_fraction coverage\
        --browser-file-basename sample.alt_modified_base_detection.6mA
-   
-   # plot raw signal at most significant locations
+
+   # plot raw signal at most significant 6mA locations
    tombo plot most_significant --fast5-basedirs path/to/fast5s/ \
        --statistics-filename sample.alt_modified_base_detection.6mA.tombo.stats \
        --plot-standard-model --plot-alternate-model 6mA \
@@ -75,13 +77,13 @@ Detect any deviations from expected signal levels for canonical bases to investi
        --statistics-file-basename sample.de_novo_modified_base_detection \
        --per-read-statistics-basename sample.de_novo_modified_base_detection \
        --processes 4
-   
+
    # produces sample.de_novo_modified_base_detection.dampened_fraction.[plus|minus].wig files
    tombo text_output browser_files --statistics-filename sample.de_novo_modified_base_detection.tombo.stats \
        --browser-file-basename sample.de_novo_modified_base_detection --file-types dampened_fraction
 
 .. note::
-   
+
    All of these commands work for RNA data as well, but a transcriptome reference sequence must be provided for spliced transcripts.
 
    Run ``tombo -h`` to see all Tombo command groups, run ``tombo [command-group] -h`` to see all commands within each group and run ``tombo [command-group] [comand] -h`` for help with arguments to each Tombo command.
@@ -110,18 +112,13 @@ Contents
    rna
    model_training
 
--------------------------
-Full API reference (beta)
--------------------------
+-------------------
+Tombo API Reference
+-------------------
 
 .. toctree::
    :maxdepth: 2
 
    tombo
 
--------------------
-Documentation Index
--------------------
-
-* :ref:`genindex`
-* :ref:`modindex`
+:ref:`Tombo Module Documentation Index <genindex>`

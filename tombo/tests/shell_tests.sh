@@ -11,8 +11,8 @@ poreModel="r9_250bps.nucleotide.5mer.template.model"
 genomeFn="e_coli.K12.NEB5alpha.fasta"
 mmiFn="e_coli.K12.NEB5alpha.mmi"
 
-genomeLocs='"CP017100.1:1505285" "CP017100.1:1504705"'
-strandGenomeLocs='"CP017100.1:1505285:+" "CP017100.1:1504705:+"'
+genomeLocs='"CP017100.1:1505285" "CP017100.1:2873680"'
+strandGenomeLocs='"CP017100.1:1505285:+" "CP017100.1:2873680:-"'
 
 runHelps=false
 runResquiggle=true
@@ -66,11 +66,11 @@ printf "\n\n********* Testing re-squiggle command **********\n"
 tombo resquiggle \
       $natDir $genomeFn \
       --failed-reads-filename testing.native.failed_read.txt \
-      --processes 4 --overwrite --include-event-stdev
+      --processes 8 --overwrite --num-most-common-errors 5
 tombo resquiggle \
       $ampDir $genomeFn \
       --failed-reads-filename testing.amplified.failed_read.txt \
-      --processes 4 --overwrite --include-event-stdev
+      --processes 8 --overwrite --num-most-common-errors 5
 
 printf "\n\n********* Testing FASTQ annotation and re-squiggle **********\n"
 tombo preprocess annotate_raw_with_fastqs --fast5-basedir $natFqDir \
@@ -78,66 +78,61 @@ tombo preprocess annotate_raw_with_fastqs --fast5-basedir $natFqDir \
 tombo resquiggle \
       $natFqDir $genomeFn \
       --corrected-group FastqAnnotation \
-      --failed-reads-filename testing.native.fastq_ann.failed_read.txt \
-      --processes 4 --overwrite
-
-printf "\n\n********* Testing re-squiggle command with filename **********\n"
-tombo resquiggle \
-      $natDir $genomeFn --tombo-model-filename $nrModFn \
-      --corrected-group RawWFilenameCorrected \
-      --processes 4 --overwrite \
-      --failed-reads-filename testing.native.fn_model.failed_read.txt
-tombo resquiggle \
-      $ampDir $genomeFn --tombo-model-filename $nrModFn \
-      --corrected-group RawWFilenameCorrected \
-      --processes 4 --overwrite \
-      --failed-reads-filename testing.amplified.fn_model.failed_read.txt
-
-printf "\n\n********* Testing event-based resquiggle **********\n"
-tombo build_model event_resquiggle \
-      $natDir $genomeFn --minimap2-executable ./minimap2 \
-      --corrected-group RawEventCorrected --processes 4 --overwrite \
-      --failed-reads-filename testing.native.failed_read.event.txt
+      --processes 8 --overwrite
 
 printf "\n\n********* Testing minimap2 index **********\n"
 tombo resquiggle \
       $natDir $mmiFn \
       --corrected-group RawMinimapIndexCorrected \
-      --processes 4 --overwrite \
-      --failed-reads-filename testing.native.failed_read.txt
+      --processes 8 --overwrite
+
+printf "\n\n********* Testing re-squiggle command with filename **********\n"
+tombo resquiggle \
+      $natDir $genomeFn --tombo-model-filename $nrModFn \
+      --corrected-group RawWFilenameCorrected \
+      --processes 8 --overwrite
+tombo resquiggle \
+      $ampDir $genomeFn --tombo-model-filename $nrModFn \
+      --corrected-group RawWFilenameCorrected \
+      --processes 8 --overwrite
+
+printf "\n\n********* Testing event-based resquiggle **********\n"
+tombo build_model event_resquiggle \
+      $natDir $genomeFn --minimap2-executable ./minimap2 \
+      --corrected-group RawEventCorrected --processes 8 --overwrite
 
 printf "\n\n********* Testing pA normalization **********\n"
-tombo build_model event_resquiggle --minimap2-executable ./minimap2 \
-      $natDir $genomeFn \
-      --normalization-type pA_raw --processes 4 \
-      --corrected-group RawGenomeCorrected_pA_raw_000 --overwrite \
-      --failed-reads-filename testing.native.pA_raw.failed_read.txt
 tombo build_model event_resquiggle \
-        $natDir $genomeFn --minimap2-executable ./minimap2 \
-        --normalization-type pA --pore-model-filename $poreModel \
-        --corrected-group RawGenomeCorrected_pA_000 --overwrite \
-        --failed-reads-filename testing.native.pA.failed_read.txt \
-        --processes 4
+      $natDir $genomeFn \
+       --minimap2-executable ./minimap2 \
+      --normalization-type pA_raw --processes 8 \
+      --corrected-group RawGenomeCorrected_pA_raw_000 --overwrite
+tombo build_model event_resquiggle \
+      $natDir $genomeFn --minimap2-executable ./minimap2 \
+      --normalization-type pA --pore-model-filename $poreModel \
+      --corrected-group RawGenomeCorrected_pA_000 --overwrite \
+      --processes 8
 
 printf "\n\n********* Testing recursive resquiggle **********\n"
 tombo resquiggle \
-        $rcsvDir $genomeFn \
-        --failed-reads-filename testing.recursive.failed_read.txt \
-        --processes 4 --overwrite
+      $rcsvDir $genomeFn \
+      --processes 8 --overwrite
 fi
 
 printf "\n\n********* Testing filter functions **********\n"
 tombo filter clear_filters --fast5-basedirs $natDir
 tombo filter stuck --fast5-basedirs $natDir \
-      --obs-per-base-filter 99:200 100:5000
+      --obs-per-base-filter 99:200 100:1000
 tombo filter level_coverage --fast5-basedirs $natDir \
       --percent-to-filter 10
-tombo filter q_score --fast5-basedirs $natDir --q-score 21
+tombo filter q_score --fast5-basedirs $natDir --q-score 10
 tombo filter raw_signal_matching --fast5-basedirs $natDir \
       --signal-matching-score 0.75
 tombo filter clear_filters --fast5-basedirs $natDir
 tombo filter genome_locations --fast5-basedirs $natDir \
-      --include-regions CP017100.1:1,458,474-1,558,736
+      --include-regions CP017100.1:1,485,920-1,558,736 --include-partial-overlap
+tombo filter genome_locations --fast5-basedirs $natDir \
+      --include-regions CP017100.1:1,485,920-1,558,736
 tombo filter clear_filters --fast5-basedirs $natDir
 
 
@@ -164,6 +159,10 @@ tombo plot motif_centered --fast5-basedirs $natDir --motif ATC \
         --genome-fasta $genomeFn \
         --num-bases 21 --overplot-threshold 1000 --deepest-coverage \
         --pdf-filename testing.motif_centered.deepest.1_samp.pdf
+tombo plot motif_centered --fast5-basedirs $natDir --motif CCWGG \
+      --plot-alternate-model 5mC --genome-fasta $genomeFn \
+      --num-bases 21 --overplot-threshold 1000 \
+      --pdf-filename testing.motif_centered.w_model.pdf
 tombo plot max_coverage --fast5-basedirs $rcsvDir \
         --num-bases 21 --overplot-threshold 1000 \
         --pdf-filename testing.max_cov.1_samp.recursive.pdf
@@ -198,16 +197,14 @@ tombo plot motif_centered --fast5-basedirs $natDir --motif ATC \
 printf "\n\n********* Testing statistical testing. **********\n"
 rm test_stats.de_novo.tombo.stats test_stats.2samp.tombo.stats \
    test_stats.alt_model.5mC.tombo.stats \
-   test_stats.alt_model.6mA.tombo.stats \
    test_stats.alt_default_model.5mC.tombo.stats \
    test_stats.alt_default_model.6mA.tombo.stats \
    test_stats.de_novo.tombo.per_read_stats test_stats.2samp.tombo.per_read_stats \
    test_stats.alt_model.5mC.tombo.per_read_stats \
-   test_stats.alt_model.6mA.tombo.per_read_stats \
    test_stats.alt_default_model.5mC.tombo.per_read_stats \
    test_stats.alt_default_model.6mA.tombo.per_read_stats \
    test_standard.model test_stats.de_novo.new_thresh.tombo.stats \
-   test_alt_est.alt_C.tombo_model
+   test_alt.model test_alt.use_densities.model
 tombo detect_modifications de_novo --fast5-basedirs $natDir \
       --minimum-test-reads 5 \
       --statistics-file-basename test_stats.de_novo \
@@ -218,9 +215,14 @@ tombo detect_modifications de_novo --fast5-basedirs $natDir \
       --per-read-statistics-basename test_stats.de_novo.two_way_thresh
 tombo detect_modifications sample_compare --fast5-basedirs $natDir \
       --control-fast5-basedirs $ampDir \
-      --minimum-test-reads 5 \
+      --minimum-test-reads 5 --sample-only-estimates \
       --statistics-file-basename test_stats.2samp \
       --per-read-statistics-basename test_stats.2samp
+tombo detect_modifications sample_compare --fast5-basedirs $natDir \
+      --control-fast5-basedirs $ampDir \
+      --minimum-test-reads 5 \
+      --statistics-file-basename test_stats.2samp_w_post \
+      --per-read-statistics-basename test_stats.2samp_w_post
 tombo detect_modifications alternative_model --fast5-basedirs $natDir \
       --alternate-bases 5mC 6mA \
       --statistics-file-basename test_stats.alt_default_model \
@@ -250,27 +252,31 @@ tombo build_model estimate_alt_reference \
 printf "\n\n********* Testing aggregate per-read stats **********\n"
 tombo detect_modifications aggregate_per_read_stats --minimum-test-reads 5 \
       --single-read-threshold 0.4 \
-      --statistics-file-basename test_stats.de_novo.new_thresh \
+      --statistics-filename test_stats.de_novo.new_thresh.tombo.stats \
       --per-read-statistics-filename test_stats.de_novo.tombo.per_read_stats
 
 printf "\n\n********* Testing ROC and Precision-Recall plotting **********\n"
 tombo plot roc --genome-fasta e_coli.K12.NEB5alpha.fasta \
       --statistics-filenames test_stats.2samp.tombo.stats \
+      test_stats.2samp_w_post.tombo.stats \
       test_stats.alt_default_model.5mC.tombo.stats \
       test_stats.alt_default_model.6mA.tombo.stats \
       test_stats.de_novo.tombo.stats test_stats.de_novo.new_thresh.tombo.stats \
       --motif-descriptions \
       CCWGG:2:"dcm 5mC Samp Comp"::GATC:2:"dam 6mA Samp Comp" \
+      CCWGG:2:"dcm 5mC Samp Comp w/ post"::GATC:2:"dam 6mA Samp Comp w/ post" \
       CCWGG:2:"dcm 5mC Alt Test" GATC:2:"dam 6mA Alt Test" \
       CCWGG:2:"dcm 5mC De Novo"::GATC:2:"dam 6mA De Novo" \
       CCWGG:2:"dcm 5mC De Novo New Thresh"::GATC:2:"dam 6mA De Novo New Thresh"
 
 tombo plot per_read_roc --genome-fasta e_coli.K12.NEB5alpha.fasta \
       --per-read-statistics-filenames test_stats.2samp.tombo.per_read_stats \
+      test_stats.2samp_w_post.tombo.per_read_stats \
       test_stats.alt_default_model.5mC.tombo.per_read_stats \
       test_stats.alt_default_model.6mA.tombo.per_read_stats \
       test_stats.de_novo.tombo.per_read_stats --motif-descriptions \
       CCWGG:2:"dcm 5mC Samp Comp"::GATC:2:"dam 6mA Samp Comp" \
+      CCWGG:2:"dcm 5mC Samp Comp w/ post"::GATC:2:"dam 6mA Samp Comp w/ post" \
       CCWGG:2:"dcm 5mC Alt Test" GATC:2:"dam 6mA Alt Test" \
       CCWGG:2:"dcm 5mC De Novo"::GATC:2:"dam 6mA De Novo"
 
@@ -376,7 +382,7 @@ tombo plot most_significant --fast5-basedirs $natDir \
         --statistics-filename test_stats.de_novo.tombo.stats \
         --overplot-threshold 1 --overplot-type Density \
         --pdf-filename testing.model_plotting.density.pdf
-tombo plot genome_locations --fast5-basedirs $ampDir \
+tombo plot genome_locations --fast5-basedirs $natDir \
         --tombo-model-filename $nrModFn \
         --alternate-model-filename $altModFn \
         --genome-locations $genomeLocs \
@@ -401,7 +407,7 @@ tombo plot max_coverage --fast5-basedirs $natDir \
 printf "\n\n********* Testing per-read testing plot **********\n"
 tombo plot per_read --genome-locations $genomeLocs --num-bases 101 \
       --per-read-statistics-filename test_stats.2samp.tombo.per_read_stats \
-      --genome-fasta $genomeFn --pdf-filename testing.per_read.pdf
+      --genome-fasta $genomeFn --pdf-filename testing.per_read.samp_comp.pdf
 tombo plot per_read --genome-locations $genomeLocs --num-bases 101 \
       --per-read-statistics-filename test_stats.de_novo.tombo.per_read_stats \
       --genome-fasta $genomeFn --pdf-filename testing.de_novo.per_read.pdf
@@ -413,7 +419,7 @@ tombo plot per_read --genome-locations $genomeLocs --num-bases 101 \
       --per-read-statistics-filename test_stats.alt_model.5mC.tombo.per_read_stats \
       --pdf-filename testing.per_read.wo_seq.pdf
 
-printf "\n\n********* Testing auxilliary commands **********\n"
+printf "\n\n********* Testing text output commands **********\n"
 tombo text_output signif_sequence_context --fast5-basedirs $natDir $ampDir \
         --statistics-filename test_stats.de_novo.tombo.stats \
         --sequences-filename testing_signif_regions.from_fast5s.fasta

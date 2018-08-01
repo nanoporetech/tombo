@@ -40,12 +40,12 @@ else:
     extras_require.append('rpy2')
 
 ext_modules = [
-    Extension(str("tombo.c_dynamic_programming"),
-              [str("tombo/c_dynamic_programming.pyx")],
+    Extension(str("tombo._c_dynamic_programming"),
+              [str("tombo/_c_dynamic_programming.pyx")],
               include_dirs=include_dirs,
               language="c++"),
-    Extension(str("tombo.c_helper"),
-              [str("tombo/c_helper.pyx")],
+    Extension(str("tombo._c_helper"),
+              [str("tombo/_c_helper.pyx")],
               include_dirs=include_dirs,
               language="c++")
 ]
@@ -57,7 +57,7 @@ setup(
     name = "ont-tombo",
     version = __version__,
     packages = ["tombo"],
-    install_requires = ['h5py <= 2.7.0', 'numpy', 'scipy', 'cython',
+    install_requires = ['h5py', 'numpy', 'scipy', 'cython',
                         'setuptools >= 18.0', 'mappy >= 2.10', 'future', 'tqdm'],
     extras_require={'full':extras_require},
 

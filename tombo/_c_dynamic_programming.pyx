@@ -1,3 +1,6 @@
+# _c_dynamic_programming.pyx
+# cython: profile=True
+
 cimport cython
 
 import numpy as np
@@ -178,8 +181,60 @@ def c_base_traceback(
             curr_b_data[sig_pos-curr_start-1]):
             return sig_pos
 
+@cython.wraparound(False)
+@cython.boundscheck(False)
+cdef DTYPE_INT_t c_argmax(np.ndarray[DTYPE_t] vals):
+    cdef DTYPE_t val
+    cdef DTYPE_t max_val = vals[0]
+    cdef DTYPE_INT_t pos
+    cdef DTYPE_INT_t max_pos = 0
+
+    for pos in range(1, vals.shape[0]):
+        val = vals[pos]
+        if val > max_val:
+            max_val = val
+            max_pos = pos
+    return max_pos
 
 # Eventless re-squiggle dynamic programming algorithm
+@cython.wraparound(False)
+@cython.boundscheck(False)
+cdef void c_process_band(
+        np.ndarray[DTYPE_t, ndim=2] fwd_pass,
+        np.ndarray[DTYPE_INT_t, ndim=2] fwd_pass_tb,
+        np.ndarray[DTYPE_t] shifted_z_scores,
+        DTYPE_t stay_pen, DTYPE_t skip_pen,
+        DTYPE_INT_t bandwidth, DTYPE_INT_t band_starts_diff,
+        DTYPE_INT_t seq_pos):
+
+    cdef DTYPE_INT_t band_pos, max_from, prev_b_pos
+    cdef DTYPE_t max_score, diag_score, skip_score, pos_z_score
+
+    for band_pos in range(1, bandwidth):
+        pos_z_score = shifted_z_scores[band_pos]
+        prev_b_pos = band_pos + band_starts_diff
+
+        # first set to stay state
+        max_score = fwd_pass[seq_pos+1, band_pos-1] - stay_pen + pos_z_score
+        max_from = 0
+        # then check diagonal score
+        if prev_b_pos - 1 < bandwidth:
+            diag_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
+            if diag_score > max_score:
+                max_score = diag_score
+                max_from = 2
+            # finally check skip score (note nested check to save some ops)
+            if prev_b_pos < bandwidth:
+                skip_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
+                if skip_score > max_score:
+                    max_score = skip_score
+                    max_from = 1
+
+        fwd_pass[seq_pos + 1, band_pos] = max_score
+        fwd_pass_tb[seq_pos + 1, band_pos] = max_from
+
+    return
+
 @cython.wraparound(False)
 @cython.boundscheck(False)
 def c_banded_forward_pass(
@@ -198,7 +253,7 @@ def c_banded_forward_pass(
     for idx in range(bandwidth):
         fwd_pass[0, idx] = 0.0
 
-    cdef DTYPE_INT_t max_from, band_pos, seq_pos, prev_b_pos
+    cdef DTYPE_INT_t max_from, band_pos, seq_pos, prev_b_pos, band_starts_diff
     cdef DTYPE_t max_score, pos_z_score, skip_score, diag_score
 
     for seq_pos in range(n_bases):
@@ -214,30 +269,12 @@ def c_banded_forward_pass(
                 shifted_z_scores[seq_pos, 0])
             fwd_pass_tb[seq_pos + 1, 0] = 2
 
-        for band_pos in range(1, bandwidth):
-            pos_z_score = shifted_z_scores[seq_pos, band_pos]
-            prev_b_pos = (band_pos + event_starts[seq_pos] -
-                          event_starts[seq_pos-1]
-                          if seq_pos > 0 else band_pos)
-
-            # first set to stay state
-            max_score = fwd_pass[seq_pos+1, band_pos-1] - stay_pen + pos_z_score
-            max_from = 0
-            # then check diagonal score
-            if prev_b_pos - 1 < bandwidth:
-                diag_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
-                if diag_score > max_score:
-                    max_score = diag_score
-                    max_from = 2
-                # finally check skip score (note nested check to save some ops)
-                if prev_b_pos < bandwidth:
-                    skip_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                    if skip_score > max_score:
-                        max_score = skip_score
-                        max_from = 1
-
-            fwd_pass[seq_pos + 1, band_pos] = max_score
-            fwd_pass_tb[seq_pos + 1, band_pos] = max_from
+        band_starts_diff = (
+            event_starts[seq_pos] - event_starts[seq_pos-1]
+            if seq_pos > 0 else 0)
+        c_process_band(
+            fwd_pass, fwd_pass_tb, shifted_z_scores[seq_pos,:], stay_pen,
+            skip_pen, bandwidth, band_starts_diff, seq_pos)
 
     return fwd_pass, fwd_pass_tb
 
@@ -265,27 +302,12 @@ def c_banded_traceback(
             band_pos -= 1
         if (band_boundary_thresh >= 0 and
             min(band_pos, bandwidth - band_pos - 1) < band_boundary_thresh):
-            raise NotImplementedError, (
-                'Read event to sequence alignment extends beyond --bandwidth')
+            raise NotImplementedError(
+                'Read event to sequence alignment extends beyond bandwidth')
         curr_event_pos = event_starts[curr_seq_pos-1] + band_pos
         seq_poss[curr_seq_pos-1] = curr_event_pos + 1
 
     return seq_poss
-
-@cython.wraparound(False)
-@cython.boundscheck(False)
-def c_argmax(np.ndarray[DTYPE_t] vals):
-    cdef DTYPE_t val
-    cdef DTYPE_t max_val = vals[0]
-    cdef DTYPE_INT_t pos
-    cdef DTYPE_INT_t max_pos = 0
-
-    for pos in range(1, vals.shape[0]):
-        val = vals[pos]
-        if val > max_val:
-            max_val = val
-            max_pos = pos
-    return max_pos
 
 @cython.wraparound(False)
 @cython.boundscheck(False)
@@ -305,10 +327,12 @@ def c_adaptive_banded_forward_pass(
     cdef DTYPE_INT_t half_bandwidth = bandwidth / 2
     cdef DTYPE_INT_t n_events = event_means.shape[0]
 
-    cdef DTYPE_INT_t event_pos, seq_pos, prev_band_start, curr_band_start, \
-        band_pos, prev_b_pos, max_from
-    cdef DTYPE_t pos_z_score, ref_mean, ref_sd, max_score, skip_score, \
-        diag_score
+    # comment out when profiling
+    #cdef DTYPE_INT_t band_pos, max_from, prev_b_pos
+    #cdef DTYPE_t max_score, diag_score, skip_score, pos_z_score
+
+    cdef DTYPE_INT_t event_pos, seq_pos, prev_band_start, curr_band_start
+    cdef DTYPE_t pos_z_score, ref_mean, ref_sd
 
     cdef np.ndarray[DTYPE_t] shifted_z_scores = np.empty(bandwidth, dtype=DTYPE)
     cdef np.ndarray[DTYPE_t, ndim=2] all_shifted_z_scores
@@ -327,7 +351,7 @@ def c_adaptive_banded_forward_pass(
             # the read is forced to skip to the end and will likely
             # not end in a favorable alignment
             if seq_pos < n_bases - 2:
-                raise NotImplementedError, (
+                raise NotImplementedError(
                     'Adaptive signal to seqeunce alignment extended ' +
                     'beyond raw signal')
             curr_band_start = n_events - 1
@@ -342,6 +366,8 @@ def c_adaptive_banded_forward_pass(
                 pos_z_score = (event_means[event_pos] - ref_mean) / ref_sd
                 if pos_z_score < 0:
                     pos_z_score = -pos_z_score
+                if do_winsorize_z:
+                    pos_z_score = min(pos_z_score, max_half_z_score)
                 shifted_z_scores[
                     event_pos - curr_band_start] = z_shift - pos_z_score
         else:
@@ -352,6 +378,8 @@ def c_adaptive_banded_forward_pass(
                 pos_z_score = (event_means[event_pos] - ref_mean) / ref_sd
                 if pos_z_score < 0:
                     pos_z_score = -pos_z_score
+                if do_winsorize_z:
+                    pos_z_score = min(pos_z_score, max_half_z_score)
                 shifted_z_scores[
                     event_pos - curr_band_start] = z_shift - pos_z_score
             for event_pos in range(n_events - curr_band_start, bandwidth):
@@ -374,28 +402,9 @@ def c_adaptive_banded_forward_pass(
 
         # profiling shows that >60% of the time is spent here. Not
         # functionalized now due to function call overheads
-        for band_pos in range(1, bandwidth):
-            pos_z_score = shifted_z_scores[band_pos]
-            prev_b_pos = band_pos + curr_band_start - prev_band_start
-
-            # first set to stay state
-            max_score = fwd_pass[seq_pos+1, band_pos-1] - stay_pen + pos_z_score
-            max_from = 0
-            # then check diagonal score
-            if prev_b_pos - 1 < bandwidth:
-                diag_score = fwd_pass[seq_pos, prev_b_pos-1] + pos_z_score
-                if diag_score > max_score:
-                    max_score = diag_score
-                    max_from = 2
-                # finally check skip score (note nested check to save some ops)
-                if prev_b_pos < bandwidth:
-                    skip_score = fwd_pass[seq_pos, prev_b_pos] - skip_pen
-                    if skip_score > max_score:
-                        max_score = skip_score
-                        max_from = 1
-
-            fwd_pass[seq_pos + 1, band_pos] = max_score
-            fwd_pass_tb[seq_pos + 1, band_pos] = max_from
+        c_process_band(
+            fwd_pass, fwd_pass_tb, shifted_z_scores, stay_pen, skip_pen,
+            bandwidth, curr_band_start - prev_band_start, seq_pos)
 
     if return_z_scores:
         return all_shifted_z_scores

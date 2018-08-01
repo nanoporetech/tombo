@@ -83,10 +83,10 @@ plotMotifStats <- function(PlotDat, BaseDat, StatsDat,
         }
         p <- p + geom_path(aes(x=Position, y=Signal, color=Group, group=Read),
                            alpha=0.5, size=0.1, show.legend=FALSE)
-        p <- p + geom_text(aes(x=Position+0.5, y=-ylim,
-                               label=Base, color=Base),
-                           data=rBaseDat,
-                           hjust=0.5, vjust=0, size=3, show.legend=FALSE) +
+        p <- p + geom_text(
+                     aes(x=Position+0.5, y=-ylim,label=Base, color=Base),
+                     data=rBaseDat,
+                     vjust=0, hjust=0.5, size=3, show.legend=FALSE) +
             scale_color_manual(
                 values=c(
                     'A'='#00CC00', 'C'='#0000CC', 'G'='#FFB300',
@@ -132,15 +132,16 @@ plotMotifStats <- function(PlotDat, BaseDat, StatsDat,
               panel.grid.minor.y=element_blank()) +
         ylab('Est. Fraction Modified')))
     maxWidth <- do.call(grid::unit.pmax,
-                        sapply(ps, function(x) x$widths[2:3]))
+                        sapply(ps, function(x) x$widths[1:4]))
     ps <- lapply(ps, function(p){
-        p$widths[2:3] <- maxWidth
+        p$widths[1:4] <- maxWidth
         return(p)})
     # close dev null sink
     foo <- dev.off()
     do.call(
         grid.arrange,
         c(ps, list(ncol=1, heights=c(rep(1, length(regions)), 3))))
+    ##library(cowplot)
     ##print(do.call(
     ##    plot_grid,
     ##    c(ps, list(ncol=1, align='v',

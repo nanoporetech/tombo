@@ -32,8 +32,8 @@ if sys.version_info[0] > 2:
 from . import tombo_stats as ts
 from . import tombo_helper as th
 
-from ._default_parameters import SEG_PARAMS_TABLE
-from .c_helper import c_valid_cpts, c_valid_cpts_w_cap
+from ._default_parameters import SEG_PARAMS_TABLE, DNA_SAMP_TYPE, RNA_SAMP_TYPE
+
 
 VERBOSE = False
 
@@ -67,6 +67,7 @@ SAM_FIELDS = (
     'cigar', 'rNext', 'pNext', 'tLen', 'seq', 'qual')
 CIGAR_PAT = re.compile('(\d+)([MIDNSHP=X])')
 GAP_PAT = re.compile('-+')
+
 
 #################################################
 ########## Raw Signal Re-squiggle Code ##########
@@ -150,9 +151,8 @@ def get_indel_groups(
                 group_end < len(align_segs) - 1)
             # ensure no infinite loop for large segmentation parameters
             if num_cpts == prev_num_cpts:
-                raise NotImplementedError(
-                    'Entire read does not contain enough ' +
-                    'signal to re-squiggle')
+                raise th.TomboError(
+                    'Entire read does not contain enough signal to re-squiggle')
             prev_num_cpts = num_cpts
             group_start = max(0, group_start - 1)
             group_end = min(len(align_segs) - 1, group_end + 1)
@@ -174,14 +174,14 @@ def get_indel_groups(
         while maintaining min_obs_per_base between changepoints.
         """
         if num_cpts_limit is not None and num_cpts > num_cpts_limit:
-            raise NotImplementedError('Reached maximum number of ' +
-                               'changepoints for a single indel')
+            raise th.TomboError('Reached maximum number of changepoints ' +
+                                'for a single indel')
         try:
-            cpts = c_valid_cpts_w_cap(
+            cpts = th.valid_cpts_w_cap(
                 raw_signal[align_segs[group_start]:align_segs[group_end]],
                 min_obs_per_base, running_stat_width, num_cpts)
         # not implemented error returned when fewer cpts found than requested
-        except NotImplementedError:
+        except th.TomboError:
             return None
         cpts.sort()
         return cpts
@@ -216,7 +216,7 @@ def get_indel_groups(
     curr_group = [all_indels[0],]
     for indel in all_indels[1:]:
         if timeout is not None and time() - timeout_start > timeout:
-            raise NotImplementedError('Read took too long to re-segment.')
+            raise th.TomboError('Read took too long to re-segment.')
         # check if indel hits current group
         if max(g_indel.end for g_indel in curr_group) >= indel.start:
             curr_group.append(indel)
@@ -255,7 +255,7 @@ def find_read_start(
         if starts_rel_to_read[-1] > num_obs else starts_rel_to_read
     if begin_read_starts.shape[0] <= 0:
         return norm_signal, starts_rel_to_read
-    signal_cpts = c_valid_cpts_w_cap(
+    signal_cpts = th.valid_cpts_w_cap(
         norm_signal[:num_obs], min_obs_per_base, running_stat_width,
         begin_read_starts.shape[0])
 
@@ -296,7 +296,7 @@ def resquiggle_read(
         fast5_fn, read_start_rel_to_raw, starts_rel_to_read,
         norm_type, outlier_thresh, alignVals, fix_read_start,
         timeout, num_cpts_limit, genome_loc, read_info,
-        basecall_group, corrected_group, compute_sd, pore_model, obs_filter,
+        basecall_group, corr_grp, compute_sd, pore_model, obs_filter,
         seg_params, in_place=True, skip_index=False):
     # errors should not happen here since these slotes were checked
     # in alignment function, but old zombie processes might cause
@@ -306,7 +306,7 @@ def resquiggle_read(
         channel_info = th.get_channel_info(fast5_data)
 
         # extract raw data for this read
-        all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'].value
+        all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'][:]
         rna = th.is_read_rna(fast5_data)
         if rna:
             all_raw_signal = all_raw_signal[::-1]
@@ -314,7 +314,7 @@ def resquiggle_read(
         if norm_type == 'pA':
             event_data = fast5_data[
                 '/Analyses/' + basecall_group + '/' +
-                read_info.Subgroup + '/Events'].value
+                read_info.Subgroup + '/Events'][:]
             r_event_means = event_data['mean']
             r_event_kmers = list(map(lambda x: x.decode(),
                                      event_data['model_state']))
@@ -324,23 +324,23 @@ def resquiggle_read(
                 pore_model.inv_var[kmer] for kmer in r_event_kmers])
         fast5_data.close()
     except:
-        raise NotImplementedError(
+        raise th.TomboError(
             'Error opening file for re-squiggle. This should have ' +
             'been caught during the alignment phase. Check that there ' +
             'are no other tombo processes or processes accessing ' +
             'these HDF5 files running simultaneously.')
 
     if seg_params is None:
-        bio_samp_type = 'RNA' if rna else 'DNA'
-        (running_stat_width, min_obs_per_base,
-         _) = SEG_PARAMS_TABLE[bio_samp_type]
+        seg_params = SEG_PARAMS_TABLE[RNA_SAMP_TYPE] if rna else \
+                     SEG_PARAMS_TABLE[RNA_SAMP_TYPE]
+        (running_stat_width, min_obs_per_base, _) = seg_params
     else:
         running_stat_width, min_obs_per_base = seg_params
 
     # normalize signal (potentially using model fitting if provided)
     norm_signal, scale_values = ts.normalize_raw_signal(
         all_raw_signal, read_start_rel_to_raw, starts_rel_to_read[-1],
-        norm_type, channel_info, outlier_thresh, event_means=r_event_means,
+        norm_type, outlier_thresh, channel_info, event_means=r_event_means,
         model_means=r_model_means, model_inv_vars=r_model_inv_vars)
     if fix_read_start:
         norm_signal, read_start_rel_to_raw = find_read_start(
@@ -365,27 +365,30 @@ def resquiggle_read(
     new_segs.append(starts_rel_to_read[prev_stop:])
     new_segs = np.concatenate(new_segs).astype(np.int64)
     if np.diff(new_segs).min() < 1:
-        raise NotImplementedError(
+        raise th.TomboError(
             'New segments include zero length events.')
     if new_segs[0] < 0:
-        raise NotImplementedError(
+        raise th.TomboError(
             'New segments start with negative index.')
     if new_segs[-1] > norm_signal.shape[0]:
-        raise NotImplementedError(
+        raise th.TomboError(
             'New segments end past raw signal values.')
 
     # get just from alignVals
     align_seq = ''.join(map(itemgetter(1), alignVals)).replace('-', '')
     if new_segs.shape[0] != len(align_seq) + 1:
-        raise ValueError('Aligned sequence does not match number ' +
-                         'of segments produced.')
+        raise th.TomboError('Aligned sequence does not match number ' +
+                            'of segments produced.')
 
     if in_place:
+        rsqgl_res = th.resquiggleResults(
+            align_info=read_info, genome_loc=genome_loc, genome_seq=align_seq,
+            mean_q_score=None, raw_signal=norm_signal,
+            read_start_rel_to_raw=read_start_rel_to_raw, segs=new_segs,
+            scale_values=scale_values)
         # create new hdf5 file to hold new read signal
         th.write_new_fast5_group(
-            fast5_fn, genome_loc, read_start_rel_to_raw, new_segs, align_seq,
-            norm_signal, scale_values, corrected_group, read_info.Subgroup,
-            norm_type, outlier_thresh, compute_sd, alignVals, read_info,
+            fast5_fn, corr_grp, rsqgl_res, norm_type, compute_sd, alignVals,
             starts_rel_to_read, rna)
     else:
         # create new hdf5 file to hold corrected read events
@@ -397,14 +400,17 @@ def resquiggle_read(
             base_lens = np.diff(new_segs)
             is_filtered = any(np.percentile(base_lens, pctl) > thresh
                               for pctl, thresh in obs_filter)
-        return th.prep_index_data(
-            fast5_fn, genome_loc, read_start_rel_to_raw, new_segs,
-            corrected_group, read_info.Subgroup, rna, is_filtered)
+
+        mapped_end = genome_loc.Start + len(new_segs) - 1
+        return (genome_loc.Chrom, genome_loc.Strand, th.readData(
+            genome_loc.Start, mapped_end, is_filtered,
+            read_start_rel_to_raw, genome_loc.Strand, fast5_fn,
+            corr_grp + '/' + read_info.Subgroup, rna))
 
     return
 
 def resquiggle_worker(
-        basecalls_q, failed_reads_q, index_q, basecall_group, corrected_group,
+        basecalls_q, failed_reads_q, index_q, basecall_group, corr_grp,
         norm_type, outlier_thresh, timeout, num_cpts_limit, compute_sd,
         pore_model, obs_filter, seg_params):
     num_processed = 0
@@ -434,7 +440,7 @@ def resquiggle_worker(
                     fast5_fn, read_start_rel_to_raw, starts_rel_to_read,
                     norm_type, outlier_thresh, alignVals, fix_read_start,
                     timeout, num_cpts_limit, genome_loc, read_info,
-                    basecall_group, corrected_group, compute_sd,
+                    basecall_group, corr_grp, compute_sd,
                     pore_model, obs_filter, seg_params, skip_index=skip_index)
                 if not skip_index:
                     proc_index_data.append(index_data)
@@ -443,7 +449,7 @@ def resquiggle_worker(
                 #raise
                 try:
                     th.write_error_status(
-                        fast5_fn, corrected_group, read_info.Subgroup, unicode(e))
+                        fast5_fn, corr_grp, read_info.Subgroup, unicode(e))
                 except:
                     pass
                 failed_reads_q.put((
@@ -509,6 +515,10 @@ def fix_all_clipped_bases(batch_align_data, batch_reads_data):
         read_info = th.alignInfo(
             read_id, bc_subgroup, start_clipped_bases, end_clipped_bases,
             num_ins, num_del, num_match, num_mismatch)
+        # print genomic sequence for exact sequence comparison to resquiggle
+        #print('@' + read_id.decode() + '\n' +
+        #      ''.join([str(b) for b in list(zip(*alignVals))[1]
+        #               if b != '-']) + '\n+\n!!!')
 
         clip_fix_align_data.append((fast5_fn, (
             alignVals, genome_loc, starts_rel_to_read,
@@ -543,20 +553,20 @@ def clip_m5_alignment(alignVals, start, strand, chrm):
         alignVals = alignVals[:-1*end_clipped_align_bases]
 
     if strand == '+' and start_clipped_genome_bases > 0:
-        genome_loc = th.genomeLoc(
+        genome_loc = th.genomeLocation(
             start + start_clipped_genome_bases, '+', chrm)
     elif strand == '-' and end_clipped_genome_bases > 0:
-        genome_loc = th.genomeLoc(
+        genome_loc = th.genomeLocation(
             start + end_clipped_genome_bases, '-', chrm)
     else:
-        genome_loc = th.genomeLoc(start, strand, chrm)
+        genome_loc = th.genomeLocation(start, strand, chrm)
 
     return alignVals, start_clipped_read_bases, \
         end_clipped_read_bases, genome_loc
 
 def parse_m5_record(r_m5_record):
     if r_m5_record['tStrand'] != '+':
-        raise NotImplementedError(
+        raise th.TomboError(
             'Mapping indicates negative strand reference mapping.')
 
     if r_m5_record['qStrand'] == "+":
@@ -609,7 +619,7 @@ def parse_sam_record(r_sam_record, genome_index):
             (int(reg_len), reg_type) for reg_len, reg_type in
             CIGAR_PAT.findall(r_sam_record['cigar'])]
         if len(cigar) < 1:
-            raise NotImplementedError('Invalid cigar string produced.')
+            raise th.TomboError('Invalid cigar string produced.')
 
         if strand == '-':
             cigar = cigar[::-1]
@@ -697,7 +707,7 @@ def parse_sam_record(r_sam_record, genome_index):
         qSeq, start_clipped_bases, end_clipped_bases, cigar, strand)
     alignVals = get_align_vals(tSeq, qSeq, cigar, strand)
 
-    return (alignVals, th.genomeLoc(
+    return (alignVals, th.genomeLocation(
         int(r_sam_record['pos']) - 1, strand, r_sam_record['rName']),
             start_clipped_bases, end_clipped_bases)
 
@@ -732,7 +742,7 @@ def parse_sam_output(align_output, batch_reads_data, genome_index):
                     r_sam_record, genome_index)
             except Exception as e:
                 # uncomment to identify mysterious errors
-                raise
+                #raise
                 batch_align_failed_reads.append((unicode(e), read_fn_sg))
 
     return batch_align_failed_reads, batch_align_data
@@ -783,7 +793,7 @@ def align_to_genome(batch_reads_data, genome_fn, mapper_data, genome_index,
                 genome_fn, read_fp.name, num_align_ps, mapper_data.index)
             stdout_sink = out_fp
         else:
-            raise NotImplementedError('Mapper not supported.')
+            raise th.TomboError('Mapper not supported.')
 
         try:
             exitStatus = call([mapper_data.exe,] + mapper_options,
@@ -809,7 +819,7 @@ def align_to_genome(batch_reads_data, genome_fn, mapper_data, genome_index,
         batch_parse_failed_reads, batch_align_data = parse_m5_output(
             align_output, batch_reads_data)
     else:
-        raise NotImplementedError('Mapper output type not supported.')
+        raise th.TomboError('Mapper output type not supported.')
 
     clip_fix_align_data = fix_all_clipped_bases(
         batch_align_data, batch_reads_data)
@@ -826,7 +836,7 @@ def fix_stay_states(
     event_change_state = move_states[0]
     while not event_change_state:
         if start_clip >= len(move_states) - 2:
-            raise NotImplementedError(
+            raise th.TomboError(
                 'Read is composed entirely of stay model ' +
                 'states and cannot be processed')
         start_clip += 1
@@ -862,7 +872,7 @@ def get_read_data(fast5_fn, basecall_group, basecall_subgroup):
     try:
         fast5_data = h5py.File(fast5_fn, 'r')
     except:
-        raise NotImplementedError(
+        raise th.TomboError(
             'Error opening file for alignment. This should have ' +
             'been caught during the HDF5 prep phase. Check that there ' +
             'are no other tombo processes or processes accessing ' +
@@ -871,14 +881,14 @@ def get_read_data(fast5_fn, basecall_group, basecall_subgroup):
     try:
         # get albacore version, or if not specified set to 0.0
         albacore_version = LooseVersion(fast5_data[
-            '/Analyses/' + basecall_group].attrs['version']
+            '/Analyses/' + basecall_group].attrs.get('version')
             if 'version' in fast5_data['/Analyses/' +
                                        basecall_group].attrs else "0.0")
         called_dat = fast5_data[
             '/Analyses/' + basecall_group + '/' + basecall_subgroup +
-            '/Events'].value
+            '/Events'][:]
     except:
-        raise NotImplementedError(
+        raise th.TomboError(
             'No events or corrupted events in file. Likely a ' +
             'segmentation error or mis-specified basecall-' +
             'subgroups (--2d?).')
@@ -892,7 +902,7 @@ def get_read_data(fast5_fn, basecall_group, basecall_subgroup):
         channel_info = th.get_channel_info(fast5_data)
         fast5_data.close()
     except:
-        raise NotImplementedError(
+        raise th.TomboError(
             'Error getting channel information and closing fast5 file.')
 
     read_id = raw_attrs['read_id']
@@ -977,10 +987,10 @@ def get_read_data(fast5_fn, basecall_group, basecall_subgroup):
     if any(len(vals) <= 1 for vals in (
         starts_rel_to_read, basecalls,
         called_dat['model_state'])):
-        raise NotImplementedError(
+        raise th.TomboError(
             'One or no segments or signal present in read.')
     if min(np.diff(starts_rel_to_read)) < 1:
-        raise NotImplementedError(
+        raise th.TomboError(
             'Zero length event present in input data.')
 
     # remove stay states from the base caller
@@ -1027,17 +1037,17 @@ def align_and_parse(
 
 def align_reads(
         fast5_batch, genome_fn, mapper_data, genome_index,
-        basecall_group, basecall_subgroups, corrected_group,
+        basecall_group, basecall_subgroups, corr_grp,
         basecalls_q, overwrite, num_align_ps, in_place=True):
     batch_prep_failed_reads = []
     fast5s_to_process = []
     for fast5_fn in fast5_batch:
         prep_result = th.prep_fast5(
-            fast5_fn, corrected_group, overwrite, in_place, basecall_group)
+            fast5_fn, corr_grp, overwrite, in_place, basecall_group)
         if prep_result is None:
             fast5s_to_process.append(fast5_fn)
         else:
-            batch_prep_failed_reads.append(prep_result)
+            batch_prep_failed_reads.append(prep_result[:2])
 
     batch_align_failed_reads, batch_align_data = align_and_parse(
         fast5s_to_process, genome_fn, mapper_data, genome_index,
@@ -1053,7 +1063,7 @@ def align_reads(
 def alignment_worker(
         fast5_q, basecalls_q, failed_reads_q, genome_fn,
         mapper_data, basecall_group, basecall_subgroups,
-        corrected_group, overwrite, num_align_ps):
+        corr_grp, overwrite, num_align_ps):
     # this is only needed for sam output format (not m5)
     genome_index = th.Fasta(genome_fn)
     while not fast5_q.empty():
@@ -1065,7 +1075,7 @@ def alignment_worker(
         batch_failed_reads = align_reads(
             fast5_batch, genome_fn, mapper_data,
             genome_index, basecall_group, basecall_subgroups,
-            corrected_group, basecalls_q, overwrite, num_align_ps)
+            corr_grp, basecalls_q, overwrite, num_align_ps)
         for failed_read in batch_failed_reads:
             try:
                 sg_fn = failed_read[1].split(FASTA_NAME_JOINER)
@@ -1074,7 +1084,7 @@ def alignment_worker(
                 else:
                     subgroup, fast5_fn = None, sg_fn
                 th.write_error_status(
-                    fast5_fn, corrected_group, subgroup, failed_read[0])
+                    fast5_fn, corr_grp, subgroup, failed_read[0])
             except:
                 pass
             failed_reads_q.put(failed_read)
@@ -1092,11 +1102,11 @@ if OPTIMIZE_ALIGN:
 
 def resquiggle_all_reads(
         fast5_fns, genome_fn, mapper_data,
-        basecall_group, basecall_subgroups, corrected_group, norm_type,
+        basecall_group, basecall_subgroups, corr_grp, norm_type,
         outlier_thresh, timeout, num_cpts_limit, overwrite,
         align_batch_size, num_align_ps, align_threads_per_proc,
         num_resquiggle_ps, compute_sd, pore_model, skip_index, obs_filter,
-        seg_params):
+        seg_params, fast5s_dir):
     manager = mp.Manager()
     fast5_q = manager.Queue()
     # set maximum number of parsed basecalls to sit in the middle queue
@@ -1119,7 +1129,7 @@ def resquiggle_all_reads(
     align_args = (
         fast5_q, basecalls_q, failed_reads_q, genome_fn,
         mapper_data, basecall_group, basecall_subgroups,
-        corrected_group, overwrite, align_threads_per_proc)
+        corr_grp, overwrite, align_threads_per_proc)
     align_ps = []
     for p_id in range(num_align_ps):
         p = mp.Process(target=alignment_worker, args=align_args)
@@ -1127,7 +1137,7 @@ def resquiggle_all_reads(
         align_ps.append(p)
 
     rsqgl_args = (basecalls_q, failed_reads_q, index_q, basecall_group,
-                  corrected_group, norm_type, outlier_thresh, timeout,
+                  corr_grp, norm_type, outlier_thresh, timeout,
                   num_cpts_limit, compute_sd, pore_model, obs_filter,
                   seg_params)
     resquiggle_ps = []
@@ -1136,13 +1146,14 @@ def resquiggle_all_reads(
         p.start()
         resquiggle_ps.append(p)
 
-    if VERBOSE: th._status_message(
+    if VERBOSE: th.status_message(
             'Correcting ' + unicode(num_reads) + ' files with ' +
             unicode(len(basecall_subgroups)) + ' subgroup(s)/read(s) ' +
             'each (Will print a dot for each ' + unicode(PROGRESS_INTERVAL) +
             ' reads completed).')
     failed_reads = defaultdict(list)
-    all_index_data = []
+    if index_q is not None:
+        reads_index = th.TomboReads([fast5s_dir,], corr_grp, for_writing=True)
     while any(p.is_alive() for p in align_ps):
         try:
             errorType, fn = failed_reads_q.get(block=False)
@@ -1163,7 +1174,8 @@ def resquiggle_all_reads(
         except queue.Empty:
             try:
                 proc_index_data = index_q.get(block=False)
-                all_index_data.extend(proc_index_data)
+                for index_r_data in proc_index_data:
+                    reads_index.add_read_data(*index_r_data)
             except queue.Empty:
                 sleep(1)
                 continue
@@ -1174,19 +1186,21 @@ def resquiggle_all_reads(
         failed_reads[errorType].append(fn)
     while not index_q.empty():
         proc_index_data = index_q.get(block=False)
-        all_index_data.extend(proc_index_data)
+        for index_r_data in proc_index_data:
+            reads_index.add_read_data(*index_r_data)
 
     # print newline after read progress dots
     if VERBOSE: sys.stderr.write('\n')
+    reads_index.write_index_file()
 
-    return dict(failed_reads), all_index_data
+    return dict(failed_reads)
 
 def check_for_albacore(files, basecall_group, num_reads=50):
     has_albacore = False
     for fast5_fn in np.random.choice(files, num_reads):
         try:
             fast5_data = h5py.File(fast5_fn, 'r')
-            if fast5_data['/Analyses/' + basecall_group].attrs['name'] == \
+            if fast5_data['/Analyses/' + basecall_group].attrs.get('name') == \
                ALBACORE_TEXT:
                 has_albacore = True
                 break
@@ -1194,7 +1208,7 @@ def check_for_albacore(files, basecall_group, num_reads=50):
             continue
 
     if not has_albacore:
-       th._warning_message(
+       th.warning_message(
            'The provided FAST5 files do not ' +
            'appear to contain albacore basecalling events. ' +
            'tombo is only tested on albacore formatted results ' +
@@ -1211,7 +1225,7 @@ def _event_resquiggle_main(args):
     if all(map_exe is None for map_exe in (
             args.minimap2_executable, args.bwa_mem_executable,
             args.graphmap_executable)):
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Must provide either a minimap2, graphmap or ' +
             'bwa-mem executable.')
     if args.minimap2_executable is not None:
@@ -1222,31 +1236,29 @@ def _event_resquiggle_main(args):
     else:
         mapper_data = mapperData(args.graphmap_executable, 'graphmap')
 
-    if VERBOSE: th._status_message('Getting file list.')
+    if VERBOSE: th.status_message('Getting file list.')
     try:
-        if not os.path.isdir(args.fast5_basedir):
-            th._error_message_and_exit(
+        if not os.path.isdir(args.fast5s_basedir):
+            th.error_message_and_exit(
                 'Provided --fast5-basedir is not a directory.')
         fast5_basedir = (
-            args.fast5_basedir if args.fast5_basedir.endswith('/') else
-            args.fast5_basedir + '/')
+            args.fast5s_basedir if args.fast5s_basedir.endswith('/') else
+            args.fast5s_basedir + '/')
         files = th.get_files_list(fast5_basedir)
-        if not args.skip_index:
-            index_fn = th.get_index_fn(fast5_basedir, args.corrected_group)
-            if os.path.exists(index_fn): os.remove(index_fn)
     except OSError:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'Reads base directory, a sub-directory ' +
             'or an old (hidden) index file does not appear to be ' +
             'accessible. Check directory permissions.')
     if len(files) < 1:
-        th._error_message_and_exit(
+        th.error_message_and_exit(
             'No files identified in the specified directory or ' +
             'within immediate subdirectories.')
 
     check_for_albacore(files, args.basecall_group)
 
     outlier_thresh = args.outlier_threshold if (
+        args.outlier_threshold is not None and
         args.outlier_threshold > 0) else None
 
     # resolve processor and thread arguments
@@ -1267,30 +1279,29 @@ def _event_resquiggle_main(args):
     pore_model = None
     if args.normalization_type == 'pA':
         pore_model = ts.TomboModel(
-            args.pore_model_filename, is_text_model=True)
+            args.pore_model_filename, is_text_model=True, minimal_startup=False)
 
     obs_filter = th.parse_obs_filter(args.obs_per_base_filter) \
                  if 'obs_per_base_filter' in args else None
 
-    failed_reads, all_index_data = resquiggle_all_reads(
+    failed_reads = resquiggle_all_reads(
         files, args.reference_fasta, mapper_data,
         args.basecall_group, args.basecall_subgroups,
         args.corrected_group, args.normalization_type, outlier_thresh,
         args.timeout, args.cpts_limit, args.overwrite,
         args.alignment_batch_size, args.align_processes,
         align_threads_per_proc, num_resquiggle_ps, compute_sd,
-        pore_model, args.skip_index, obs_filter, args.segmentation_parameters)
-    if not args.skip_index:
-        th.write_index_file(all_index_data, index_fn, fast5_basedir)
+        pore_model, args.skip_index, obs_filter, args.segmentation_parameters,
+        fast5_basedir)
     fail_summary = [(err, len(fns)) for err, fns in failed_reads.items()]
     if len(fail_summary) > 0:
         total_num_failed = sum(map(itemgetter(1), fail_summary))
-        th._status_message('Failed reads summary (' + unicode(total_num_failed) +
+        th.status_message('Failed reads summary (' + unicode(total_num_failed) +
                          ' total failed):\n' + '\n'.join(
                              "\t" + err + " :\t" + unicode(n_fns)
                              for err, n_fns in sorted(fail_summary)))
     else:
-        th._status_message('All reads successfully re-squiggled!')
+        th.status_message('All reads successfully re-squiggled!')
     if args.failed_reads_filename is not None:
         with io.open(args.failed_reads_filename, 'wt') as fp:
             fp.write('\n'.join((
@@ -1299,11 +1310,6 @@ def _event_resquiggle_main(args):
 
     return
 
-def args_and_main():
-    import _option_parsers
-    event_resquiggle_main(
-        _option_parsers.get_resquiggle_parser().parse_args())
-    return
-
 if __name__ == '__main__':
-    args_and_main()
+    sys.stderr.write('This is a module. See commands with `tombo -h`')
+    sys.exit(1)
