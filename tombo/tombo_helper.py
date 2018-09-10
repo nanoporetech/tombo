@@ -2109,7 +2109,6 @@ def prep_fast5(fast5_fn, corr_grp, overwrite, in_place,
         corr_grp.attrs['tombo_version'] = TOMBO_VERSION
         corr_grp.attrs['basecall_group'] = bc_grp
     except:
-        raise
         return 'Error opening or writing to fast5 file', fast5_fn, True
 
     if return_fp:
