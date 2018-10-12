@@ -90,14 +90,16 @@ _DEBUG_CLIP_START = False
 # fit debug plot requires r cowplot package to be installed
 _DEBUG_FIT = False
 _DEBUG_START_CLIP_FIT = False
+# raw signal re-squiggle DP
+_DEBUG_RAW_DP = False
 
 # don't plot more than one debug type at a time
 assert sum((
     _DEBUG_DP_ENDS, _DEBUG_FIT, _DEBUG_START_CLIP_FIT,
-    _DEBUG_DP_START, _DEBUG_CLIP_START)) <= 1
+    _DEBUG_DP_START, _DEBUG_CLIP_START, _DEBUG_RAW_DP)) <= 1
 _DEBUG_PLOTTING = any((
     _DEBUG_FIT, _DEBUG_START_CLIP_FIT, _DEBUG_DP_ENDS, _DEBUG_DP_START,
-    _DEBUG_CLIP_START))
+    _DEBUG_CLIP_START, _DEBUG_RAW_DP))
 _DRY_RUN = any((
     _DEBUG_PARAMS, _DEBUG_BANDWIDTH, _DEBUG_START_BANDWIDTH, _DEBUG_PLOTTING))
 
@@ -118,6 +120,7 @@ def _write_params_debug(
         '\t'.join(map(str, (
             rsqgl_params.running_stat_width,
             rsqgl_params.min_obs_per_base,
+            rsqgl_params.raw_min_obs_per_base,
             rsqgl_params.mean_obs_per_event,
             rsqgl_params.match_evalue,
             rsqgl_params.skip_pen,
@@ -196,6 +199,54 @@ def _debug_plot_dp(
 
     return
 
+def _debug_raw_dp(z_scores, fwd_pass, read_tb, sig_data, reg_id='0'):
+    reg_id = unicode(reg_id)
+
+    event_poss, seq_poss, r_z_scores, fwd_scores = [], [], [], []
+    for seq_pos, ((s_z_data, (b_e_start, b_e_end)), s_f_data) in enumerate(zip(
+            z_scores, map(itemgetter(0), fwd_pass))):
+        for band_pos, score in enumerate(s_z_data):
+            r_z_scores.append(score)
+            event_poss.append(band_pos + b_e_start)
+            seq_poss.append(seq_pos)
+        for band_pos, score in enumerate(s_f_data):
+            fwd_scores.append(score)
+
+    zDat = r.DataFrame({
+        'Score':r.FloatVector(r_z_scores),
+        'EventPos':r.IntVector(event_poss),
+        'SeqPos':r.IntVector(seq_poss),
+        'Region':r.StrVector([reg_id,] * len(seq_poss))})
+    fwdDat = r.DataFrame({
+        'Score':r.FloatVector(fwd_scores),
+        'EventPos':r.IntVector(event_poss),
+        'SeqPos':r.IntVector(seq_poss),
+        'Region':r.StrVector([reg_id,] * len(seq_poss))})
+
+    event_poss, seq_poss = [0,], [0,]
+    for seq_pos, event_pos in enumerate(read_tb):
+        event_poss.append(event_pos - 1)
+        seq_poss.append(seq_pos)
+        event_poss.append(event_pos)
+        seq_poss.append(seq_pos + 1)
+    event_poss.append(z_scores[-1][1][1] - 1)
+    seq_poss.append(read_tb.shape[0])
+
+    tbDat = r.DataFrame({
+        'EventPos':r.IntVector(event_poss),
+        'SeqPos':r.IntVector(seq_poss),
+        'Region':r.StrVector([reg_id,] * len(seq_poss))})
+
+    sigDat = r.DataFrame({
+        'Pos':r.IntVector(list(range(sig_data.shape[0]))),
+        'Signal':r.FloatVector(sig_data)
+    })
+
+    r.r(resource_string(__name__, 'R_scripts/debugRawDP.R').decode())
+    r.globalenv[str('plotRawDP')](zDat, fwdDat, tbDat, sigDat)
+
+    return
+
 def _debug_fit(
         fwd_pass_move, band_event_starts, top_max_pos, z_scores, reg_id,
         final_score, bandwidth, event_means, r_ref_means,
@@ -270,6 +321,9 @@ def _open_debug_pdf():
     elif _DEBUG_START_CLIP_FIT:
         importr(str('cowplot'))
         r.r('pdf("debug_event_align.start_clip_fit.pdf", width=15, height=5)')
+    elif _DEBUG_RAW_DP:
+        importr(str('cowplot'))
+        r.r('pdf("debug_event_align.raw_dp.pdf", width=11, height=7)')
     else:
         th.error_message_and_exit('Must specify which debug plot to open.')
 
@@ -327,7 +381,6 @@ def raw_traceback(reg_fwd_scores, min_obs_per_base):
     # initilize array to store new segments
     new_segs = np.empty(len(reg_fwd_scores) - 1, dtype=np.int64)
     # get first two bases of data for lookups
-    curr_base_sig = 1
     curr_b_data, _, (curr_start, curr_end) = reg_fwd_scores[-1]
     next_b_data, _, (next_start, next_end) = reg_fwd_scores[-2]
     new_segs[-1] = c_base_traceback(
@@ -379,7 +432,7 @@ def resolve_skipped_bases_with_raw(
         # windows are expanded by one base and the extra signal factor
         # to allow some room to search for best path
         return sig_len <= ((n_events + 1) *
-                           rsqgl_params.min_obs_per_base) * extra_sig_factor
+                           rsqgl_params.raw_min_obs_per_base) * extra_sig_factor
 
     def expand_small_windows(all_del_windows):
         expanded_del_windows = []
@@ -458,14 +511,17 @@ def resolve_skipped_bases_with_raw(
         reg_z_scores = c_reg_z_scores(
             norm_signal[sig_start:sig_end], dp_res.ref_means[start:end],
             dp_res.ref_sds[start:end], pseudo_starts,
-            0, n_events, n_events, rsqgl_params.min_obs_per_base,
+            0, n_events, n_events, rsqgl_params.raw_min_obs_per_base,
             max_half_z_score=rsqgl_params.max_half_z_score)
         reg_fwd_scores = raw_forward_pass(
-            reg_z_scores, rsqgl_params.min_obs_per_base)
+            reg_z_scores, rsqgl_params.raw_min_obs_per_base)
         # perform signal based scoring segmentation
         #  - it is ~60X faster than base space
         reg_segs = raw_traceback(
-            reg_fwd_scores, rsqgl_params.min_obs_per_base) + sig_start
+            reg_fwd_scores, rsqgl_params.raw_min_obs_per_base) + sig_start
+        if _DEBUG_RAW_DP:
+            _debug_raw_dp(reg_z_scores, reg_fwd_scores, reg_segs - sig_start,
+            norm_signal[sig_start:sig_end])
         if reg_segs.shape[0] != end - start - 1:
             raise th.TomboError('Invalid segmentation results.')
         resolved_segs[start+1:end] = reg_segs
@@ -669,7 +725,7 @@ def find_seq_start_in_events(
     if _DEBUG_DP_START:
         _debug_plot_dp(
             start_z_scores, start_fwd_pass, start_band_event_starts,
-            start_fwd_pass_move, top_max_pos, reg_id=reg_id)
+            start_fwd_pass_move, top_max_pos, reg_id=reg_id, short=True)
     if _DEBUG_START_BANDWIDTH:
         _debug_fit(
             start_fwd_pass_move, start_band_event_starts, top_max_pos,
@@ -725,7 +781,7 @@ def find_seq_start_from_clip_basecalls(
     start_genome_seq = genome_seq[
         std_ref.central_pos:num_genome_bases + dnstrm_bases]
     start_seq = start_clip_bases + start_genome_seq
-    r_ref_means, r_ref_sds, _, _ = ts.get_ref_from_seq(start_seq, std_ref)
+    r_ref_means, r_ref_sds = std_ref.get_exp_levels_from_seq(start_seq)
     seq_len = r_ref_means.shape[0]
 
     # now find full sequence to events path using a smaller bandwidth
@@ -893,7 +949,8 @@ def find_adaptive_base_assignment(
         return
 
 
-    # if start clip bases are provided, run better start identification algorithm
+    # if start clip bases are provided, run "cliped bases" start
+    # identification algorithm
     if (start_clip_bases is not None and
         len(genome_seq) > start_clip_params.num_genome_bases):
         if len(start_clip_bases) < std_ref.central_pos:
@@ -907,7 +964,7 @@ def find_adaptive_base_assignment(
                 start_clip_params.num_genome_bases, reg_id=reg_id)
 
     dnstrm_bases = std_ref.kmer_width - std_ref.central_pos - 1
-    r_ref_means, r_ref_sds, _, _ = ts.get_ref_from_seq(genome_seq, std_ref)
+    r_ref_means, r_ref_sds = std_ref.get_exp_levels_from_seq(genome_seq)
     # trim genome seq to match model-able positions
     genome_seq = genome_seq[std_ref.central_pos:-dnstrm_bases]
     seq_len = len(genome_seq)
@@ -998,7 +1055,7 @@ def segment_signal(
     """Normalize and segment raw signal as defined by `rsqgl_params` into `num_events`.
 
     Args:
-        map_res (:class:`tombo.tombo_helper.resquiggleResults`): containing mapping results
+        map_res (:class:`tombo.tombo_helper.resquiggleResults`): containing mapping results only (attributes after ``read_start_rel_to_raw`` will all be ``None``)
         num_events (int): number of events to process
         rsqgl_params (:class:`tombo.tombo_helper.resquiggleParams`): parameters for the re-squiggle algorithm
         outlier_thresh (float): windsorize signal greater than this value (optional)
@@ -1079,7 +1136,7 @@ def resquiggle_read(
         seq_samp_type (:class:`tombo.tombo_helper.seqSampleType`): sequencing sample type (default: DNA)
 
     Returns:
-        :class:`tombo.tombo_helper.resquiggleResults` containing raw signal to genome sequence alignment
+        :class:`tombo.tombo_helper.resquiggleResults` containing raw signal to genome sequence alignment (note that ``raw_signal`` now contains trimmed and normalized raw signal)
     """
     if all_raw_signal is not None:
         map_res = map_res._replace(raw_signal = all_raw_signal)
@@ -1232,7 +1289,7 @@ def map_read(
         q_score_thresh (float): basecalling mean q-score threshold (optional; default: 0/no filtering)
 
     Returns:
-        :class:`tombo.tombo_helper.resquiggleResults` containing valid mapping values
+        :class:`tombo.tombo_helper.resquiggleResults` containing valid mapping values (signal to sequence assignment attributes will be ``None``)
     """
     seq_data = get_read_seq(
         fast5_data, bc_grp, bc_subgrp, seq_samp_type, q_score_thresh)
@@ -1297,8 +1354,8 @@ def map_read(
         genome_seq = genome_seq.decode()
     if strand == '-':
         genome_seq = th.rev_comp(genome_seq)
-    # discordant mapping to sequence extraction is due to reads mapping up to the
-    # end of a seqeunce record (and don't need to carry around record lens),
+    # discordant mapping to sequence extraction is due to reads mapping up to
+    # the end of a seqeunce record (and don't need to carry around record lens),
     # so don't error on these discordant lengths here
     #if len(genome_seq) != ref_end - ref_start + std_ref.kmer_width - 1:
     #    raise th.TomboError('Discordant mapped position and sequence')
@@ -1524,7 +1581,8 @@ if _PROFILE_RSQGL:
 def _io_and_mappy_thread_worker(
         fast5_q, progress_q, failed_reads_q, index_q, bc_grp, bc_subgrps,
         corr_grp, aligner, outlier_thresh, compute_sd, sig_match_thresh,
-        obs_filter, seq_samp_type, overwrite, map_conn, q_score_thresh, std_ref):
+        obs_filter, seq_samp_type, overwrite, map_conn, q_score_thresh,
+        std_ref):
     # increase update interval as more reads are provided
     proc_update_interval = 1
     def update_progress(num_processed, proc_update_interval):
@@ -1576,6 +1634,8 @@ def _io_and_mappy_thread_worker(
                 aligner, seq_samp_type, map_thr_buf, fast5_fn,
                 num_processed, map_conn, outlier_thresh, compute_sd,
                 obs_filter, index_q, q_score_thresh, sig_match_thresh, std_ref)
+        except th.TomboError as e:
+            failed_reads_q.put((str(e), fast5_fn, True))
         finally:
             try:
                 fast5_data.close()
@@ -1603,7 +1663,8 @@ def _get_progress_fail_queues(
                     (None, '') for _ in range(num_errs - len(summ_errs))])
         errs_str = '\n'.join(
             "{:8.1f}% ({:>7} reads)".format(100 * n_fns / float(num_proc),
-                                            n_fns) + " : " + '{:<80}'.format(err)
+                                            n_fns) + " : " + '{:<80}'.format(
+                                                err)
             if (n_fns is not None and num_proc > 0) else
             '     -----' for n_fns, err in summ_errs)
         return '\n'.join((header, errs_str))
@@ -1879,7 +1940,8 @@ def _resquiggle_main(args):
     """Main method for resquiggle
     """
     if args.processes > 1 and _DEBUG_PLOTTING:
-        th.error_message_and_exit('Cannot run multiple processes and debugging.')
+        th.error_message_and_exit(
+            'Cannot run multiple processes and debugging.')
     if _DEBUG_PLOTTING:
         th.warning_message(
             'Producing de-bug plotting output. Can be very slow and should ' +
@@ -1915,7 +1977,8 @@ def _resquiggle_main(args):
 
     if VERBOSE: th.status_message('Loading minimap2 reference.')
     # to be enabled when mappy genome sequence extraction bug is fixed
-    aligner = mappy.Aligner(str(args.reference), preset=str('map-ont'), best_n=1)
+    aligner = mappy.Aligner(
+        str(args.reference), preset=str('map-ont'), best_n=1)
     if not aligner:
         th.error_message_and_exit(
             'Failed to load reference genome FASTA for mapping.')

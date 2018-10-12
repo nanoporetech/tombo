@@ -41,6 +41,8 @@ Plots are also enabled to visualize the different testing frameworks available i
 
 Control these plots with these options: ``--control-fast5-basedirs``, ``--plot-standard-model``, ``--plot-alternate-model 5mC``, ``--tombo-model-filename``, and ``--alternate-model-filename``.
 
+For alternative model plotting (``--plot-alternate-model``), note that, as of v1.5, alternative models are spcified for a specific position within each label. Thus a global alternative model cannot be plotted. As such, the alternative model is only displayed around the central base in each plot and only when applicable (i.e. the cetnral base fits the model motif). So the alternative levels may not appear for some regions when a plot specifies the alternative model option. The alternative model levels should always be plotted when plotting using the ``tombo plot most_significant`` command and specifying the same model used in the ``tombo detect_modifications`` call.
+
 ----
 
 .. figure::  _images/sample_comp.png
@@ -125,24 +127,26 @@ This command identifies a number (defined by ``--num-statistics``) of genomic re
 Other Plotting Commands
 -----------------------
 
-K-mer Level Distributions
-^^^^^^^^^^^^^^^^^^^^^^^^^
+K-mer Signal Levels
+^^^^^^^^^^^^^^^^^^^
 
-In order to investigate the k-mer signal current levels of a particular set of reads, the ``tombo plot kmer`` command is provided. This plot extracts the observed signal levels from a set of reads and groups the signal by the local genomic sequence context (k-mer) and plots the resulting distributions of signal levels.
+In order to investigate the signal levels of a particular set of reads, the ``tombo plot kmer`` command is provided. This plot extracts the observed signal levels from a set of reads and groups the signal by the local genomic sequence context (k-mer) and plots the resulting distributions of signal levels.
 
 ----
 
 .. figure::  _images/kmer_levels.png
    :align: center
 
-   Example k-mer current level distribution plot
+   Example current level distribution plot
 
 ----
 
 ROC Curves
 ^^^^^^^^^^
 
-In order to validate the performance of modified base detection results at a known sequence motif, the ``tombo plot roc`` command is provided. This command takes a Tombo statistics file, corresponding motif descriptions and the genome FASTA file. The "area under the curve" (AUC) for each motif is printed and the precision-recall curve is also plotted for each motif on the second page of the resulting PDF. Note that only genomic positions with the canonical base of interest are included in the results from this command (since the alternative model only makes calls at these positions).
+In order to validate the performance of modified base detection results at a known sequence motif or set of ground truth locations, a set of ground truth evaluation plotting commands are prodived (``roc``, ``sample_compare_roc``, ``per_read_roc``, and ``sample_compare_per_read_roc``). Each of these commands produced both a receiver operating characteristic (ROC) curve as well as a Precision-Recall curve. This command also outputs a table of area under the curve (AUC) and mean average precision (mean AP) for all provided ground truth sets.
+
+For the ``roc`` and ``per_read_roc`` commands ground truth sites are compared to modified base statistics at all other "swap base" sites in the genome. Users should be aware that for more specific motifs the AUC statistic may be somewhat misleading and are not directly comparable from one motif to the next. The ``sample_compare_roc``, and ``sample_compare_per_read_roc`` commands instead use a separate control sample as the ground truth and includes only sites at the ground truth motif. This creates balanced validation metrics that are more comparable between two motifs and/or modifications.
 
 Below is an example command and resulting plot for identifying the known dam and dcm methylase contexts in E. coli using all three provided testing methods.
 
@@ -169,7 +173,7 @@ Below is an example command and resulting plot for identifying the known dam and
 
 ----
 
-It is also possible to compute and plot validation results on a per-read basis from a Tombo per-read statistics file. Along with ROC and precision-recall curves, this command also plots a distribution of test statistics for motif-matching and non-motif-matching sites for each motif provided (see figure below). These plots can be very useful in picking a ``--single-read-threshold`` for use in either the ``detect_modifications`` or ``aggregate_per_read_stats`` commands.
+For the per-read ROC plots, along with ROC and precision-recall curves these commands plot a distribution of test statistics for motif-matching and non-motif-matching sites for each motif provided (see figure below). These plots can be very useful in picking a ``--single-read-threshold`` for use in either the ``detect_modifications`` or ``aggregate_per_read_stats`` commands.
 
 .. code-block:: bash
 

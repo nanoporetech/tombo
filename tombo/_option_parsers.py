@@ -92,6 +92,10 @@ ctrlfast5dir_opt=('--control-fast5-basedirs', {
     'type':unicode, 'nargs':'+',
     'help':'Set of directories containing fast5 files for control reads, ' +
     'containing only canonical nucleotides.'})
+altfast5dir_opt=('--alternate-fast5-basedirs', {
+    'type':unicode, 'nargs':'+',
+    'help':'Set of directories containing fast5 files for alternate set of ' +
+    'reads.'})
 
 corrgrp_opt=('--corrected-group', {
     'type':unicode, 'default':'RawGenomeCorrected_000',
@@ -198,19 +202,55 @@ prstats_opt=('--per-read-statistics-filenames', {
     'type':unicode, 'nargs':'+',
     'help':'Binary files containing per-read statistics from ' +
     'statistical testing.'})
+prctrlstats_opt=('--per-read-control-statistics-filenames', {
+    'type':unicode, 'nargs':'+',
+    'help':'Binary files containing per-read control statistics from ' +
+    'statistical testing.'})
 
 statfns_opt=('--statistics-filenames', {
     'type':unicode, 'nargs':'+',
-    'help':"Files to load base by base statistics."})
-motifdesc_opt=('--motif-descriptions', {
+    'help':"Files to load genomic base anchored statistics."})
+ctrlstatfns_opt=('--control-statistics-filenames', {
+    'type':unicode, 'nargs':'+', 'help':'Files to load genomic base anchored ' +
+    'statistics from a control sample.'})
+validlocs_opt=('--valid-locations-filename', {
+    'type':unicode,
+    'help':"Bed format file containing single base locations of valid sites. " +
+    "Should contain 6 fields including strand. E.g. modified base locations."})
+moddescs_opt=('--modified-locations', {
+    'type':unicode, 'nargs':'+',
+    'help':'Modification description and bed format files containing ' +
+    'single base locations of ground truth modified sites. Bed files should ' +
+    'contain 6 fields including strand. Format descriptions as ' +
+    '"mod_name:locs.bed". Example: "CpG bisulfite":bisulfite_locs.bed'})
+unmodlocs_opt=('--unmodified-locations', {
+    'type':unicode, 'nargs':'+',
+    'help':'Bed format files containing single base locations of ground ' +
+    'truth unmodified sites. Bed files should contain 6 fields including ' +
+    'strand.'})
+motifdesc_opt=('--motif-description', {
+    'type':unicode,
+    'help':'Motif containing alternate-base. All positions with this motif ' +
+    'should be modified (or filtered with [--valid-locations-filename]). ' +
+    'Format descriptions as: "motif:mod_pos". mod_pos indicates the ' +
+    'alternate-base within the motif (1-based index). Example: "CG:1" to ' +
+    'train a CpG methylation model.'})
+motifdescs_opt=('--motif-descriptions', {
     'type':unicode, 'nargs':'+',
     'help':'Ground truth, motif centered, modified base descriptions for ' +
     'computing ROC and PR curves. Each statistics file is associated with ' +
     'a set of motif descriptions. Format descriptions as: "motif:mod_pos:name' +
-    '[::motif2:mod_pos2:name2...]". The mod_pos indicated the modified base ' +
+    '[::motif2:mod_pos2:name2...]". mod_pos indicates the alternate-base ' +
     'within the motif (1-based index). Example: CCWGG:2:"dcm 5mC"::GATC:2:' +
     '"dam 6mA" would assess the performance of a single Tombo statistics ' +
     'file for identification of E. coli dam and dcm methylation.'})
+motifdescsimp_opt=('--motif-descriptions', {
+    'type':unicode, 'nargs':'+',
+    'help':'Ground truth, motif centered, modified base descriptions for ' +
+    'output filtering. Format descriptions as: "motif:mod_pos:name". The ' +
+    'mod_pos indicates the modified base within the motif (1-based index). ' +
+    'Example: CCWGG:2:dcm_5mC GATC:2:dam_6mA would filter output for ' +
+    'identification of E. coli dam and dcm methylation.'})
 
 
 ############################
@@ -335,8 +375,9 @@ dynerr_opt=('--num-most-common-errors', {
 segpars_opt=('--segmentation-parameters', {
     'type':int, 'nargs':len(next(iter(SEG_PARAMS_TABLE.values()))),
     'help':'Specify parameters for segmentation 1) running neighboring ' +
-    'windows width 2) minimum raw observations per genomic base 3) mean raw ' +
-    'observations per event. Sample type defaults: ' +
+    'windows width 2) minimum raw observations per genomic base, 3) raw ' +
+    're-squiggle min obs per base 4) mean raw observations per event. ' +
+    'Sample type defaults: ' +
     ' || '.join((bst + ' : ' + ' '.join(map(str, params)))
                 for bst, params in SEG_PARAMS_TABLE.items())})
 hidsegpars_opt=('--segmentation-parameters', {
@@ -422,6 +463,11 @@ prtovlp_opt=('--include-partial-overlap', {
     'default':False, 'action':'store_true',
     'help':'Include reads that partially overlap the specified region. ' +
     'Default: Only include reads completely contained in a specified region'})
+storepval_opt=('--store-p-value', {
+    'default':False, 'action':'store_true',
+    'help':'Store p-value instead of effect-size statistic. Statistics are ' +
+    'D-statistic (KS-test), deviation from even common language effect size ' +
+    "(u-test), and Cohen's D (t-test)."})
 
 readmean_opt=('--read-mean', {
     'default':False, 'action':'store_true',
@@ -593,11 +639,14 @@ ovplttype_opt=('--overplot-type', {
 ftypes_opt=('--file-types', {
     'type':unicode, 'default':['coverage', ], 'nargs':'+',
     'choices':['coverage', 'valid_coverage', 'fraction', 'dampened_fraction',
-               'signal', 'signal_sd', 'dwell', 'difference'],
+               'signal', 'signal_sd', 'dwell', 'difference', 'statistic'],
     'help':'Data types of genome browser files to produce. Produced coverage ' +
     'files are in bedGraph format, while all other file types  will be in ' +
     'wiggle format (https://genome.ucsc.edu/goldenpath/help/wiggle.html). ' +
     'Default: "coverage"'})
+stype_opt=('--statistic-type', {
+    'type':unicode, 'default':'ks', 'choices':['ks', 'u', 't'],
+    'help':'Type of statistical test to apply. Default: "ks"'})
 
 dna_opt=('--dna', {
     'dest':'seq_sample_type', 'action':'store_const', 'const':DNA_SAMP_TYPE,
@@ -855,7 +904,7 @@ def get_est_ref_parser():
 
 def get_est_alt_ref_parser():
     parser = argparse.ArgumentParser(
-        description='Estimate alternative k-mer reference model for use ' +
+        description='Estimate alternate-base k-mer reference model for use ' +
         'in testing for specific modification types. [--fast5-basedirs] ' +
         'should contain a sample spiked with a single known randomly ' +
         'incorporated base.', add_help=False)
@@ -888,6 +937,39 @@ def get_est_alt_ref_parser():
     io_args.add_argument(densbn_opt[0], **densbn_opt[1])
 
     multi_args = parser.add_argument_group('Multiprocessing Arguments')
+    multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
+
+    fast5_args, misc_args, parser = add_default_args(parser)
+
+    return parser
+
+def get_est_motif_alt_ref_parser():
+    parser = argparse.ArgumentParser(
+        description='Estimate motif-specific alternate-base k-mer reference ' +
+        'model. [--fast5-basedirs] should contain a sample with a specific ' +
+        'alternate-base occuring at a specific motif and ideally only ' +
+        'canonical bases otherwise. These models often perform better than ' +
+        'models trained from samples with random alternate-base incorporation.',
+        add_help=False)
+    req_args = parser.add_argument_group('Required Arguments')
+    req_args.add_argument(atbmod_opt[0], required=True, **atbmod_opt[1])
+    req_args.add_argument(altname_opt[0], required=True, **altname_opt[1])
+    req_args.add_argument(motifdesc_opt[0], required=True, **motifdesc_opt[1])
+    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
+
+    mod_args = parser.add_argument_group(
+        'Modeling Arguments (Should match canoncial model)')
+    mod_args.add_argument(upstrmbs_opt[0], **upstrmbs_opt[1])
+    mod_args.add_argument(dnstrmbs_opt[0], **dnstrmbs_opt[1])
+
+    filt_args = parser.add_argument_group('Filtering Argument')
+    filt_args.add_argument(minkmer_opt[0], default=1, **minkmer_opt[1])
+    filt_args.add_argument(validlocs_opt[0], **validlocs_opt[1])
+    filt_args.add_argument(minreads_opt[0], default=10, **minreads_opt[1])
+    filt_args.add_argument(covthresh_opt[0],  default=100, **covthresh_opt[1])
+
+    multi_args = parser.add_argument_group('Multiprocessing Arguments')
+    multi_args.add_argument(mpreg_opt[0], **mpreg_opt[1])
     multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
 
     fast5_args, misc_args, parser = add_default_args(parser)
@@ -966,8 +1048,8 @@ def get_alt_test_signif_parser():
 def get_samp_comp_test_signif_parser():
     parser = argparse.ArgumentParser(
         description='Test for significant shifts in raw nanopore signal ' +
-        'away from a control/canonical base only sample (usually ' +
-        'PCR for DNA or IVT for RNA).', add_help=False)
+        'from levels estimated from a control/canonical base only sample ' +
+        '(usually PCR for DNA or IVT for RNA).', add_help=False)
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
     req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
@@ -988,6 +1070,34 @@ def get_samp_comp_test_signif_parser():
     test_args.add_argument(cvgdmp_opt[0], **cvgdmp_opt[1])
 
     io_args, multi_args = add_common_testing_args(parser)
+    fast5_args, misc_args, parser = add_default_args(parser)
+
+    return parser
+
+def get_group_comp_test_signif_parser():
+    parser = argparse.ArgumentParser(
+        description='Test for significant shifts in raw nanopore signal ' +
+        'away from a control/canonical base only sample (usually ' +
+        'PCR for DNA or IVT for RNA).', add_help=False)
+    req_args = parser.add_argument_group('Required Argument')
+    req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
+    req_args.add_argument(statbsnm_opt[0], required=True, **statbsnm_opt[1])
+    req_args.add_argument(
+        altfast5dir_opt[0], required=True, **altfast5dir_opt[1])
+
+    test_args = parser.add_argument_group('Significance Test Arguments')
+    test_args.add_argument(fmo_opt[0], **fmo_opt[1])
+    test_args.add_argument(minreads_opt[0], default=50, **minreads_opt[1])
+    test_args.add_argument(stype_opt[0], **stype_opt[1])
+    test_args.add_argument(storepval_opt[0], **storepval_opt[1])
+
+    io_args = parser.add_argument_group('Output Argument')
+    io_args.add_argument(mstsgnf_opt[0], **mstsgnf_opt[1])
+
+    multi_args = parser.add_argument_group('Multiprocessing Arguments')
+    multi_args.add_argument(mpreg_opt[0], **mpreg_opt[1])
+    multi_args.add_argument(proc_opt[0], default=1, **proc_opt[1])
+
     fast5_args, misc_args, parser = add_default_args(parser)
 
     return parser
@@ -1358,13 +1468,41 @@ def get_roc_parser():
         add_help=False)
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(statfns_opt[0], required=True, **statfns_opt[1])
-    req_args.add_argument(motifdesc_opt[0], required=True, **motifdesc_opt[1])
+
+    gt_args = parser.add_argument_group(
+        'Ground Truth Arguments (provide bed files or motifs)')
+    gt_args.add_argument(moddescs_opt[0], **moddescs_opt[1])
+    gt_args.add_argument(unmodlocs_opt[0], **unmodlocs_opt[1])
+    gt_args.add_argument(motifdescs_opt[0], **motifdescs_opt[1])
+    gt_args.add_argument(fasta_opt[0], **fasta_opt[1])
+
+    out_args = parser.add_argument_group('Output Arguments')
+    out_args.add_argument(
+        pdf_opt[0], default=OUTPUT_BASE + '.roc.pdf', **pdf_opt[1])
+
+    limit_args = parser.add_argument_group('Down-sampling Arguments')
+    limit_args.add_argument(allspb_opt[0], **allspb_opt[1])
+    limit_args.add_argument(tsl_opt[0], default=5000000, **tsl_opt[1])
+
+    misc_args, parser = add_misc_args(parser)
+
+    return parser
+
+def get_control_roc_parser():
+    parser = argparse.ArgumentParser(
+        description='Plot ROC curve comparing a control and native sample ' +
+        'at known motif(s).', add_help=False)
+    req_args = parser.add_argument_group('Required Arguments')
+    req_args.add_argument(statfns_opt[0], required=True, **statfns_opt[1])
+    req_args.add_argument(
+        ctrlstatfns_opt[0], required=True, **ctrlstatfns_opt[1])
+    req_args.add_argument(motifdescs_opt[0], required=True, **motifdescs_opt[1])
     req_args.add_argument(fasta_opt[0], required=True, **fasta_opt[1])
 
     out_args = parser.add_argument_group('Output Arguments')
-    out_args.add_argument(pdf_opt[0],
-                          default=OUTPUT_BASE + '.roc.pdf',
-                          **pdf_opt[1])
+    out_args.add_argument(
+        pdf_opt[0], default=OUTPUT_BASE + '.sample_compare.roc.pdf',
+        **pdf_opt[1])
 
     limit_args = parser.add_argument_group('Down-sampling Arguments')
     limit_args.add_argument(allspb_opt[0], **allspb_opt[1])
@@ -1380,8 +1518,13 @@ def get_per_read_roc_parser():
         add_help=False)
     req_args = parser.add_argument_group('Required Argument')
     req_args.add_argument(prstats_opt[0], required=True, **prstats_opt[1])
-    req_args.add_argument(motifdesc_opt[0], required=True, **motifdesc_opt[1])
-    req_args.add_argument(fasta_opt[0], required=True, **fasta_opt[1])
+
+    gt_args = parser.add_argument_group(
+        'Ground Truth Arguments (provide bed files or motifs)')
+    gt_args.add_argument(moddescs_opt[0], **moddescs_opt[1])
+    gt_args.add_argument(unmodlocs_opt[0], **unmodlocs_opt[1])
+    gt_args.add_argument(motifdescs_opt[0], **motifdescs_opt[1])
+    gt_args.add_argument(fasta_opt[0], **fasta_opt[1])
 
     limit_args = parser.add_argument_group('Down-sampling Arguments')
     limit_args.add_argument(spb_opt[0], default=100000, **spb_opt[1])
@@ -1391,6 +1534,30 @@ def get_per_read_roc_parser():
     out_args.add_argument(pdf_opt[0],
                          default=OUTPUT_BASE + '.per_reads_roc.pdf',
                          **pdf_opt[1])
+
+    misc_args, parser = add_misc_args(parser)
+
+    return parser
+
+def get_control_per_read_roc_parser():
+    parser = argparse.ArgumentParser(
+        description='Plot per-read ROC curve comparing a control and ' +
+        'native sample at known motif(s).', add_help=False)
+    req_args = parser.add_argument_group('Required Arguments')
+    req_args.add_argument(prstats_opt[0], required=True, **prstats_opt[1])
+    req_args.add_argument(
+        prctrlstats_opt[0], required=True, **prctrlstats_opt[1])
+    req_args.add_argument(motifdescs_opt[0], required=True, **motifdescs_opt[1])
+    req_args.add_argument(fasta_opt[0], required=True, **fasta_opt[1])
+
+    out_args = parser.add_argument_group('Output Arguments')
+    out_args.add_argument(
+        pdf_opt[0], default=OUTPUT_BASE + '.sample_compare.roc.pdf',
+        **pdf_opt[1])
+
+    limit_args = parser.add_argument_group('Down-sampling Arguments')
+    limit_args.add_argument(allspb_opt[0], **allspb_opt[1])
+    limit_args.add_argument(tsl_opt[0], default=5000000, **tsl_opt[1])
 
     misc_args, parser = add_misc_args(parser)
 
@@ -1441,6 +1608,10 @@ def get_browser_files_parser():
     data_args.add_argument(fast5dir_opt[0], **fast5dir_opt[1])
     data_args.add_argument(ctrlfast5dir_opt[0], **ctrlfast5dir_opt[1])
     data_args.add_argument(statfn_opt[0], **statfn_opt[1])
+
+    motif_args = parser.add_argument_group('Statistic Motif Filter Arguments')
+    motif_args.add_argument(fasta_opt[0], **fasta_opt[1])
+    motif_args.add_argument(motifdescsimp_opt[0], **motifdescsimp_opt[1])
 
     out_args = parser.add_argument_group('Output Arguments')
     out_args.add_argument(brsrfn_opt[0], **brsrfn_opt[1])

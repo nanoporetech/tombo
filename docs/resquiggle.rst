@@ -2,9 +2,9 @@
 Re-squiggle Algorithm
 *********************
 
-The electric current signal level data produced from a nanopore read is referred to as a squiggle. Base calling this squiggle information generally contains some errors compared to a reference sequence. The re-squiggle algorithm defines a new assignment from squiggle to genomic sequence, hence a re-squiggle.
+The electric current signal level data produced from a nanopore read is referred to as a squiggle. Base calling this squiggle information generally contains some errors compared to a reference sequence. The re-squiggle algorithm defines a new assignment from squiggle to reference sequence, hence a re-squiggle.
 
-The re-squiggle algorithm is the basis for the Tombo framework. The re-squiggle algorithm takes as input a read file (in FAST5 format) containing raw signal and associated base calls. The base calls are mapped to a genome or transcriptome reference and then the raw signal is assigned to the genomic sequence based on an expected current level model.
+The re-squiggle algorithm is the basis for the Tombo framework. The re-squiggle algorithm takes as input a read file (in FAST5 format) containing raw signal and associated base calls. The base calls are mapped to a genome or transcriptome reference and then the raw signal is assigned to the reference sequence based on an expected current level model.
 
 **TL;DR**:
 
@@ -13,13 +13,13 @@ The re-squiggle algorithm is the basis for the Tombo framework. The re-squiggle 
 
    - The reference sequence may be previously known or discovered from this sample.
 
-*  Importantly, the reference sequence is assumed to be correct, so polishing to create a personalized genome may improve performance, particularly for samples divergent from the reference or poorly assembled genomes.
+*  Importantly, the reference sequence is assumed to be correct, so polishing to create a personalized reference may improve performance, particularly for a divergent sample or poorly assembled reference.
 *  Raw read FAST5 files must contain basecalls.
 
    -  Add basecalls from a set of FASTQs to raw read files with the ``tombo preprocess annotate_raw_with_fastqs`` command.
-   -  Read files need not contain ``Events`` data (as output with ``fast5`` mode from albacore).
+   -  Read files need *NOT* contain ``Events`` data (as output with ``fast5`` mode from albacore).
 
-*  Tombo currently only supports both DNA and RNA data (including R9.4 and R9.5; 1D and 1D2 data; R9.*.1 chemistries). Other data may produce sub-optimal results (e.g. R7 data).
+*  Tombo currently only supports both DNA and RNA data (including R9.4 and R9.5; 1D and 1D2 data; R9.*.1 chemistries). Other data may produce sub-optimal results (e.g. R9.0 or R7 data).
 *  DNA and RNA reads will be detected automatically and processed accordingly (set explicitly with ``--dna`` or ``--rna``).
 
    -  Tombo does not perform spliced mapping. Thus a transcriptime reference must be passed to the re-squiggle command for RNA samples. For futher details on Tombo RNA processing see the :doc:`rna` section.

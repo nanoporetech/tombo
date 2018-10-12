@@ -130,7 +130,7 @@ plotMotifStats <- function(PlotDat, BaseDat, StatsDat,
               axis.ticks.x=element_blank(),
               axis.title.x=element_blank(),
               panel.grid.minor.y=element_blank()) +
-        ylab('Est. Fraction Modified')))
+        ylab('Fraction Modified or -log10(p-value)')))
     maxWidth <- do.call(grid::unit.pmax,
                         sapply(ps, function(x) x$widths[1:4]))
     ps <- lapply(ps, function(p){

@@ -22,8 +22,10 @@ plotModelComp <- function(sigDat, quantDat, boxDat, eventDat,
                       unique(as.character(eventDat$Region))))
     for(reg_i in regions){
         reg_model_dat <- modelDat[modelDat$Region==reg_i,]
+        reg_has_alt <- FALSE
         if(!is.null(altModelDat)){
-            reg_alt_model_dat <- altModelDat[modelDat$Region==reg_i,]
+            reg_alt_model_dat <- altModelDat[altModelDat$Region==reg_i,]
+            reg_has_alt = nrow(reg_alt_model_dat) > 0
         }
         reg_base_dat <- baseDat[baseDat$Region==reg_i,]
         title <- TitleDat[TitleDat$Region==reg_i,'Title']
@@ -41,7 +43,7 @@ plotModelComp <- function(sigDat, quantDat, boxDat, eventDat,
                                gPos=rep(psDat$Position[1], nDens),
                                Group=rep(psDat$Region[1], nDens))
                 })
-            if(!is.null(altModelDat)){
+            if(reg_has_alt){
                 altModDensDat <- lapply(split(
                     reg_alt_model_dat, paste0(reg_alt_model_dat$Position,
                                               reg_alt_model_dat$Strand)),
@@ -78,7 +80,7 @@ plotModelComp <- function(sigDat, quantDat, boxDat, eventDat,
                 geom_polygon(aes(x=Position, y=Signal, group=gPos),
                              data=normDensDat, fill='black', alpha=0.4,
                              size=0, show.legend=FALSE)
-            if(!is.null(altModelDat)){
+            if(reg_has_alt){
                 altNormDensDat <- do.call(
                     rbind.data.frame,
                     lapply(altModDensDat, function(posDens){

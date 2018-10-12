@@ -70,7 +70,7 @@ def c_reg_z_scores(
     # clip positions from the end of each base
     for idx in range(reg_len):
         base_i = base_range[reg_len - idx - 1]
-        b_sig_end = r_b_starts[min(reg_end - 1, base_i + max_base_shift + 1)]
+        b_sig_end = r_b_starts[min(reg_end, base_i + max_base_shift + 1)]
         # clip observations from the end of a base if there is no
         # possible traceback path through that location
         if (prev_end_set and
@@ -91,8 +91,8 @@ def c_reg_z_scores(
             c_base_z_scores(r_sig[b_sig_start:b_sig_end],
                             r_ref_means[base_i], r_ref_sds[base_i],
                             do_winsorize_z, np_max_half_z_score), (
-                                b_sig_start-r_b_starts[reg_start],
-                                b_sig_end-r_b_starts[reg_start])))
+                                b_sig_start - r_b_starts[reg_start],
+                                b_sig_end - r_b_starts[reg_start])))
 
     return reg_scores
 

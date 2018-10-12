@@ -43,12 +43,17 @@ DWELL_WIG_TYPE = 'dwell'
 POS_SLOT = 'pos'
 FRAC_SLOT = 'frac'
 DFRAC_SLOT = 'damp_frac'
+STAT_SLOT = 'stat'
 VCOV_SLOT = 'valid_cov'
+
 FRAC_WIG_TYPE = 'fraction'
 DFRAC_WIG_TYPE = 'dampened_fraction'
+STAT_WIG_TYPE = 'statistic'
 VCOV_WIG_TYPE = 'valid_coverage'
+
 FRAC_WIG_NAME = 'fraction_modified_reads'
 DFRAC_WIG_NAME = 'dampened_fraction_modified_reads'
+STAT_WIG_NAME = 'statistic'
 VCOV_WIG_NAME = 'valid_coverage'
 
 
@@ -87,77 +92,138 @@ def _write_cs_int_data(wig_fp, chrm, cs_poss, cs_vals):
 
     return
 
-def write_frac_wigs(all_stats, wig_base, do_frac, do_damp, do_valid_cov):
+def write_frac_wigs(
+        all_stats, wig_base, do_frac, do_damp, do_stats, do_vcov, fasta_fn,
+        motif_descs):
     if VERBOSE: th.status_message('Parsing and outputting statistics wiggles.')
-    if do_frac:
-        plus_frac_fp, minus_frac_fp = open_browser_files(
-            wig_base, '', FRAC_WIG_NAME)
-    if do_damp:
-        plus_damp_fp, minus_damp_fp = open_browser_files(
-            wig_base, '', DFRAC_WIG_NAME)
-    if do_valid_cov:
-        plus_vcov_fp, minus_vcov_fp = open_browser_files(
-            wig_base, '', VCOV_WIG_NAME)
+    filter_motifs = not(fasta_fn is None or motif_descs is None)
+    if filter_motifs:
+        genome_index = th.Fasta(fasta_fn)
+        motifs = [
+            motif for motif in th.parse_motif_descs('::'.join(motif_descs))]
+    else:
+        motifs = [(None, ''),]
 
-    (curr_chrm, curr_strand, curr_poss, curr_fracs, curr_damp_fracs,
-     curr_valid_cov) = (None, None, [], [], [], [])
+    if do_frac:
+        frac_fps = dict(
+            kv for _, mod_name in motifs
+            for kv in zip(
+                    (('+', mod_name), ('-', mod_name)),
+                    open_browser_files(wig_base, mod_name, FRAC_WIG_NAME)))
+    if do_damp:
+        damp_fps = dict(
+            kv for _, mod_name in motifs
+            for kv in zip(
+                    (('+', mod_name), ('-', mod_name)),
+                    open_browser_files(wig_base, mod_name, DFRAC_WIG_NAME)))
+    if do_stats:
+        stat_fps = dict(
+            kv for _, mod_name in motifs
+            for kv in zip(
+                    (('+', mod_name), ('-', mod_name)),
+                    open_browser_files(wig_base, mod_name, STAT_WIG_NAME)))
+    if do_vcov:
+        vcov_fps = dict(
+            kv for _, mod_name in motifs
+            for kv in zip(
+                    (('+', mod_name), ('-', mod_name)),
+                    open_browser_files(wig_base, mod_name, VCOV_WIG_NAME)))
+
+
+    def write_cs_stats(
+            curr_chrm, curr_strand, curr_poss,
+            curr_fracs, curr_dampf, curr_stats, curr_vcov):
+        curr_poss = np.concatenate(curr_poss)
+        if do_frac: curr_fracs = np.concatenate(curr_fracs)
+        if do_damp: curr_dampf = np.concatenate(curr_dampf)
+        if do_stats: curr_stats = np.concatenate(curr_stats)
+        if do_vcov: curr_vcov = np.concatenate(curr_vcov)
+
+        if filter_motifs:
+            chrm_seq = genome_index.get_seq(curr_chrm)
+        for motif, mod_name in motifs:
+            if do_frac:
+                frac_fp = frac_fps[(curr_strand, mod_name)]
+                motif_fracs = curr_fracs
+            if do_damp:
+                damp_fp = damp_fps[(curr_strand, mod_name)]
+                motif_damp = curr_dampf
+            if do_stats:
+                stat_fp = stat_fps[(curr_strand, mod_name)]
+                motif_stats = curr_stats
+            if do_vcov:
+                vcov_fp = vcov_fps[(curr_strand, mod_name)]
+                motif_vcov = curr_vcov
+            m_curr_poss = curr_poss
+            if filter_motifs:
+                if curr_strand == '-':
+                    chrm_motif_poss = np.array([
+                        m.start() + motif.motif_len - motif.mod_pos
+                        for m in motif.rev_comp_pat.finditer(chrm_seq)])
+                else:
+                    chrm_motif_poss = np.array([
+                        m.start() + motif.mod_pos - 1
+                        for m in motif.motif_pat.finditer(chrm_seq)])
+                valid_poss = np.isin(
+                    curr_poss, chrm_motif_poss, assume_unique=True)
+                m_curr_poss = curr_poss[valid_poss]
+                if do_frac: motif_fracs = curr_fracs[valid_poss]
+                if do_damp: motif_damp = curr_dampf[valid_poss]
+                if do_stats: motif_stats = curr_stats[valid_poss]
+                if do_vcov: motif_vcov = curr_vcov[valid_poss]
+
+            # write current chrm/strand data
+            if do_frac:
+                _write_cs_data(frac_fp, curr_chrm, m_curr_poss, motif_fracs)
+            if do_damp:
+                _write_cs_data(damp_fp, curr_chrm, m_curr_poss, motif_damp)
+            if do_stats:
+                _write_cs_data(stat_fp, curr_chrm, m_curr_poss, motif_stats)
+            if do_vcov:
+                _write_cs_int_data(vcov_fp, curr_chrm, m_curr_poss, motif_vcov)
+
+        return
+
+
+    (curr_chrm, curr_strand, curr_poss, curr_fracs, curr_dampf, curr_stats,
+     curr_vcov) = (None, None, [], [], [], [], [])
     for chrm, strand, start, end, block_stats in all_stats:
         if chrm != curr_chrm or strand != curr_strand:
             if len(curr_poss) > 0:
-                curr_poss = np.concatenate(curr_poss)
-                # write current chrm/strand data
-                if do_frac:
-                    wig_fp = plus_frac_fp if curr_strand == '+' else minus_frac_fp
-                    _write_cs_data(wig_fp, curr_chrm, curr_poss,
-                                   np.concatenate(curr_fracs))
-                if do_damp:
-                    wig_fp = plus_damp_fp if curr_strand == '+' else minus_damp_fp
-                    _write_cs_data(wig_fp, curr_chrm, curr_poss,
-                                   np.concatenate(curr_damp_fracs))
-                if do_valid_cov:
-                    wig_fp = plus_vcov_fp if curr_strand == '+' else minus_vcov_fp
-                    _write_cs_int_data(wig_fp, curr_chrm, curr_poss,
-                                       np.concatenate(curr_valid_cov))
+                write_cs_stats(
+                    curr_chrm, curr_strand, curr_poss, curr_fracs,
+                    curr_dampf, curr_stats, curr_vcov)
 
             # set new chrm and strand and empty lists
             curr_chrm, curr_strand = chrm, strand
-            curr_poss, curr_fracs, curr_damp_fracs, curr_valid_cov = (
-                [], [], [], [])
+            curr_poss, curr_fracs, curr_dampf, curr_stats, curr_vcov = (
+                [], [], [], [], [])
 
         # store block statistics
         curr_poss.append(block_stats[POS_SLOT])
-        if do_frac:
-            curr_fracs.append(1 - block_stats[FRAC_SLOT])
-        if do_damp:
-            curr_damp_fracs.append(1 - block_stats[DFRAC_SLOT])
-        if do_valid_cov:
-            curr_valid_cov.append(block_stats[VCOV_SLOT])
+        if do_frac: curr_fracs.append(1 - block_stats[FRAC_SLOT])
+        if do_damp: curr_dampf.append(1 - block_stats[DFRAC_SLOT])
+        if do_stats: curr_stats.append(all_stats._stat_transform(block_stats))
+        if do_vcov: curr_vcov.append(block_stats[VCOV_SLOT])
 
     # write last chrm/strand data
     if len(curr_poss) > 0:
-        curr_poss = np.concatenate(curr_poss)
-        if do_frac:
-            wig_fp = plus_frac_fp if curr_strand == '+' else minus_frac_fp
-            _write_cs_data(wig_fp, curr_chrm, curr_poss,
-                           np.concatenate(curr_fracs))
-        if do_damp:
-            wig_fp = plus_damp_fp if curr_strand == '+' else minus_damp_fp
-            _write_cs_data(wig_fp, curr_chrm, curr_poss,
-                           np.concatenate(curr_damp_fracs))
-        if do_valid_cov:
-            wig_fp = plus_vcov_fp if curr_strand == '+' else minus_vcov_fp
-            _write_cs_int_data(wig_fp, curr_chrm, curr_poss,
-                               np.concatenate(curr_valid_cov))
+        write_cs_stats(
+            curr_chrm, curr_strand, curr_poss,
+            curr_fracs, curr_dampf, curr_stats, curr_vcov)
 
     if do_frac:
-        plus_frac_fp.close()
-        minus_frac_fp.close()
+        for wig_fp in frac_fps.values():
+            wig_fp.close()
     if do_damp:
-        plus_damp_fp.close()
-        minus_damp_fp.close()
-    if do_valid_cov:
-        plus_vcov_fp.close()
-        minus_vcov_fp.close()
+        for wig_fp in damp_fps.values():
+            wig_fp.close()
+    if do_stats:
+        for wig_fp in stat_fps.values():
+            wig_fp.close()
+    if do_vcov:
+        for wig_fp in vcov_fps.values():
+            wig_fp.close()
 
     return
 
@@ -255,7 +321,7 @@ def write_cov_wig(reads_index, out_base, group_text):
 
 def write_all_browser_files(
         fast5s_dirs, ctrl_fast5s_dirs, corr_grp, bc_subgrps,
-        stats_fn, wig_base, wig_types):
+        stats_fn, wig_base, wig_types, motif_descs, fasta_fn):
     if fast5s_dirs is not None:
         reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
         if reads_index.is_empty():
@@ -301,13 +367,20 @@ def write_all_browser_files(
             reads_index, chrm_sizes, wig_base, CTRL_NAME,
             DWELL_WIG_TYPE, DWELL_SLOT)
     if any(wig_type in wig_types for wig_type in (
-            FRAC_WIG_TYPE, DFRAC_WIG_TYPE, VCOV_WIG_TYPE)):
+            FRAC_WIG_TYPE, DFRAC_WIG_TYPE, STAT_WIG_TYPE, VCOV_WIG_TYPE)):
         if VERBOSE: th.status_message('Loading statistics from file.')
         all_stats = ts.TomboStats(stats_fn)
-        write_frac_wigs(all_stats, wig_base,
-                        FRAC_WIG_TYPE in wig_types,
-                        DFRAC_WIG_TYPE in wig_types,
-                        VCOV_WIG_TYPE in wig_types)
+        if all_stats.is_model_stats and any((
+                FRAC_WIG_TYPE in wig_types, DFRAC_WIG_TYPE in wig_types,
+                VCOV_WIG_TYPE in wig_types)):
+            th.TomboError('Cannot output fraction, dampened_fraction or ' +
+                          'valid_coverage for LevelStats statistics.')
+        if not all_stats.is_model_stats and STAT_WIG_TYPE in wig_types:
+            th.TomboError('Cannot output stat for ModelStats statistics.')
+        write_frac_wigs(
+            all_stats, wig_base, FRAC_WIG_TYPE in wig_types,
+            DFRAC_WIG_TYPE in wig_types, STAT_WIG_TYPE in wig_types,
+            VCOV_WIG_TYPE in wig_types, motif_descs, fasta_fn)
 
     return
 
@@ -361,7 +434,7 @@ def _browser_files_main(args):
             'Must provide a fast5 basedir to output signal, difference, ' +
             'coverage, signal_sd and/or length browser files.')
     if (any(wig_type in args.file_types for wig_type in (
-            FRAC_WIG_TYPE, DFRAC_WIG_TYPE, VCOV_WIG_TYPE)) and
+            FRAC_WIG_TYPE, DFRAC_WIG_TYPE, STAT_WIG_TYPE, VCOV_WIG_TYPE)) and
         args.statistics_filename is None):
         th.error_message_and_exit(
             'Must provide a statistics filename to output ' +
@@ -380,7 +453,8 @@ def _browser_files_main(args):
     write_all_browser_files(
         args.fast5_basedirs, args.control_fast5_basedirs, args.corrected_group,
         args.basecall_subgroups, args.statistics_filename,
-        args.browser_file_basename, args.file_types)
+        args.browser_file_basename, args.file_types, args.genome_fasta,
+        args.motif_descriptions)
 
     return
 

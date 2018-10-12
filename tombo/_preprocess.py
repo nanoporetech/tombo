@@ -187,7 +187,7 @@ def _get_ann_queues(prog_q, warn_q, num_read_ids, wp_conn):
         elif warn_val == _WARN_IO_VAL:
             if VERBOSE and not been_warned[_WARN_IO_VAL]:
                 bar.write(
-                    _WARN_PREFIX + 'Some read files that could not be accessed.',
+                    _WARN_PREFIX + 'Some read files could not be accessed.',
                     file=sys.stderr)
             been_warned[_WARN_IO_VAL] = True
         elif warn_val == _WARN_MISMATCH_VAL:

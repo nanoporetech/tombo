@@ -4,6 +4,10 @@ Read Filtering Commands
 
 Read filtering commands can be useful to extract the most out out of a set of reads for modified base detection. Read filtering commands effect only the Tombo index file, and so filters can be cleared or applied iteratively without re-running the re-squiggle command. Five filters are currently made available (``genome_locations``, ``raw_signal_matching``, ``q_score``,  ``level_coverage`` and ``stuck``).
 
+.. hint::
+
+    Hint: Save a set of filters for later use by copying the Tombo index file: ``cp path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index save.native.tombo.index``. To re-set to a set of saved filters after applying further filters simply replace the index file: ``cp save.native.tombo.index path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index``.
+
 ---------------------------------
 ``tombo filter genome_locations``
 ---------------------------------

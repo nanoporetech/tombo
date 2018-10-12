@@ -9,7 +9,7 @@ Primarily this includes inspection of per-read modified base detection results a
 
 .. note::
 
-    Effort will be made to maintain this API interface introduced at Tombo version 1.3.1, but major structural changes to the Tombo framework may require changes to some API interface components. Such changes will be noted in github release notes where applicable.
+    Effort will be made to maintain this API interface introduced at Tombo version 1.4, but major structural changes to the Tombo framework may require changes to some API interface components. Such changes will be noted in github release notes where applicable.
 
 -------------------
 Python API Examples

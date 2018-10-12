@@ -333,7 +333,7 @@ def resquiggle_read(
     if seg_params is None:
         seg_params = SEG_PARAMS_TABLE[RNA_SAMP_TYPE] if rna else \
                      SEG_PARAMS_TABLE[RNA_SAMP_TYPE]
-        (running_stat_width, min_obs_per_base, _) = seg_params
+        (running_stat_width, min_obs_per_base, _, _) = seg_params
     else:
         running_stat_width, min_obs_per_base = seg_params
 

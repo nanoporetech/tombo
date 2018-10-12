@@ -17,7 +17,6 @@ import h5py
 import numpy as np
 np.seterr(all='raise')
 
-from tqdm import tqdm
 from time import sleep
 from time import strftime
 from operator import itemgetter
@@ -174,9 +173,9 @@ class scaleValues(namedtuple(
 class resquiggleParams(namedtuple(
         'resquiggleParams',
         ('match_evalue', 'skip_pen', 'bandwidth', 'max_half_z_score',
-         'running_stat_width', 'min_obs_per_base', 'mean_obs_per_event',
-         'z_shift', 'stay_pen', 'use_t_test_seg', 'band_bound_thresh',
-         'start_bw', 'start_save_bw', 'start_n_bases'))):
+         'running_stat_width', 'min_obs_per_base', 'raw_min_obs_per_base',
+         'mean_obs_per_event', 'z_shift', 'stay_pen', 'use_t_test_seg',
+         'band_bound_thresh', 'start_bw', 'start_save_bw', 'start_n_bases'))):
     """Re-squiggle parameters
 
     Args:
@@ -240,7 +239,7 @@ class resquiggleResults(namedtuple(
         genome_loc (:class:`tombo.tombo_helper.genomeLocation`): genome mapping location
         genome_seq (str): mapped genome sequence
         mean_q_score (float): mean basecalling q-score
-        raw_signal (np.array::np.float64): raw signal (optional)
+        raw_signal (np.array::np.float64): raw signal (i.e. un-segmented; signal may be normalized) (optional)
         channel_info (:class:`tombo.tombo_helper.channelInfo`): channel information (optional)
         read_start_rel_to_raw (int): read start within raw signal (optional)
         segs (np.array::np.int64): relative raw signal segment positions (optional)
@@ -311,6 +310,21 @@ class regionStats(namedtuple(
         reg_cov (np.array::np.int64): region read depth
         ctrl_cov (np.array::np.int64): region control sample read depth
         valid_cov (np.array::np.int64): region valid (tested) read depth
+    """
+
+class groupStats(namedtuple(
+        'groupStats', ('reg_stats', 'reg_poss', 'chrm', 'strand',
+                       'start', 'reg_cov', 'ctrl_cov'))):
+    """Region statistics
+
+    Args:
+        reg_stats (np.array::np.float64): statistic for group comparison
+        reg_poss (np.array::np.int64): positions for reported fractions
+        chrm (str): chromosome name
+        strand (str): strand (should be '+' or '-')
+        start (int): 0-based region start
+        reg_cov (np.array::np.int64): region read depth
+        ctrl_cov (np.array::np.int64): region control sample read depth
     """
 
 class seqSampleType(namedtuple(
@@ -458,6 +472,23 @@ def parse_genome_regions(all_regs_text):
 
     return parsed_regs
 
+def parse_locs_file(locs_fn):
+    """Parse BED files containing genomic locations (assumes single base locations, so end coordinate is ignored).
+    """
+    raw_locs = defaultdict(set)
+    with open(locs_fn) as locs_fp:
+        for line in locs_fp:
+            try:
+                chrm, pos, _, _, _, strand = line.split()[:6]
+                # bed specs indicate 0-based start so don't shift here
+                pos = int(pos)
+                raw_locs[(chrm, strand)].add(pos)
+            except:
+                continue
+
+    return dict((cs, np.array(sorted(cs_poss)))
+                for cs, cs_poss in raw_locs.items())
+
 def parse_obs_filter(obs_filter):
     """Parse observations per base formatted filtering
     """
@@ -476,6 +507,22 @@ def parse_obs_filter(obs_filter):
 
     return obs_filter
 
+def get_seq_kmers(seq, kmer_width, rev_strand=False):
+    """Compute expected signal levels for a sequence from a reference model
+
+    Args:
+        seq (str): genomic seqeunce to be converted to expected signal levels
+        kmer_width (int): k-mer width
+        rev_strand (bool): provided sequence is from reverse strand (so flip return order to genome forward direction)
+    """
+    seq_kmers = [seq[i:i + kmer_width]
+                 for i in range(len(seq) - kmer_width + 1)]
+    # get stat lookups from seq on native strand then flip if rev_strand
+    if rev_strand:
+        seq_kmers = seq_kmers[::-1]
+
+    return seq_kmers
+
 class TomboMotif(object):
     """Description of a sequence motif, including potentially modified position
 
@@ -490,22 +537,53 @@ class TomboMotif(object):
 
     .. automethod:: __init__
     """
-    def _parse_motif(self, rev_comp_motif=False):
+    def _parse_motif(self, raw_motif, rev_comp_motif=False):
         conv_motif = ''.join(SINGLE_LETTER_CODE[letter]
-                             for letter in self.raw_motif)
+                             for letter in raw_motif)
         if rev_comp_motif:
             # reverse complement and then flip any group brackets
             conv_motif = rev_comp(conv_motif).translate({
                 ord('['):']', ord(']'):'['})
         return re.compile(conv_motif)
 
+    def _compute_partial_patterns(self):
+        """Compute patterns for partial matches that include the mod_pos
+        at the start, end or within short sequences.
+
+        Key into _partial_pats with:
+            1) whether searching at start, end or within a short sequence
+            2) length of the partial pattern
+
+        Values are compiled partial pattern and mod_pos within pattern.
+        Short patterns are lists.
+        """
+        self._partial_pats = {'start':{}, 'end':{}, 'short':{}}
+        for offset in range(self.mod_pos - 1):
+            self._partial_pats['start'][
+                self.motif_len - offset - 1] = (self._parse_motif(
+                    self.raw_motif[offset + 1:]), self.mod_pos - offset - 1)
+        for offset in range(self.motif_len - self.mod_pos):
+            self._partial_pats['end'][
+                self.motif_len - offset - 1] = (self._parse_motif(
+                    self.raw_motif[:-(offset + 1)]), self.mod_pos)
+        for short_len in range(1, self.motif_len):
+            self._partial_pats['short'][short_len] = [
+                (self._parse_motif(self.raw_motif[offset:offset + short_len]),
+                 self.mod_pos - offset)
+                for offset in range(
+                        max(0, self.mod_pos - short_len),
+                        min(self.motif_len - short_len + 1, self.mod_pos))]
+        return
+
     def __init__(self, raw_motif, mod_pos=None):
         """Parse string motif
 
         Args:
             raw_motif (str): sequence motif. supports IUPAC single letter codes (use T for RNA).
-            mod_pos (int): 0-based position of modified base within the motif
+            mod_pos (int): 1-based position of modified base within the motif
         """
+        # TODO convert mod_pos to 0-based coordinate
+        # (1-based is much more error prone)
         invalid_chars = re.findall(
             '[^' + ''.join(SINGLE_LETTER_CODE) + ']', raw_motif)
         if len(invalid_chars) > 0:
@@ -515,8 +593,8 @@ class TomboMotif(object):
         # basic motif parsing
         self.raw_motif = raw_motif
         self.motif_len = len(raw_motif)
-        self.motif_pat = self._parse_motif()
-        self.rev_comp_pat = self._parse_motif(True)
+        self.motif_pat = self._parse_motif(raw_motif)
+        self.rev_comp_pat = self._parse_motif(raw_motif, True)
 
         self.is_palindrome = self.motif_pat == self.rev_comp_pat
 
@@ -532,6 +610,86 @@ class TomboMotif(object):
                     'Provided modified position is not a single base, which ' +
                     'is likely an error. Specified modified base is one of: ' +
                     ' '.join(SINGLE_LETTER_CODE[self.mod_base][1:-1]))
+            self._compute_partial_patterns()
+
+    def __repr__(self):
+        return '\n'.join(('Raw Motif:\t' + self.raw_motif,
+                          'Mod Position:\t' + str(self.mod_pos),
+                          'Motif Pattern:\t' + str(self.motif_pat),
+                          'Rev Comp Pattern:\t' + str(self.rev_comp_pat)))
+
+    def matches_seq(self, seq):
+        """Does the motif match provided sequence (including mod_pos within seq)?
+
+        Including partial matches at beginning and end that include mod_pos.
+        """
+        # check matches to start of sequence
+        for start_len in range(1, min(len(seq) + 1, self.motif_len)):
+            try:
+                start_pat, start_mod_pos = self._partial_pats[
+                    'start'][start_len]
+            except KeyError:
+                continue
+            if start_pat.match(seq[:start_len]):
+                return True
+
+        # check central sequence overlaps
+        if len(seq) < self.motif_len:
+            for short_pat, mod_pos in self._partial_pats['short'][len(seq)]:
+                if short_pat.match(seq):
+                    return True
+        else:
+            if self.motif_pat.search(seq):
+                return True
+
+        # check end of seq matches
+        for end_len in range(1, min(len(seq) + 1, self.motif_len)):
+            try:
+                end_pat, end_mod_pos = self._partial_pats['end'][end_len]
+            except KeyError:
+                continue
+            if end_pat.match(seq[-end_len:]):
+                return True
+
+        return False
+
+    def find_mod_poss(self, seq):
+        """Find all mod-base positions within the sequence.
+
+        Including partial matches at beginning and end that include mod_pos.
+        """
+        seq_mod_poss = set()
+        # check matches to start of sequence
+        for start_len in range(1, min(len(seq) + 1, self.motif_len)):
+            try:
+                start_pat, start_mod_pos = self._partial_pats[
+                    'start'][start_len]
+            except KeyError:
+                continue
+            if start_pat.match(seq[:start_len]):
+                seq_mod_poss.add(start_mod_pos)
+
+        # check central sequence overlaps
+        if len(seq) < self.motif_len:
+            for short_pat, short_mod_pos in self._partial_pats[
+                    'short'][len(seq)]:
+                if short_pat.match(seq):
+                    seq_mod_poss.add(short_mod_pos)
+        else:
+            for motif_match in self.motif_pat.finditer(seq):
+                seq_mod_poss.add(motif_match.start() + self.mod_pos)
+
+        # check end of seq matches
+        for end_len in range(1, min(len(seq) + 1, self.motif_len)):
+            try:
+                end_pat, end_mod_pos = self._partial_pats['end'][end_len]
+            except KeyError:
+                continue
+            if end_pat.match(seq[-end_len:]):
+                seq_mod_poss.add(len(seq) - end_len + end_mod_pos)
+
+        return sorted(seq_mod_poss)
+
 
 def parse_motif_descs(stat_motif_descs):
     """Parse string motif descriptions as defined by ``tombo plot roc --motif-descriptions``
@@ -612,7 +770,6 @@ class Fasta(object):
         """Load a fasta
 
         Args:
-
             fasta_fn (str): path to fasta file
             dry_run (bool): when pyfaidx is not installed, don't actually read sequence into memory.
             force_in_mem (bool): force genome to be loaded into memory even if pyfaidx is installed allowing on-disk access
@@ -909,7 +1066,7 @@ def get_raw_read_slot(fast5_data):
         The HDF5 group slot containing the raw signal data.
     """
     try:
-        raw_read_slot = list(fast5_data['/Raw/Reads'].values())[0]
+        raw_read_slot = next(iter(fast5_data['/Raw/Reads'].values()))
     except KeyError:
         raise TomboError('Raw data is not found in /Raw/Reads/Read_[read#]')
 
@@ -1163,7 +1320,8 @@ class TomboReads(object):
                 except TomboError:
                     warning_message(
                         'Failed to parse tombo index file for ' + fast5s_dir +
-                        ' directory. Creating index in memory from FAST5 files.')
+                        ' directory. Creating temporary index from ' +
+                        'FAST5 files.')
                     wo_index_dirs.append(fast5s_dir)
             else:
                 if not warn_index:
@@ -1275,6 +1433,36 @@ class TomboReads(object):
                 [cs_cov.shape[0],]])
             cs_cov = cs_cov[cs_cov_starts[:-1]]
             yield chrm, strand, cs_cov, cs_cov_starts
+
+        return
+
+    def iter_cov_regs(
+            self, cov_thresh, region_size=None, ctrl_reads_index=None):
+        """Iterate over regions with coverage greater than or equal to cov_thresh.
+
+        If region_size is provided, regions are rounded to the nearest region_sized windows and only the region start is yielded (e.g. chrm, strand, start). If not provided (chrm, strand, start, end) is yielded.
+        """
+        def round_reg_start(x):
+            return int(region_size * np.floor(x / float(region_size)))
+        def round_reg_end(x):
+            return int(region_size * np.ceil(x / float(region_size)))
+
+
+        for chrm, strand, cov, starts in self.iter_coverage_regions(
+                ctrl_reads_index):
+            curr_reg_start = -1
+            valid_cov = np.where(np.diff(np.concatenate([
+                [False,], np.greater_equal(cov, cov_thresh), [False,]])))[0]
+            for cov_start_i, cov_end_i in zip(valid_cov[:-1], valid_cov[1:]):
+                cov_start, cov_end = starts[cov_start_i], starts[cov_end_i]
+                if region_size is None:
+                    yield chrm, strand, cov_start, cov_end
+                    continue
+                for reg_start in range(round_reg_start(cov_start),
+                                       round_reg_end(cov_end), region_size):
+                    if reg_start != curr_reg_start:
+                        yield chrm, strand, reg_start
+                        curr_reg_start = reg_start
 
         return
 
@@ -2027,6 +2215,7 @@ def get_reads_events(cs_reads):
         # in RAM at one time
         read_means = get_single_slot_genome_centric(r_data, 'norm_mean')
         if read_means is None: continue
+        if read_means.shape[0] != r_data.end - r_data.start: continue
         assert read_means.shape[0] == r_data.end - r_data.start, (
             'Read found with mismatching mapping location and ' +
             'signal information.')
@@ -2084,14 +2273,16 @@ def prep_fast5(fast5_fn, corr_grp, overwrite, in_place,
             analyses_grp = fast5_data['/Analyses']
         except:
             return try_close_prep_err(
-                fast5_data, 'Analysis group not found at root of FAST5')
+                fast5_data,
+                'Base calls not found in FAST5 (see `tombo preprocess`)')
         try:
             # check that the requested basecalls group exsists
             if bc_grp is not None:
                 analyses_grp[bc_grp]
         except:
             return try_close_prep_err(
-                fast5_data, 'Basecall group not found at [--basecall-group]')
+                fast5_data,
+                'Base calls not found in FAST5 (see `tombo preprocess`)')
 
         try:
             corr_grp_ptr = analyses_grp[corr_grp]

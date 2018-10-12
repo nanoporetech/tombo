@@ -38,60 +38,60 @@ Basic tombo installation (python 2.7 and 3.4+ support)
 Quick Start
 ===========
 
-Re-squiggle raw nanopore read files and call 5mC and 6mA sites.
+This quick start guides the steps to perform some common modified base detection analyses using the Tombo command line interface.
 
-Then, for 5mA calls, output genome browser `wiggle format file <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_ and, for 6mA calls, plot raw signal around most significant locations.
+The first step in any Tombo analysis is to re-squiggle (raw signal to reference sequence alignment) raw nanopore reads. This creates an index and stores the information necessary to perform downstream analyses.
+
+In this example, an E. coli sample is tested for dam and dcm methylation (CpG model also available for human analysis). Using these results, raw signal is plotted at the most significantly modified dcm positions and the dam modified base predictions are output to a `wiggle <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_ file for use in downstream processing or visualization in a genome browser.
 
 ::
-
-   # skip this step if FAST5 files already contain basecalls
-   tombo preprocess annotate_raw_with_fastqs --fast5-basedir path/to/fast5s/ \
-       --fastq-filenames basecalls1.fastq basecalls2.fastq \
-       --sequencing-summary-filenames seq_summary1.txt seq_summary2.txt \
-       --processes 4
 
    tombo resquiggle path/to/fast5s/ genome.fasta --processes 4 --num-most-common-errors 5
    tombo detect_modifications alternative_model --fast5-basedirs path/to/fast5s/ \
-       --statistics-file-basename sample.alt_modified_base_detection \
-       --per-read-statistics-basename sample.alt_modified_base_detection \
-       --alternate-bases 5mC 6mA --processes 4
+       --statistics-file-basename native.e_coli_sample \
+       --alternate-bases dam dcm --processes 4
 
-   # produces "estimated fraction of modified reads" genome browser files
-   # for 5mC testing
-   tombo text_output browser_files --statistics-filename sample.alt_modified_base_detection.5mC.tombo.stats \
-       --file-types dampened_fraction --browser-file-basename sample.alt_modified_base_detection.5mC
-   # and 6mA testing (along with coverage bedgraphs)
-   tombo text_output browser_files --statistics-filename sample.alt_modified_base_detection.6mA.tombo.stats \
-       --fast5-basedirs path/to/fast5s/  --file-types dampened_fraction coverage \
-       --browser-file-basename sample.alt_modified_base_detection.6mA
-
-   # plot raw signal at most significant 6mA locations
+   # plot raw signal at most significant dcm locations
    tombo plot most_significant --fast5-basedirs path/to/fast5s/ \
-       --statistics-filename sample.alt_modified_base_detection.6mA.tombo.stats \
-       --plot-standard-model --plot-alternate-model 6mA \
-       --pdf-filename sample.most_significant_6mA_sites.pdf
+       --statistics-filename native.e_coli_sample.dcm.tombo.stats \
+       --plot-standard-model --plot-alternate-model dcm \
+       --pdf-filename sample.most_significant_dcm_sites.pdf
 
-Detect any deviations from expected signal levels for canonical bases to investigate any type of modification.
+   # produces wig file with estimated fraction of modified reads at each valid reference site
+   tombo text_output browser_files --statistics-filename native.e_coli_sample.dam.tombo.stats \
+       --file-types dampened_fraction --browser-file-basename native.e_coli_sample.dam
+   # also produce successfully processed reads coverage file for reference
+   tombo text_output browser_files --fast5-basedirs path/to/fast5s/ \
+       --file-types coverage --browser-file-basename native.e_coli_sample
+
+While motif models (``CpG``, ``dcm`` and ``dam``; most accurate) and all-context specific alternate base models (``5mC`` and ``6mA``; more accurate) are preferred, Tombo also allows users to investigate other or even unknown base modifications.
+
+Here are two example commands running the ``de_novo`` method (detect deviations from expected cannonical signal levels) and the ``level_sample_compare`` method (detect deviation in signal levels between two samples of interest; works best with high coverage).
 
 ::
 
-   tombo resquiggle path/to/fast5s/ genome.fasta --processes 4 --num-most-common-errors 5
    tombo detect_modifications de_novo --fast5-basedirs path/to/fast5s/ \
-       --statistics-file-basename sample.de_novo_modified_base_detection \
-       --per-read-statistics-basename sample.de_novo_modified_base_detection \
-       --processes 4
+       --statistics-file-basename sample.de_novo_detect --processes 4
+   tombo text_output browser_files --statistics-filename sample.de_novo_detect.tombo.stats \
+       --browser-file-basename sample.de_novo_detect --file-types dampened_fraction
 
-   # produces "estimated fraction of modified reads" genome browser files from de novo testing
-   tombo text_output browser_files --statistics-filename sample.de_novo_modified_base_detection.tombo.stats \
-       --browser-file-basename sample.de_novo_modified_base_detection --file-types dampened_fraction
+   tombo detect_modifications level_sample_compare --fast5-basedirs path/to/fast5s/ \
+       --control-fast5-basedirs path/to/control/fast5s/ --minimum-test-reads 50 \
+       --processes 4 --statistics-file-basename sample.level_samp_comp_detect
+   tombo text_output browser_files --statistics-filename sample.level_samp_comp_detect.tombo.stats \
+       --browser-file-basename sample.level_samp_comp_detect --file-types statistic
+
+..
+
+   See more complete tutorials on the `documentation page <https://nanoporetech.github.io/tombo/tutorials.html>`_.
 
 ===
 RNA
 ===
 
-All Tombo commands work for RNA data as well, but a transcriptome reference sequence must be provided for spliced transcripts.
+All Tombo commands work for direct RNA nanopore reads as well, but a transcriptome reference sequence must be provided for spliced transcripts.
 
-The reasons for this decision and other tips for processing RNA data within the Tombo framework can be found in the `RNA section <https://nanoporetech.github.io/tombo/rna.html>`_ of the detailed Tombo documentation.
+Tips for processing direct RNA reads within the Tombo framework can be found in the `RNA section <https://nanoporetech.github.io/tombo/rna.html>`_ of the detailed Tombo documentation.
 
 =====================
 Further Documentation
@@ -99,7 +99,7 @@ Further Documentation
 
 Run ``tombo -h`` to see all Tombo command groups and run ``tombo [command-group] -h`` to see all commands within each group.
 
-Detailed documentation for all Tombo commands and algorithms can be found at https://nanoporetech.github.io/tombo/
+Detailed documentation for all Tombo commands and algorithms can be found on the `tombo documentation page <https://nanoporetech.github.io/tombo/>`_.
 
 ========
 Citation

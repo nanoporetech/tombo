@@ -57,10 +57,15 @@ def main(args=None):
              ('alternative_model', 'Test for shifts in raw signal which match ' +
               'those of a specific known non-canonical base.',
               _option_parsers.get_alt_test_signif_parser()),
-             ('sample_compare', 'Test for shifts in raw signal against signal ' +
-              'levels derived from a canonical base only sample (PCR/IVT).',
+             ('model_sample_compare', 'Test for shifts in raw signal ' +
+              'against levels estimated from a canonical/control ' +
+              'sample (PCR/IVT) at each reference position.',
               _option_parsers.get_samp_comp_test_signif_parser()),
-             ('aggregate_per_read_stats','Aggregate Tombo per-read statistics ' +
+             ('level_sample_compare', 'Test for shifts in raw signal against ' +
+              'signal level distributions from a canonical/control sample ' +
+              '(PCR/IVT) at each reference position.',
+              _option_parsers.get_group_comp_test_signif_parser()),
+             ('aggregate_per_read_stats', 'Aggregate Tombo per-read statistics ' +
               'to produce a genomic base statistics file.',
               _option_parsers.get_aggregate_per_read_parser()),
          ]),
@@ -74,39 +79,6 @@ def main(args=None):
              'modified genomic locations.',
              _option_parsers.get_write_signif_diff_parser()),
         ]),
-        ('plot', 'Save plots to visualize raw nanopore signal or ' +
-         'testing results.', [
-            ('max_coverage',
-             'Plot raw signal in regions with maximal coverage.',
-             _option_parsers.get_max_cov_parser()),
-            ('genome_locations',
-             'Plot raw signal at defined genomic locations.',
-             _option_parsers.get_genome_loc_parser()),
-            ('motif_centered',
-             'Plot raw signal at a specific motif.',
-             _option_parsers.get_motif_loc_parser()),
-            ('max_difference',
-             'Plot raw signal where signal differs most between two ' +
-             'read groups.', _option_parsers.get_max_diff_parser()),
-            ('most_significant',
-             'Plot raw signal at most modified locations.',
-             _option_parsers.get_signif_diff_parser()),
-            ('motif_with_stats',
-             'Plot example signal and statistic distributions around a ' +
-             'motif of interst.', _option_parsers.get_signif_motif_parser()),
-            ('per_read',
-             'Plot per-read modified base probabilities.',
-             _option_parsers.get_per_read_parser()),
-            ('roc','Plot ROC curve from known motif(s).',
-             _option_parsers.get_roc_parser()),
-            ('per_read_roc','Plot per-read ROC curve from known motif(s).',
-             _option_parsers.get_per_read_roc_parser()),
-            ('kmer','Plot signal distributions acorss kmers.',
-             _option_parsers.get_kmer_dist_parser()),
-            ('cluster_most_significant',
-             'Clustering traces at bases with most significant stats.',
-             _option_parsers.get_cluster_signif_diff_parser()),
-        ]),
         ('build_model', 'Create canonical and alternative base Tombo models.', [
             ('estimate_reference',
              'Estimate reference tombo model derived from the provided reads.',
@@ -115,6 +87,9 @@ def main(args=None):
              'a sample containing canonical bases spiked with a single ' +
              'non-standard base.',
              _option_parsers.get_est_alt_ref_parser()),
+            ('estimate_motif_alt_reference', 'Estimate alternative tombo ' +
+             'model from a sample containing modified bases within a known ' +
+             'sequence motif.', _option_parsers.get_est_motif_alt_ref_parser()),
             ('estimate_scale', 'Estimate a global scaling parameter from a ' +
              'sub-set of reads.',
              _option_parsers.get_estimate_scale_parser()),
@@ -123,11 +98,60 @@ def main(args=None):
              _option_parsers.get_event_resquiggle_parser()),
         ]),
     ]
+    plot_commands = (
+        'plot', 'Save plots to visualize raw nanopore signal or ' +
+        'testing results.', [
+            ('Genome Location (Standard)',
+             (('max_coverage',
+               'Plot raw signal in regions with maximal coverage.',
+               _option_parsers.get_max_cov_parser()),
+              ('genome_locations',
+               'Plot raw signal at defined genomic locations.',
+               _option_parsers.get_genome_loc_parser()),
+              ('motif_centered',
+               'Plot raw signal at a specific motif.',
+               _option_parsers.get_motif_loc_parser()),
+              ('max_difference',
+               'Plot raw signal where signal differs most between two ' +
+               'read groups.', _option_parsers.get_max_diff_parser()),
+              ('most_significant',
+               'Plot raw signal at most modified locations.',
+               _option_parsers.get_signif_diff_parser()),
+             )),
+            ('Genome Location (Other)', (
+                ('motif_with_stats',
+                 'Plot example signal and statistic distributions around a ' +
+                 'motif of interst.', _option_parsers.get_signif_motif_parser()),
+                ('per_read',
+                 'Plot per-read modified base probabilities.',
+                 _option_parsers.get_per_read_parser()),
+            )),
+            ('Ground Truth Performance Evaluation',
+             (('roc','Plot ROC curve from known motif(s).',
+               _option_parsers.get_roc_parser()),
+              ('sample_compare_roc',
+               'Plot ROC curve comparing two samples at known motif(s).',
+               _option_parsers.get_control_roc_parser()),
+              ('per_read_roc','Plot per-read ROC curve from known motif(s).',
+               _option_parsers.get_per_read_roc_parser()),
+              ('sample_compare_per_read_roc',
+               'Plot per-read ROC curve comparing two samples at known motif(s).',
+               _option_parsers.get_control_per_read_roc_parser()),
+              )),
+            ('Other',
+             (('kmer','Plot signal distributions acorss kmers.',
+               _option_parsers.get_kmer_dist_parser()),
+              ('cluster_most_significant',
+               'Clustering traces at bases with most significant stats.',
+               _option_parsers.get_cluster_signif_diff_parser()))
+            )])
+
 
     desc = ('Tombo command groups (additional help available ' +
             'within each command group):\n' + '\n'.join([
                 '\t{0: <25}{1}'.format(grp_name, grp_help)
-                for grp_name, grp_help, _ in rsqgl_help + nested_commands]))
+                for grp_name, grp_help, _ in rsqgl_help + nested_commands +
+                [plot_commands,]]))
     parser = argparse.ArgumentParser(
         prog='tombo',
         description='********** Tombo *********\n\nTombo is a suite of tools ' +
@@ -161,6 +185,21 @@ def main(args=None):
             title=grp_name, dest="action_command")
         for cmd_name, cmd_help, cmd_parser in grp_sub_cmds:
             subparser_cmd = grp_subparser.add_parser(
+                cmd_name, parents=[cmd_parser,], add_help=False)
+
+    # add plot commands in groups for easier command determination
+    plot_desc = '\n\n'.join([
+        grp + '\n' + '\n'.join([
+            '\t{0: <30}{1}'.format(cmd, cmd_help)
+            for cmd, cmd_help, _ in cmds])
+        for grp, cmds in plot_commands[2]])
+    plot_parser = service_subparsers.add_parser(
+        'plot', formatter_class=SubcommandHelpFormatter, description=plot_desc)
+    plot_subparser = plot_parser.add_subparsers(
+        title='plot', dest="action_command")
+    for grp, cmds in plot_commands[2]:
+        for cmd_name, cmd_help, cmd_parser in cmds:
+            subparser_cmd = plot_subparser.add_parser(
                 cmd_name, parents=[cmd_parser,], add_help=False)
 
     try:
@@ -211,6 +250,8 @@ def main(args=None):
             tombo_stats._est_ref_main(args)
         elif args.action_command == 'estimate_alt_reference':
             tombo_stats._est_alt_ref_main(args)
+        elif args.action_command == 'estimate_motif_alt_reference':
+            tombo_stats._est_motif_alt_ref_main(args)
         elif args.action_command == 'estimate_scale':
             tombo_stats._estimate_scale_main(args)
         else:

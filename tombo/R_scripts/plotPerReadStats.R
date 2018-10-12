@@ -1,5 +1,5 @@
 # set thresholds for plotting tile
-pointMaxReads <- 30
+pointMaxReads <- 40
 pointMaxBases <- 200
 textLim <- 150
 
@@ -36,7 +36,8 @@ plotPerReadStats <- function(StatData, OrdData, baseDat, boxCenter, arePvals){
                 p <- p + geom_tile(aes(x=Position, y=Read, fill=Stats))
             } else {
                 p <- p + geom_point(aes(x=Position, y=Read, fill=Stats),
-                                    stroke=0, color='#969696', size=5, shape=21)
+                                    stroke=0, color='#969696', size=5, shape=21,
+                                    alpha=0.5)
             }
             lhRatioMax <- max(abs(regDat$Stats))
             breaks <- seq(-lhRatioMax, lhRatioMax, length.out=5)

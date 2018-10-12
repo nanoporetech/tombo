@@ -35,8 +35,9 @@ def c_mean_std(np.ndarray[DTYPE_t] values):
         v_var += (values[idx] - v_mean)**2
     return v_mean, sqrt(v_var / v_len)
 
-def c_new_mean_stds(np.ndarray[DTYPE_t] norm_signal not None,
-                    np.ndarray[DTYPE_INT_t] new_segs not None):
+def c_new_mean_stds(
+        np.ndarray[DTYPE_t] norm_signal not None,
+        np.ndarray[DTYPE_INT_t] new_segs not None):
     cdef DTYPE_INT_t n_segs = new_segs.shape[0] - 1
     cdef np.ndarray[DTYPE_t] means_arr = np.empty(n_segs, dtype=DTYPE)
     cdef np.ndarray[DTYPE_t] stds_arr = np.empty(n_segs, dtype=DTYPE)
@@ -55,8 +56,9 @@ def c_new_mean_stds(np.ndarray[DTYPE_t] norm_signal not None,
         stds_arr[idx] = sqrt(curr_var / seg_len)
     return means_arr, stds_arr
 
-def c_new_means(np.ndarray[DTYPE_t] norm_signal not None,
-                np.ndarray[DTYPE_INT_t] new_segs not None):
+def c_new_means(
+        np.ndarray[DTYPE_t] norm_signal not None,
+        np.ndarray[DTYPE_INT_t] new_segs not None):
     cdef DTYPE_INT_t n_segs = new_segs.shape[0] - 1
     cdef np.ndarray[DTYPE_t] means_arr = np.empty(n_segs, dtype=DTYPE)
     cdef DTYPE_t curr_sum
@@ -117,8 +119,9 @@ def c_valid_cpts_w_cap(
 
     return cpts
 
-def c_valid_cpts(np.ndarray[DTYPE_t] raw_signal, DTYPE_INT_t min_base_obs,
-                 DTYPE_INT_t running_stat_width):
+def c_valid_cpts(
+        np.ndarray[DTYPE_t] raw_signal, DTYPE_INT_t min_base_obs,
+        DTYPE_INT_t running_stat_width):
     cdef np.ndarray[DTYPE_t] raw_cumsum = np.cumsum(
         np.concatenate([[0.0], raw_signal]))
     # get difference between all neighboring running_stat_width regions

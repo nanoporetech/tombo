@@ -57,61 +57,7 @@ _PROFILE_PLOT_MAX = False
 #### ROC Curves ####
 ####################
 
-def plot_roc(
-        stats_fns, motif_descs, fasta_fn, pdf_fn, stats_per_block,
-        total_stats_limit):
-    if len(motif_descs) != len(stats_fns):
-        th.error_message_and_exit(
-            'Must provide exactly one set of motif descriptions for ' +
-            'each statistics file.')
-
-    if VERBOSE: th.status_message('Parsing motifs.')
-    motif_descs = [th.parse_motif_descs(stat_motif_descs)
-                   for stat_motif_descs in motif_descs]
-    mod_names = [mod_name for stat_mds in motif_descs
-                 for _, mod_name in stat_mds]
-    if len(mod_names) != len(set(mod_names)):
-        th.error_message_and_exit('Modified base names are not unique.')
-
-    if VERBOSE: th.status_message('Parsing genome.')
-    genome_index = th.Fasta(fasta_fn)
-
-    all_motif_stats = {}
-    all_motif_stats_for_r = {}
-    for stats_fn, stat_motif_descs in zip(stats_fns, motif_descs):
-        if not os.path.isfile(stats_fn):
-            th.warning_message('Statistics file does not exist. Skipping: ' +
-                                stats_fn)
-            continue
-        try:
-            stats = ts.TomboStats(stats_fn)
-        except Exception as e:
-            th.warning_message(
-                'Unexpected error parsing ' + stats_fn + '. Continuing ' +
-                'without processing this file. \n\tError code:\n\t\t' +
-                str(e) + '\n')
-            continue
-        for mod_name, mod_stats in stats.compute_motif_stats(
-                stat_motif_descs, genome_index, stats_per_block,
-                total_stats_limit).items():
-            all_motif_stats[mod_name] = mod_stats
-        stats.close()
-
-        for mod_name, stats in all_motif_stats.items():
-            unzip_stats = list(zip(*stats))
-            all_motif_stats_for_r[mod_name] = r.DataFrame({
-                'stat':r.FloatVector(unzip_stats[0]),
-                'motif_match':r.BoolVector(unzip_stats[1])})
-
-    # python2 rpy2 ListVector can't take unicode keys
-    if sys.version_info[0] < 3:
-        conv_all_motif_stats_for_r = {}
-        for k, v in all_motif_stats_for_r.items():
-            conv_all_motif_stats_for_r[k.encode()] = v
-        all_motif_stats_for_r = conv_all_motif_stats_for_r
-    all_motif_stats_for_r = r.ListVector(all_motif_stats_for_r)
-
-    if VERBOSE: th.status_message('Computing accuracy statistics.')
+def prep_accuracy_rates(all_motif_stats):
     tp_rates, fp_rates, precisions, mod_names_for_r = [], [], [], []
     if VERBOSE:
         sys.stderr.write('      {:<30}{:<6}    {:<6}\n'.format(
@@ -132,6 +78,141 @@ def plot_roc(
         fp_rates.extend(mod_fp_rate)
         precisions.extend(mod_precision)
         mod_names_for_r.extend(repeat(mod_name, len(mod_tp_rate)))
+
+    return tp_rates, fp_rates, precisions, mod_names_for_r
+
+def plot_roc(
+        stats_fns, motif_descs, fasta_fn, mod_locs_fns, unmod_locs_fns,
+        pdf_fn, stats_per_block, total_stats_limit):
+    if motif_descs is None:
+        if mod_locs_fns is None:
+            th.error_message_and_exit(
+                'Must provide either motifs or bed files describing ground ' +
+                'truth modification locations.')
+        if (len(mod_locs_fns) != len(unmod_locs_fns) or
+            len(mod_locs_fns) != len(stats_fns)):
+            th.error_message_and_exit(
+                'Must provide exactly one [--modified-locations] and ' +
+                '[--unmodified-locations] for each statistics file.')
+        ground_truth_info = []
+        for mod_name_fn, unmod_fn in zip(mod_locs_fns, unmod_locs_fns):
+            mod_name, mod_fn  = mod_name_fn.split(':')
+            ground_truth_info.append((
+                th.parse_locs_file(mod_fn), th.parse_locs_file(unmod_fn),
+                mod_name))
+    else:
+        if len(motif_descs) != len(stats_fns):
+            th.error_message_and_exit(
+                'Must provide exactly one set of motif descriptions for ' +
+                'each statistics file.')
+        if VERBOSE: th.status_message('Parsing motifs.')
+        ground_truth_info = [
+            th.parse_motif_descs(stat_motif_descs)
+            for stat_motif_descs in motif_descs]
+        mod_names = [mod_name for stat_motif_descs in ground_truth_info
+                     for _, mod_name in stat_motif_descs]
+        if len(mod_names) != len(set(mod_names)):
+            th.error_message_and_exit('Modified base names are not unique.')
+
+        if VERBOSE: th.status_message('Parsing genome.')
+        genome_index = th.Fasta(fasta_fn)
+
+    all_stats = {}
+    for stats_fn, stat_gt_info in zip(stats_fns, ground_truth_info):
+        if not os.path.isfile(stats_fn):
+            th.warning_message('Statistics file does not exist. Skipping: ' +
+                                stats_fn)
+            continue
+        try:
+            stats = ts.TomboStats(stats_fn)
+        except Exception as e:
+            th.warning_message(
+                'Unexpected error parsing ' + stats_fn + '. Continuing ' +
+                'without processing this file. \n\tError code:\n\t\t' +
+                str(e) + '\n')
+            continue
+        if motif_descs is None:
+            stat_type_stats = stats.compute_ground_truth_stats(
+                stat_gt_info)
+        else:
+            stat_type_stats = stats.compute_motif_stats(
+                stat_gt_info, genome_index, stats_per_block,
+                total_stats_limit)
+        for mod_name, mod_stats in stat_type_stats.items():
+            all_stats[mod_name] = mod_stats
+        stats.close()
+
+    if VERBOSE: th.status_message('Computing accuracy statistics.')
+    tp_rates, fp_rates, precisions, mod_names_for_r = prep_accuracy_rates(
+        all_stats)
+
+    if VERBOSE: th.status_message('Plotting.')
+    rocDat = r.DataFrame({
+        'TP':r.FloatVector(tp_rates),
+        'FP':r.FloatVector(fp_rates),
+        'Precision':r.FloatVector(precisions),
+        'Comparison':r.StrVector(mod_names_for_r)})
+    r.r(resource_string(__name__, 'R_scripts/plotROC.R').decode())
+    r.r('pdf("' + pdf_fn + '", height=4, width=6)')
+    r.globalenv[str('plotROC')](rocDat)
+    r.r('dev.off()')
+
+    return
+
+def plot_ctrl_samp_roc(
+        stats_fns, ctrl_fns, motif_descs, fasta_fn, pdf_fn, stats_per_block,
+        total_stats_limit):
+    if len(motif_descs) != len(stats_fns) and len(stats_fns) != len(ctrl_fns):
+        th.error_message_and_exit(
+            'Must provide exactly one set of motif descriptions and a ' +
+            'control sample for each statistics file.')
+
+    if VERBOSE: th.status_message('Parsing motifs.')
+    motif_descs = [th.parse_motif_descs(stat_motif_descs)
+                   for stat_motif_descs in motif_descs]
+    mod_names = [mod_name for stat_mds in motif_descs
+                 for _, mod_name in stat_mds]
+    if len(mod_names) != len(set(mod_names)):
+        th.error_message_and_exit('Modified base names are not unique.')
+
+    if VERBOSE: th.status_message('Parsing genome.')
+    genome_index = th.Fasta(fasta_fn)
+
+    all_motif_stats = {}
+    for stats_fn, ctrl_fn, stat_motif_descs in zip(
+            stats_fns, ctrl_fns,motif_descs):
+        if not os.path.isfile(stats_fn) or not os.path.isfile(ctrl_fn):
+            th.warning_message(
+                'Statistics file does not exist. Skipping: ' +
+                stats_fn + ' ' +  ctrl_fn)
+            continue
+        try:
+            stats = ts.TomboStats(stats_fn)
+        except Exception as e:
+            th.warning_message(
+                'Unexpected error parsing ' + stats_fn + '. Continuing ' +
+                'without processing this file. \n\tError code:\n\t\t' +
+                str(e) + '\n')
+            continue
+        try:
+            ctrl_stats = ts.TomboStats(ctrl_fn)
+        except Exception as e:
+            th.warning_message(
+                'Unexpected error parsing ' + ctrl_fn + '. Continuing ' +
+                'without processing this file. \n\tError code:\n\t\t' +
+                str(e) + '\n')
+            continue
+
+        for mod_name, mod_stats in stats.compute_ctrl_motif_stats(
+                ctrl_stats, stat_motif_descs, genome_index, stats_per_block,
+                total_stats_limit).items():
+            all_motif_stats[mod_name] = mod_stats
+        stats.close()
+        ctrl_stats.close()
+
+    if VERBOSE: th.status_message('Computing accuracy statistics.')
+    tp_rates, fp_rates, precisions, mod_names_for_r = prep_accuracy_rates(
+        all_motif_stats)
 
     if VERBOSE: th.status_message('Plotting.')
     rocDat = r.DataFrame({
@@ -147,28 +228,44 @@ def plot_roc(
     return
 
 def plot_per_read_roc(
-        pr_stats_fns, motif_descs, fasta_fn, pdf_fn, stats_per_block,
-        total_stats_limit):
-    if len(motif_descs) != len(pr_stats_fns):
-        th.error_message_and_exit(
-            'Must provide exactly one set of motif descriptions for ' +
-            'each statistics file.')
+        pr_stats_fns, motif_descs, fasta_fn, mod_locs_fns, unmod_locs_fns,
+        pdf_fn, stats_per_block, total_stats_limit):
+    if motif_descs is None:
+        if mod_locs_fns is None:
+            th.error_message_and_exit(
+                'Must provide either motifs or bed files describing ground ' +
+                'truth modification locations.')
+        if (len(mod_locs_fns) != len(unmod_locs_fns) or
+            len(mod_locs_fns) != len(pr_stats_fns)):
+            th.error_message_and_exit(
+                'Must provide exactly one [--modified-locations] and ' +
+                '[--unmodified-locations] for each statistics file.')
+        ground_truth_info = []
+        for mod_name_fn, unmod_fn in zip(mod_locs_fns, unmod_locs_fns):
+            mod_name, mod_fn  = mod_name_fn.split(':')
+            ground_truth_info.append((
+                th.parse_locs_file(mod_fn), th.parse_locs_file(unmod_fn),
+                mod_name))
+    else:
+        if len(motif_descs) != len(pr_stats_fns):
+            th.error_message_and_exit(
+                'Must provide exactly one set of motif descriptions for ' +
+                'each statistics file.')
+        if VERBOSE: th.status_message('Parsing motifs.')
+        ground_truth_info = [th.parse_motif_descs(stat_motif_descs)
+                             for stat_motif_descs in motif_descs]
+        mod_names = [mod_name for stat_motif_descs in ground_truth_info
+                     for _, mod_name in stat_motif_descs]
+        if len(mod_names) != len(set(mod_names)):
+            th.error_message_and_exit('Modified base names are not unique.')
 
-    if VERBOSE: th.status_message('Parsing motifs.')
-    motif_descs = [th.parse_motif_descs(stat_motif_descs)
-                   for stat_motif_descs in motif_descs]
-    mod_names = [mod_name for stat_mds in motif_descs
-                 for _, mod_name in stat_mds]
-    if len(mod_names) != len(set(mod_names)):
-        th.error_message_and_exit('Modified base names are not unique.')
-
-    if VERBOSE: th.status_message('Parsing genome.')
-    genome_index = th.Fasta(fasta_fn)
+        if VERBOSE: th.status_message('Parsing genome.')
+        genome_index = th.Fasta(fasta_fn)
 
     if VERBOSE: th.status_message('Extracting per-read statistics.')
-    all_motif_stats = {}
-    all_motif_stats_for_r = {}
-    for pr_stats_fn, stat_motif_descs in zip(pr_stats_fns, motif_descs):
+    all_stats = {}
+    all_stats_for_r = {}
+    for pr_stats_fn, stat_gt_info in zip(pr_stats_fns, ground_truth_info):
         if not os.path.isfile(pr_stats_fn):
             th.warning_message('Statistics file does not exist. Skipping: ' +
                                 pr_stats_fn)
@@ -181,11 +278,101 @@ def plot_per_read_roc(
                 'without processing this file. \n\tError code:\n\t\t' +
                 str(e) + '\n')
             continue
-        for mod_name, mod_stats in pr_stats.compute_motif_stats(
-            stat_motif_descs, genome_index, stats_per_block,
+        if motif_descs is None:
+            stat_type_stats = pr_stats.compute_ground_truth_stats(
+                stat_gt_info)
+        else:
+            stat_type_stats = pr_stats.compute_motif_stats(
+                stat_gt_info, genome_index, stats_per_block,
+                total_stats_limit)
+        for mod_name, mod_stats in stat_type_stats.items():
+            all_stats[mod_name] = mod_stats
+        pr_stats.close()
+
+        for mod_name, stats in all_stats.items():
+            unzip_stats = list(zip(*stats))
+            all_stats_for_r[mod_name] = r.DataFrame({
+                'stat':r.FloatVector(unzip_stats[0]),
+                'motif_match':r.BoolVector(unzip_stats[1])})
+
+    # python2 rpy2 ListVector can't take unicode keys
+    if sys.version_info[0] < 3:
+        conv_all_stats_for_r = {}
+        for k, v in all_stats_for_r.items():
+            conv_all_stats_for_r[k.encode()] = v
+        all_stats_for_r = conv_all_stats_for_r
+    all_stats_for_r = r.ListVector(all_stats_for_r)
+
+    if VERBOSE: th.status_message('Computing accuracy statistics.')
+    tp_rates, fp_rates, precisions, mod_names_for_r = prep_accuracy_rates(
+        all_stats)
+
+    rocDat = r.DataFrame({
+        'TP':r.FloatVector(tp_rates),
+        'FP':r.FloatVector(fp_rates),
+        'Precision':r.FloatVector(precisions),
+        'Comparison':r.StrVector(mod_names_for_r)})
+
+    if VERBOSE: th.status_message('Plotting.')
+    r.r(resource_string(__name__, 'R_scripts/plotROCPerRead.R').decode())
+    r.r('pdf("' + pdf_fn + '", height=4, width=6)')
+    r.globalenv[str('plotROCPerRead')](rocDat, all_stats_for_r)
+    r.r('dev.off()')
+
+    return
+
+def plot_ctrl_samp_per_read_roc(
+        pr_stats_fns, pr_ctrl_fns, motif_descs, fasta_fn, pdf_fn,
+        stats_per_block, total_stats_limit):
+    if (len(motif_descs) != len(pr_stats_fns) and
+        len(pr_stats_fns) != len(pr_ctrl_fns)):
+        th.error_message_and_exit(
+            'Must provide exactly one set of motif descriptions and a ' +
+            'control sample for each statistics file.')
+
+    if VERBOSE: th.status_message('Parsing motifs.')
+    motif_descs = [th.parse_motif_descs(stat_motif_descs)
+                   for stat_motif_descs in motif_descs]
+    mod_names = [mod_name for stat_mds in motif_descs
+                 for _, mod_name in stat_mds]
+    if len(mod_names) != len(set(mod_names)):
+        th.error_message_and_exit('Modified base names are not unique.')
+
+    if VERBOSE: th.status_message('Parsing genome.')
+    genome_index = th.Fasta(fasta_fn)
+
+    all_motif_stats = {}
+    all_motif_stats_for_r = {}
+    for pr_stats_fn, pr_ctrl_fn, stat_motif_descs in zip(
+            pr_stats_fns, pr_ctrl_fns, motif_descs):
+        if not os.path.isfile(pr_stats_fn) or not os.path.isfile(pr_ctrl_fn):
+            th.warning_message(
+                'Per-read statistics files do not exist. Skipping: ' +
+                pr_stats_fn + ' ' +  pr_ctrl_fn)
+            continue
+        try:
+            pr_stats = ts.PerReadStats(pr_stats_fn)
+        except Exception as e:
+            th.warning_message(
+                'Unexpected error parsing ' + pr_stats_fn + '. Continuing ' +
+                'without processing this file. \n\tError code:\n\t\t' +
+                str(e) + '\n')
+            continue
+        try:
+            pr_ctrl_stats = ts.PerReadStats(pr_ctrl_fn)
+        except Exception as e:
+            th.warning_message(
+                'Unexpected error parsing ' + pr_ctrl_fn + '. Continuing ' +
+                'without processing this file. \n\tError code:\n\t\t' +
+                str(e) + '\n')
+            continue
+
+        for mod_name, mod_stats in pr_stats.compute_ctrl_motif_stats(
+                pr_ctrl_stats, stat_motif_descs, genome_index, stats_per_block,
                 total_stats_limit).items():
             all_motif_stats[mod_name] = mod_stats
         pr_stats.close()
+        pr_ctrl_stats.close()
 
         for mod_name, stats in all_motif_stats.items():
             unzip_stats = list(zip(*stats))
@@ -202,40 +389,22 @@ def plot_per_read_roc(
     all_motif_stats_for_r = r.ListVector(all_motif_stats_for_r)
 
     if VERBOSE: th.status_message('Computing accuracy statistics.')
-    tp_rates, fp_rates, precisions, mod_names_for_r = [], [], [], []
-    if VERBOSE:
-        sys.stderr.write('      {:<30}{:<6}    {:<6}\n'.format(
-            'Statistic Type', 'AUC', 'mean AP'))
-        sys.stderr.write('      {:<30}{:<6}    {:<6}\n'.format(
-            '--------------', '---', '-------'))
-    for mod_name, mod_stats in all_motif_stats.items():
-        # extract motif_match (bool) ordered by stat values
-        ordered_mod_tf = list(zip(*sorted(mod_stats)))[1]
-        mod_tp_rate, mod_fp_rate, mod_precision = ts.compute_accuracy_rates(
-            ordered_mod_tf)
-        auc = ts.compute_auc(mod_tp_rate, mod_fp_rate)
-        mean_ap = ts.compute_mean_avg_precison(mod_tp_rate, mod_precision)
-        if VERBOSE:
-            sys.stderr.write('      {:<30}{:6.4f}    {:6.4f}\n'.format(
-                mod_name, auc, mean_ap))
-        tp_rates.extend(mod_tp_rate)
-        fp_rates.extend(mod_fp_rate)
-        precisions.extend(mod_precision)
-        mod_names_for_r.extend(repeat(mod_name, len(mod_tp_rate)))
+    tp_rates, fp_rates, precisions, mod_names_for_r = prep_accuracy_rates(
+        all_motif_stats)
 
+    if VERBOSE: th.status_message('Plotting.')
     rocDat = r.DataFrame({
         'TP':r.FloatVector(tp_rates),
         'FP':r.FloatVector(fp_rates),
         'Precision':r.FloatVector(precisions),
         'Comparison':r.StrVector(mod_names_for_r)})
-
-    if VERBOSE: th.status_message('Plotting.')
     r.r(resource_string(__name__, 'R_scripts/plotROCPerRead.R').decode())
     r.r('pdf("' + pdf_fn + '", height=4, width=6)')
     r.globalenv[str('plotROCPerRead')](rocDat, all_motif_stats_for_r)
     r.r('dev.off()')
 
     return
+
 
 
 ###################################
@@ -582,10 +751,12 @@ def get_r_event_data(
         if reg_plot_sig != 'Density': continue
 
         for strand in ('+', '-'):
-            if sum(r_data.strand == strand
-                   for r_data in reg_data.reads) == 0:
+            strand_reads = [
+                r_data for r_data in reg_data.reads if r_data.strand == strand]
+            if len(strand_reads) == 0:
                 continue
-            reg_events = reg_data.get_base_levels()
+            reg_events = reg_data.copy(include_reads=False).update(
+                reads=strand_reads).get_base_levels()
             for pos, base_read_means in enumerate(reg_events):
                 # skip bases with zero or 1 read as ggplot won't
                 # be able to estimate the density
@@ -732,8 +903,7 @@ def get_r_raw_signal_data(
                     th.warning_message(
                         'Genome resolved raw signal could not be retrieved ' +
                         'for some reads. Ensure that reads have been ' +
-                        're-squiggled and that all data slot corresponding ' +
-                        'accordingly.')
+                        're-squiggled with the specified [--corrected-group].')
                 continue
 
             if not genome_centric and r_data.strand == "-":
@@ -1284,17 +1454,35 @@ def get_reg_kmers(
               std_ref.sds[kmer]) for pos, kmer in enumerate(rev_kmers)
              if not th.invalid_seq(kmer)]))
         # if alternative model is supplied add info
-        if alt_ref is not None:
+        if alt_ref is not None and len(fwd_kmers) >= alt_ref.kmer_width:
+            plot_center = len(fwd_kmers) // 2
+            fwd_kmer_poss = list(zip(
+                fwd_kmers[plot_center - alt_ref.central_pos - 1:
+                          plot_center + alt_ref.kmer_width -
+                          alt_ref.central_pos],
+                range(alt_ref.kmer_width - 1, -1, -1)))
+            reg_fwd_alt_data = [
+                (reg_data.start + (plot_center - pos + alt_ref.central_pos),
+                 alt_ref.means[(kmer, pos)],
+                 alt_ref.sds[(kmer, pos)])
+                for kmer, pos in fwd_kmer_poss] if all(
+                        kmer_pos in alt_ref.means
+                        for kmer_pos in fwd_kmer_poss) else []
+            rev_kmer_poss = list(zip(
+                rev_kmers[plot_center - alt_ref.central_pos - 1:
+                          plot_center + alt_ref.kmer_width -
+                          alt_ref.central_pos],
+                range(alt_ref.kmer_width - 1, -1, -1)))
+            reg_rev_alt_data = [
+                (reg_data.end - (plot_center - pos + alt_ref.central_pos) - 1,
+                 alt_ref.means[(kmer, pos)],
+                 alt_ref.sds[(kmer, pos)])
+                for kmer, pos in rev_kmer_poss] if all(
+                        kmer_pos in alt_ref.means
+                        for kmer_pos in rev_kmer_poss) else []
             all_reg_alt_model_data.append((
                 reg_data.reg_id, reg_data.strand,
-                [(reg_data.start + pos, alt_ref.means[kmer],
-                  alt_ref.sds[kmer])
-                 for pos, kmer in enumerate(fwd_kmers)
-                 if not th.invalid_seq(kmer)],
-                [(reg_data.end - pos - 1, alt_ref.means[kmer],
-                  alt_ref.sds[kmer])
-                 for pos, kmer in enumerate(rev_kmers)
-                 if not th.invalid_seq(kmer)]))
+                reg_fwd_alt_data, reg_rev_alt_data))
 
     return all_reg_model_data, all_reg_alt_model_data
 
@@ -1618,12 +1806,15 @@ def plot_motif_centered(
             if chrm not in covered_chrms: continue
             seq = genome_index.get_seq(chrm)
             for motif_loc in motif.motif_pat.finditer(seq):
-                motif_locs.append((chrm, motif_loc.start(), '+'
-                                   if not motif.is_palindrome else None))
+                motif_locs.append((
+                    chrm, motif_loc.start() + (motif.motif_len // 2) - 1, '+'
+                    if not motif.is_palindrome else None))
             # search over negative strand as well if not palindromic
             if not motif.is_palindrome:
                 for motif_loc in motif.rev_comp_pat.finditer(seq):
-                    motif_locs.append((chrm, motif_loc.start(), '-'))
+                    motif_locs.append((
+                        chrm, motif_loc.start() + (motif.motif_len // 2) - 1,
+                        '-'))
 
         if len(motif_locs) == 0:
             th.error_message_and_exit(
@@ -1861,15 +2052,16 @@ def plot_motif_centered_signif(
     def get_stat_pos(start, chrm, strand):
         # need to handle forward and reverse strand stats separately since
         # reverse strand stats are in reverse order wrt motif
-        reg_pos_fracs = []
+        reg_pos_stats = []
         for pos in range(start, start + plot_width):
-            pos_frac = all_stats.get_pos_frac(chrm, strand, pos)
-            if pos_frac is not None:
-                reg_pos_fracs.append((pos - start if strand == '+' else
-                                      -1 * (pos - start - plot_width + 1),
-                                      pos_frac))
+            pos_stat = all_stats.get_pos_stat(chrm, strand, pos)
+            if pos_stat is not None:
+                reg_pos_stats.append((
+                    pos - start if strand == '+' else
+                    -1 * (pos - start - plot_width + 1),
+                    pos_stat))
 
-        return reg_pos_fracs
+        return reg_pos_stats
 
     if VERBOSE: th.status_message('Getting all regions statistics.')
     stat_locs = [
@@ -2144,21 +2336,44 @@ def plot_main(args):
         kwargs = dict(fasta_opt +
                       [('pdf_fn', args.pdf_filename),
                        ('motif_descs', args.motif_descriptions),
+                       ('mod_locs_fns', args.modified_locations),
+                       ('unmod_locs_fns', args.unmodified_locations),
                        ('stats_fns', args.statistics_filenames),
                        ('stats_per_block', args.statistics_per_block),
                        ('total_stats_limit', args.total_statistics_limit)])
         plot_roc(**kwargs)
+    elif args.action_command == 'sample_compare_roc':
+        kwargs = dict(fasta_opt +
+                      [('pdf_fn', args.pdf_filename),
+                       ('motif_descs', args.motif_descriptions),
+                       ('stats_fns', args.statistics_filenames),
+                       ('ctrl_fns', args.control_statistics_filenames),
+                       ('stats_per_block', args.statistics_per_block),
+                       ('total_stats_limit', args.total_statistics_limit)])
+        plot_ctrl_samp_roc(**kwargs)
     elif args.action_command == 'per_read_roc':
         kwargs = dict(fasta_opt +
                       [('pdf_fn', args.pdf_filename),
                        ('motif_descs', args.motif_descriptions),
+                       ('mod_locs_fns', args.modified_locations),
+                       ('unmod_locs_fns', args.unmodified_locations),
                        ('pr_stats_fns', args.per_read_statistics_filenames),
                        ('stats_per_block', args.statistics_per_block),
                        ('total_stats_limit', args.total_statistics_limit)])
         plot_per_read_roc(**kwargs)
+    elif args.action_command == 'sample_compare_per_read_roc':
+        kwargs = dict(fasta_opt +
+                      [('pdf_fn', args.pdf_filename),
+                       ('motif_descs', args.motif_descriptions),
+                       ('pr_stats_fns', args.per_read_statistics_filenames),
+                       ('pr_ctrl_fns',
+                        args.per_read_control_statistics_filenames),
+                       ('stats_per_block', args.statistics_per_block),
+                       ('total_stats_limit', args.total_statistics_limit)])
+        plot_ctrl_samp_per_read_roc(**kwargs)
     else:
         th.error_message_and_exit('Invalid tombo sub-command entered. ' +
-                                   'Should have been caught by argparse.')
+                                  'Should have been caught by argparse.')
 
     return
 

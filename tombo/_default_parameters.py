@@ -15,6 +15,9 @@ STANDARD_MODELS = {
 ALTERNATE_MODELS = {
     DNA_SAMP_TYPE + '_5mC':'tombo.DNA.5mC.model',
     DNA_SAMP_TYPE + '_6mA':'tombo.DNA.6mA.model',
+    DNA_SAMP_TYPE + '_dcm':'tombo.DNA.dcm.model',
+    DNA_SAMP_TYPE + '_dam':'tombo.DNA.dam.model',
+    DNA_SAMP_TYPE + '_CpG':'tombo.DNA.CpG.model',
     RNA_SAMP_TYPE + '_5mC':'tombo.RNA.5mC.model',
 }
 
@@ -26,10 +29,11 @@ ALTERNATE_MODELS = {
 # table containing default segmentation parameters for different sample types
 #   1) running neighboring window width for segmentation scoring
 #   2) minimum observations per genomic base
-#   3) mean number of observations per event during segmentation
+#   3) raw re-squiggle minimum observations per genomic base
+#   4) mean number of observations per event during segmentation
 SEG_PARAMS_TABLE = {
-    RNA_SAMP_TYPE:(12, 5, 15),
-    DNA_SAMP_TYPE:(5, 3, 5),
+    RNA_SAMP_TYPE:(12, 6, 2, 15),
+    DNA_SAMP_TYPE:(5, 3, 1, 5),
 }
 
 # table containing default signal to sequence assignment parameters
@@ -187,7 +191,7 @@ PHRED_BASE= 33
 NANOPOLISH_CENTRAL_POS = 2
 
 # default values for dampened fraction computations
-COV_DAMP_COUNTS = [2, 0.5]
+COV_DAMP_COUNTS = [2, 0]
 
 # store N arrays during stat computation before re-computing the
 # most significant array
