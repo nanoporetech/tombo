@@ -1155,7 +1155,7 @@ class TomboReads(object):
                 # functions are called from another relative path and
                 # split corr_grp and bc_subgrp for easier filtering
                 index_data[chrm_strand].append((
-                    rd.fn.replace(basedir, ''), rd.start, rd.end,
+                    re.sub(basedir, '', rd.fn, 1), rd.start, rd.end,
                     rd.read_start_rel_to_raw, rd.corr_group.split('/')[0],
                     rd.corr_group.split('/')[-1], rd.filtered, rd.rna,
                     rd.sig_match_score, rd.mean_q_score, rd.read_id))
