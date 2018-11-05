@@ -42,7 +42,7 @@ from ._c_helper import (
     c_new_mean_stds, c_compute_running_pctl_diffs, c_compute_slopes)
 
 from ._default_parameters import (
-    SMALLEST_PVAL, MIN_POSITION_SD, STANDARD_MODELS, ALTERNATE_MODELS,
+    SMALLEST_PVAL, STANDARD_MODELS, ALTERNATE_MODELS,
     MIN_KMER_OBS_TO_EST, ALT_EST_BATCH, MAX_KMER_OBS, NUM_DENS_POINTS,
     LLR_THRESH, SAMP_COMP_THRESH, DE_NOVO_THRESH, KERNEL_DENSITY_RANGE,
     ROC_PLOT_POINTS, NANOPOLISH_CENTRAL_POS, NUM_READS_FOR_SCALE,
@@ -2828,12 +2828,17 @@ class ModelStats(object):
                                  pos_stat['pos'])
             if strand == '+':
                 start, end = pos - before_bases, pos + after_bases + 1
-                if start < 0: continue
-                stat_seq = genome_index.get_seq(chrm, start, end)
+                try:
+                    stat_seq = genome_index.get_seq(chrm, start, end)
+                except th.TomboError:
+                    continue
             else:
                 start, end = pos - after_bases, pos + before_bases + 1
-                if start < 0: continue
-                stat_seq = th.rev_comp(genome_index.get_seq(chrm, start, end))
+                try:
+                    stat_seq = th.rev_comp(genome_index.get_seq(
+                        chrm, start, end))
+                except th.TomboError:
+                    continue
             if include_pos:
                 yield stat_seq, chrm, strand, start, end
             else:
@@ -3650,6 +3655,11 @@ def get_reads_ref(
     # convert coverage to a dict for later lookup
     cov = dict(zip(range(reg_data.start - fm_offset,
                          reg_data.end + fm_offset), cov))
+
+    # mask regions with 0 estimated SD (likely very low coverage)
+    zero_sd_sites = level_sds == 0
+    level_means[zero_sd_sites] = np.NAN
+    level_sds[zero_sd_sites] = np.NAN
 
     return level_means, level_sds, cov
 

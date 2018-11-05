@@ -160,10 +160,6 @@ SMALLEST_PVAL = 1e-50
 # got quantiles from analysis of stability after shift-only normalization
 ROBUST_QUANTS = (46.5, 53.5)
 
-# minimum standard deviation for a genomic position when estimating spread
-# from a sample
-MIN_POSITION_SD = 0.01
-
 # number of points at which to estimate the k-mer siganl densities
 NUM_DENS_POINTS = 500
 

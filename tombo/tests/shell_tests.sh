@@ -223,7 +223,7 @@ tombo detect_modifications de_novo --fast5-basedirs $natDir \
       --per-read-statistics-basename test_stats.de_novo.two_way_thresh
 tombo detect_modifications model_sample_compare --fast5-basedirs $natDir \
       --control-fast5-basedirs $ampDir \
-      --minimum-test-reads 5 --sample-only-estimates \
+      --minimum-test-reads 1 --sample-only-estimates \
       --statistics-file-basename test_stats.2samp \
       --per-read-statistics-basename test_stats.2samp
 tombo detect_modifications model_sample_compare --fast5-basedirs $natDir \
