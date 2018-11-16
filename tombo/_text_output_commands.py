@@ -278,9 +278,10 @@ def write_signal_and_diff_wigs(
                 sig1_fp = plus_sig1_fp if strand == '+' else minus_sig1_fp
                 _write_cs_data(sig1_fp, chrm, cs_poss1, cs_means1)
 
-        if cs_sig_means2 != [] and cs_sig_means2 is not None:
+        if cs_sig_means2 != [] and cs_sig_means2[0] is not None:
             # ocmpute filtered poss since it will be used for either signal
             # diff (or both) outputs
+            cs_sig_means = cs_sig_means2[0]
             cs_poss2, cs_means2 = filter_cs_nans(cs_sig_means2)
             if write_sig:
                 sig2_fp = plus_sig2_fp if strand == '+' else minus_sig2_fp
