@@ -266,7 +266,7 @@ def write_signal_and_diff_wigs(
 
     # iterate over mean signal values for all chrm/strand combinations with
     # coverage in either sample. None returned if one sample is not covered
-    for chrm, strand, cs_sig_means1, cs_sig_means2 in th.iter_mean_slot_values(
+    for chrm, strand, cs_sig_means1, *cs_sig_means2 in th.iter_mean_slot_values(
             reads_index, chrm_sizes, SIG_SLOT, ctrl_reads_index):
         # compute valid positions since it will either be used here for signal
         # output or for diff below
@@ -278,7 +278,7 @@ def write_signal_and_diff_wigs(
                 sig1_fp = plus_sig1_fp if strand == '+' else minus_sig1_fp
                 _write_cs_data(sig1_fp, chrm, cs_poss1, cs_means1)
 
-        if cs_sig_means2 is not None:
+        if cs_sig_means2 != [] and cs_sig_means2 is not None:
             # ocmpute filtered poss since it will be used for either signal
             # diff (or both) outputs
             cs_poss2, cs_means2 = filter_cs_nans(cs_sig_means2)
