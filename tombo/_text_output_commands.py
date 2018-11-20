@@ -237,7 +237,7 @@ def write_slot_mean_wig(
     if VERBOSE: th.status_message(
             'Parsing and outputting ' + group_name + ' ' + wig_type + '.')
     plus_sd_fp, minus_sd_fp = open_browser_files(wig_base, group_name, wig_type)
-    for chrm, strand, cs_vals in th.iter_mean_slot_values(
+    for chrm, strand, cs_vals, _ in th.iter_mean_slot_values(
             reads_index, chrm_sizes, slot_name):
         sd_fp = plus_sd_fp if strand == '+' else minus_sd_fp
         cs_poss, cs_vals = filter_cs_nans(cs_vals)

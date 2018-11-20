@@ -1662,10 +1662,8 @@ def iter_mean_slot_values(
     """Iterate through chromosomes and strands yielding mean slots values over
     all reads at each covered genomic location.
 
-    Generator returns chrmosome, strand, cs_mean_values tuples (3 return values).
-
-    If a second raw_read_coverage object is included another cs_mean_values
-    array is yeilded (4 return values)
+    Generator returns chrmosome, strand, cs_mean_values,
+    cs_ctrl_mean_values tuples (4 return values).
     """
     # ignore divide by zero errors that occur where there is no
     # coverage. Need to correct nan values after subtracting two sets of
@@ -1677,7 +1675,7 @@ def iter_mean_slot_values(
             cs_mean_values = get_mean_slot_genome_centric(
                 reads_index.get_cs_reads(chrm, strand),
                 chrm_sizes[chrm], slot_name)
-            yield chrm, strand, cs_mean_values
+            yield chrm, strand, cs_mean_values, None
         else:
             cs_mean_values, ctrl_cs_mean_values = None, None
             if (chrm, strand) in reads_index:
