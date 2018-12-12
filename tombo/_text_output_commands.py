@@ -361,10 +361,10 @@ def write_all_browser_files(
         write_cov_wig(reads_index, wig_base, group_name)
     if SD_WIG_TYPE in wig_types:
         write_slot_mean_wig(
-            reads_index, chrm_sizes, wig_base, CTRL_NAME, SD_WIG_TYPE, SD_SLOT)
+            reads_index, chrm_sizes, wig_base, group_name, SD_WIG_TYPE, SD_SLOT)
     if DWELL_WIG_TYPE in wig_types:
         write_slot_mean_wig(
-            reads_index, chrm_sizes, wig_base, CTRL_NAME,
+            reads_index, chrm_sizes, wig_base, group_name,
             DWELL_WIG_TYPE, DWELL_SLOT)
     if any(wig_type in wig_types for wig_type in (
             FRAC_WIG_TYPE, DFRAC_WIG_TYPE, STAT_WIG_TYPE, VCOV_WIG_TYPE)):
