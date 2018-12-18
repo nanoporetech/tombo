@@ -4,7 +4,7 @@ RNA Processing
 
 .. important::
 
-   Tombo cannot currently process spliced alignments. Thus processing RNA data requires that a transcriptome (NOT genome) reference provided for organisms with spliced transcription products.
+   Tombo cannot currently process spliced alignments. Thus processing RNA data requires a transcriptome (NOT genome) reference be provided for organisms with spliced transcription products.
 
 Processing RNA data within the Tombo framework requires some extra care. The major item to consider when performing RNA processing is that a transcriptome reference must be supplied as spliced mapping is not supported. The lack of spliced mapping support within the Tombo framework is a conscious decision for identification of modified RNA bases. This is because the transcriptome is the natural setting for the detection of modified RNA bases. When modified RNA bases are projected onto the genome reference any potential transcript isoform-specfic modification information is lost or the signal diluted. Leaving open the potential for isoform-specific modified base detection is one reason for the choice to force mapping modified bases to a transcriptome. Regions at the edge of alternative exons also have divergent expected signal levels and thus genome statistics computed at these positions would be very difficult to process into a logical output. Processing would also be very sensetive to shifts in the mapped splice boundaries which can be variable with nanopore reads.
 

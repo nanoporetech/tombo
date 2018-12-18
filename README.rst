@@ -1,19 +1,36 @@
-=============
-Tombo Summary
-=============
+.. image:: /ONT_logo.png
+  :width: 800
 
-|travis_badge|
+******************
 
-.. |travis_badge| image:: https://travis-ci.org/nanoporetech/tombo.svg?branch=master
-    :target: https://travis-ci.org/nanoporetech/tombo
+Tombo
+"""""
 
-Tombo is a suite of tools primarily for the identification of modified nucleotides from nanopore sequencing data.
+Tombo is a suite of tools primarily for the identification of modified nucleotides from nanopore sequencing data. Tombo also provides tools for the analysis and visualization of raw nanopore signal.
 
-Tombo also provides tools for the analysis and visualization of raw nanopore signal.
+Detailed documentation for all Tombo commands and algorithms can be found on the `tombo documentation page <https://nanoporetech.github.io/tombo/>`_.
 
-============
-Installation
-============
+Features
+--------
+
+- Modified Base Detection
+
+  - Supports both DNA and direct RNA
+
+    - `RNA processing details <https://nanoporetech.github.io/tombo/rna.html>`_
+  - Three detection algorithms support broad range of applications
+
+    - Alternative model (preferred)
+    - Sample comparison
+    - De novo
+- Reference-anchored raw signal vizualization
+- Raw signal analysis python API
+- User-friendly model estimation methods with tutorial
+
+*********************
+
+Getting Started
+"""""""""""""""
 
 |bioconda_badge| |pypi_badge|
 
@@ -23,24 +40,14 @@ Installation
 .. |pypi_badge| image:: https://badge.fury.io/py/ont-tombo.svg
     :target: https://pypi.org/project/ont-tombo/
 
-Basic tombo installation (python 2.7 and 3.4+ support)
+Conda installation (preferred method)
 
 ::
 
-    # install via bioconda environment
+    # install via bioconda environment (https://bioconda.github.io/#set-up-channels)
     conda install -c bioconda ont-tombo
 
-    # or install pip package (numpy install required before tombo for cython optimization)
-    pip install numpy
-    pip install ont-tombo[full]
-
-===========
-Quick Start
-===========
-
-This quick start guides the steps to perform some common modified base detection analyses using the Tombo command line interface.
-
-The first step in any Tombo analysis is to re-squiggle (raw signal to reference sequence alignment) raw nanopore reads. This creates an index and stores the information necessary to perform downstream analyses.
+The first step in any Tombo analysis is to re-squiggle (raw signal to reference sequence alignment) raw nanopore reads. This creates an index and stores the raw signal alignments necessary to perform downstream analyses.
 
 In this example, an E. coli sample is tested for dam and dcm methylation (CpG model also available for human analysis). Using these results, raw signal is plotted at the most significantly modified dcm positions and the dam modified base predictions are output to a `wiggle <https://genome.ucsc.edu/goldenpath/help/wiggle.html>`_ file for use in downstream processing or visualization in a genome browser.
 
@@ -85,41 +92,40 @@ Here are two example commands running the ``de_novo`` method (detect deviations 
 
    See more complete tutorials on the `documentation page <https://nanoporetech.github.io/tombo/tutorials.html>`_.
 
-===
-RNA
-===
+Alternative Installation Methods
+--------------------------------
 
-All Tombo commands work for direct RNA nanopore reads as well, but a transcriptome reference sequence must be provided for spliced transcripts.
+Tombo is available for installation via pip, but requires an R installation as well as R package dependencies (ggplot2 and gridextra) for all visualization functions.
 
-Tips for processing direct RNA reads within the Tombo framework can be found in the `RNA section <https://nanoporetech.github.io/tombo/rna.html>`_ of the detailed Tombo documentation.
+::
 
-=====================
-Further Documentation
-=====================
+   # install pip package (numpy install required before tombo for cython optimization)
+   pip install numpy
+   pip install ont-tombo[full]
 
-Run ``tombo -h`` to see all Tombo command groups and run ``tombo [command-group] -h`` to see all commands within each group.
+Tombo can also be installed directly from source (mostly for development) by running the following commands:
 
-Detailed documentation for all Tombo commands and algorithms can be found on the `tombo documentation page <https://nanoporetech.github.io/tombo/>`_.
+::
 
-========
-Citation
-========
+   git clone https://github.com/nanoporetech/tombo
+   cd tombo
+   pip install -e .
+
+********
+
+Help
+""""
+
+Licence and Copyright
+---------------------
+
+© 2017-18 Oxford Nanopore Technologies Ltd.
+
+Tombo is distributed under the terms of the included MPL2 licence.
+
+References and Supporting Information
+-------------------------------------
 
 Stoiber, M.H. et al. De novo Identification of DNA Modifications Enabled by Genome-Guided Nanopore Signal Processing. bioRxiv (2016).
 
 http://biorxiv.org/content/early/2017/04/10/094672
-
-============
-Known Issues
-============
-
--  The Tombo conda environment (especially with python 2.7) may have installation issues.
-
-   + Tombo works best in python 3.4+, so many problems can be solved by upgrading python.
-   + If installed using conda:
-
-      - Ensure the most recent version of conda is installed (``conda update -n root conda``).
-      - It is recommended to set conda channels as described for `bioconda <https://bioconda.github.io/#set-up-channels>`_.
-      - Run ``conda update --all``.
-   + In python 2.7 there is an issue with the conda scipy.stats package. Down-grading to version 0.17 fixes this issue.
-   + In python 2.7 there is an issue with the conda h5py package. Down-grading to version <=2.7.0 fixes this issue.
