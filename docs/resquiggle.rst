@@ -225,7 +225,7 @@ This functionality requires that the FASTQ seqeunce header lines begin with the 
 
 .. code-block:: bash
 
-    tombo annotate_raw_with_fastqs --fast5-basedir <fast5s-base-directory> --fastq-filenames reads.fastq
+    tombo preprocess annotate_raw_with_fastqs --fast5-basedir <fast5s-base-directory> --fastq-filenames reads.fastq
 
 ---------------------------
 Non-standard Data Locations

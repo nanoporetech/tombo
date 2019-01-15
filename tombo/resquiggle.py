@@ -1931,8 +1931,8 @@ def _parse_files_and_lock_dirs(args):
         th.error_message_and_exit(
             'Reads do not to contain basecalls. Check --basecall-group ' +
             'option if basecalls are stored in non-standard location or ' +
-            'use `tombo annotate_raw_with_fastqs` to add basecalls from ' +
-            'FASTQ files to raw FAST5 files.')
+            'use `tombo preprocess annotate_raw_with_fastqs` to add ' +
+            'basecalls from FASTQ files to raw FAST5 files.')
 
     return files, fast5s_basedir, lock_fns
 
