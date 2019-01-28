@@ -397,6 +397,20 @@ msi_opt=('--max-scaling-iterations', {
     'recommended for highly modified reads. Default: %(default)d'})
 hidmsi_opt=('--max-scaling-iterations', {
     'type':int, 'default':MAX_SCALING_ITERS, 'help':argparse.SUPPRESS})
+sigrng_opt=('--signal-length-range', {
+    'type':int, 'nargs':2, 'help':'Allowed raw signal length range. ' +
+    'Useful when reads with very long signal cause very slow processing or ' +
+    'memory overflow. Reasonable maximum values may be around 500k. ' +
+    'Default: No filtering'})
+hidsigrng_opt=('--signal-length-range', {
+    'type':int, 'nargs':2, 'help':argparse.SUPPRESS})
+seqrng_opt=('--sequence-length-range', {
+    'type':int, 'nargs':2, 'help':'Allowed mapped sequence length range. ' +
+    'Useful when reads with very long signal cause very slow processing or ' +
+    'memory overflow. Reasonable maximum values may be around 50k. ' +
+    'Default: No filtering'})
+hidseqrng_opt=('--sequence-length-range', {
+    'type':int, 'nargs':2, 'help':argparse.SUPPRESS})
 
 
 ###############################
@@ -754,6 +768,8 @@ def get_resquiggle_parser():
     hid_args.add_argument(hidsigapars_opt[0], **hidsigapars_opt[1])
     hid_args.add_argument(hidsss_opt[0], **hidsss_opt[1])
     hid_args.add_argument(hidmsi_opt[0], **hidmsi_opt[1])
+    hid_args.add_argument(hidsigrng_opt[0], **hidsigrng_opt[1])
+    hid_args.add_argument(hidseqrng_opt[0], **hidseqrng_opt[1])
     hid_args.add_argument(hidfitscl_opt[0], **hidfitscl_opt[1])
     hid_args.add_argument(hidfxdscl_opt[0], **hidfxdscl_opt[1])
     hid_args.add_argument(hidotlthresh_opt[0], **hidotlthresh_opt[1])
@@ -775,6 +791,8 @@ def print_advanced_resquiggle():
     hid_args.add_argument(sigapars_opt[0], **sigapars_opt[1])
     hid_args.add_argument(sss_opt[0], **sss_opt[1])
     hid_args.add_argument(msi_opt[0], **msi_opt[1])
+    hid_args.add_argument(sigrng_opt[0], **sigrng_opt[1])
+    hid_args.add_argument(seqrng_opt[0], **seqrng_opt[1])
     hid_args.add_argument(fitscl_opt[0], **fitscl_opt[1])
     hid_args.add_argument(fxdscl_opt[0], **fxdscl_opt[1])
     hid_args.add_argument(otlthresh_opt[0], **otlthresh_opt[1])

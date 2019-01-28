@@ -121,6 +121,14 @@ printf "\n\n********* Testing recursive resquiggle **********\n"
 tombo resquiggle \
       $rcsvDir $genomeFn \
       --processes 8 --overwrite
+
+printf "\n\n********* Testing re-squiggle length filters **********\n"
+tombo resquiggle \
+      $natDir $genomeFn \
+      --corrected-group RawWLengthFilter \
+      --signal-length-range 0 500000 \
+      --sequence-length-range 0 35000 \
+      --processes 8 --overwrite
 fi
 
 printf "\n\n********* Testing filter functions **********\n"

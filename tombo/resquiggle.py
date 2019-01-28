@@ -1275,7 +1275,7 @@ def map_read(
         fast5_data, aligner, std_ref,
         seq_samp_type=th.seqSampleType(DNA_SAMP_TYPE, False),
         bc_grp='Basecall_1D_000', bc_subgrp='BaseCalled_template',
-        map_thr_buf=None, q_score_thresh=0):
+        map_thr_buf=None, q_score_thresh=0, seq_len_rng=None):
     """Extract read sequence from the Fastq slot providing useful error messages
 
     Args:
@@ -1287,6 +1287,7 @@ def map_read(
         bc_subgrp (str): sub-group location containing read information (optional; default: 'BaseCalled_template')
         map_thr_buf (mappy.ThreadBuffer): mappy thread buffer object (optional; default: None)
         q_score_thresh (float): basecalling mean q-score threshold (optional; default: 0/no filtering)
+        seq_len_rng (tuple): allowed mapped sequence length range (optional; default: None/no filtering)
 
     Returns:
         :class:`tombo.tombo_helper.resquiggleResults` containing valid mapping values (signal to sequence assignment attributes will be ``None``)
@@ -1302,6 +1303,10 @@ def map_read(
     # subtract one to put into 0-based index
     ref_start = alignment.r_st
     ref_end = alignment.r_en
+    if not (seq_len_rng is None or
+            seq_len_rng[0] < ref_end - ref_start < seq_len_rng[1]):
+        raise th.TomboError(
+            'Mapped location not within --sequence-length-range')
     strand = '+' if alignment.strand == 1 else '-'
     num_match = alignment.mlen
     num_ins, num_del, num_aligned = 0, 0, 0
@@ -1376,7 +1381,7 @@ def _io_and_map_read(
         fast5_data, failed_reads_q, bc_subgrps, bc_grp, corr_grp, aligner,
         seq_samp_type, map_thr_buf, fast5_fn, num_processed, map_conn,
         outlier_thresh, compute_sd, obs_filter, index_q, q_score_thresh,
-        sig_match_thresh, std_ref):
+        sig_match_thresh, std_ref, sig_len_rng, seq_len_rng):
     try:
         # extract channel and raw data for this read
         channel_info = th.get_channel_info(fast5_data)
@@ -1384,12 +1389,15 @@ def _io_and_map_read(
         # channel info is not needed currently, so just pass
         channel_info = None
     all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'][:]
+    if not (sig_len_rng is None or
+            sig_len_rng[0] < all_raw_signal.shape[0] < sig_len_rng[1]):
+        raise th.TomboError('Raw signal not within --signal-length-range')
 
     for bc_subgrp in bc_subgrps:
         try:
             map_res = map_read(
-                fast5_data, aligner, std_ref, seq_samp_type,
-                bc_grp, bc_subgrp, map_thr_buf, q_score_thresh)
+                fast5_data, aligner, std_ref, seq_samp_type, bc_grp, bc_subgrp,
+                map_thr_buf, q_score_thresh, seq_len_rng)
             if th.invalid_seq(map_res.genome_seq):
                 raise th.TomboError(
                     'Reference mapping contains non-canonical bases ' +
@@ -1551,6 +1559,10 @@ def _resquiggle_worker(
             try:
                 rsqgl_res = run_rsqgl_iters(
                     map_res, rsqgl_params, fast5_fn, all_raw_signal)
+            except MemoryError:
+                raise th.TomboError(
+                    'Memory error consider setting --max-signal-length or ' +
+                    '--max-sequence-length')
             # if the resquiggle read fails for any reason
             except:
                 rsqgl_res = run_rsqgl_iters(
@@ -1582,7 +1594,7 @@ def _io_and_mappy_thread_worker(
         fast5_q, progress_q, failed_reads_q, index_q, bc_grp, bc_subgrps,
         corr_grp, aligner, outlier_thresh, compute_sd, sig_match_thresh,
         obs_filter, seq_samp_type, overwrite, map_conn, q_score_thresh,
-        std_ref):
+        std_ref, sig_len_rng, seq_len_rng):
     # increase update interval as more reads are provided
     proc_update_interval = 1
     def update_progress(num_processed, proc_update_interval):
@@ -1633,7 +1645,8 @@ def _io_and_mappy_thread_worker(
                 fast5_data, failed_reads_q, bc_subgrps, bc_grp, corr_grp,
                 aligner, seq_samp_type, map_thr_buf, fast5_fn,
                 num_processed, map_conn, outlier_thresh, compute_sd,
-                obs_filter, index_q, q_score_thresh, sig_match_thresh, std_ref)
+                obs_filter, index_q, q_score_thresh, sig_match_thresh, std_ref,
+                sig_len_rng, seq_len_rng)
         except th.TomboError as e:
             failed_reads_q.put((str(e), fast5_fn, True))
         finally:
@@ -1811,7 +1824,8 @@ def resquiggle_all_reads(
         seq_samp_type, outlier_thresh, overwrite, num_ps, threads_per_proc,
         compute_sd, skip_index, rsqgl_params, save_params, sig_match_thresh,
         obs_filter, const_scale, q_score_thresh, skip_seq_scaling,
-        max_scaling_iters, failed_reads_fn, fast5s_basedir, num_update_errors):
+        max_scaling_iters, failed_reads_fn, fast5s_basedir, num_update_errors,
+        sig_len_rng, seq_len_rng):
     """Perform genomic alignment and re-squiggle algorithm
     """
     fast5_q = mp.Queue(maxsize=_MAX_QUEUE_SIZE)
@@ -1868,8 +1882,8 @@ def resquiggle_all_reads(
     for map_conn in map_conns:
         map_args = (fast5_q, progress_q, failed_reads_q, index_q, bc_grp,
                     bc_subgrps, corr_grp, aligner, outlier_thresh, compute_sd,
-                    sig_match_thresh, obs_filter, seq_samp_type,
-                    overwrite, map_conn, q_score_thresh, std_ref)
+                    sig_match_thresh, obs_filter, seq_samp_type, overwrite,
+                    map_conn, q_score_thresh, std_ref, sig_len_rng, seq_len_rng)
         t = threading.Thread(target=_io_and_mappy_thread_worker,
                              args=map_args)
         t.daemon = True
@@ -2029,7 +2043,8 @@ def _resquiggle_main(args):
             obs_filter, const_scale, args.q_score,
             args.skip_sequence_rescaling, args.max_scaling_iterations,
             args.failed_reads_filename, fast5s_basedir,
-            args.num_most_common_errors)
+            args.num_most_common_errors, args.signal_length_range,
+            args.sequence_length_range)
     finally:
         th.clear_tombo_locks(lock_fns)
 
