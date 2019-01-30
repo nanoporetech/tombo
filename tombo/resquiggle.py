@@ -107,6 +107,9 @@ _UNEXPECTED_ERROR_FN = 'unexpected_tombo_errors.{}.err'
 _MAX_NUM_UNEXP_ERRORS = 50
 _MAX_QUEUE_SIZE = 1000
 
+_BROKEN_PIPE_ERR = (
+    'Connection to re-squiggle process broken. THREAD CANNOT BE RECOVERED.')
+
 
 ##################################
 ########## Debug Output ##########
@@ -1406,9 +1409,12 @@ def _io_and_map_read(
                 raw_signal=all_raw_signal, channel_info=channel_info)
 
             # send mapping data to _resquiggle_worker process
-            map_conn.send([map_res, fast5_fn])
-            # wait until re-squiggle returns
-            read_failed, rsqgl_res = map_conn.recv()
+            try:
+                map_conn.send([map_res, fast5_fn])
+                # wait until re-squiggle returns
+                read_failed, rsqgl_res = map_conn.recv()
+            except (EOFError, BrokenPipeError) as e:
+                raise th.TomboError(_BROKEN_PIPE_ERR)
 
             if read_failed:
                 failed_reads_q.put((
@@ -1459,6 +1465,8 @@ def _io_and_map_read(
                 pass
             failed_reads_q.put((
                 unicode(e), bc_subgrp + ':::' + fast5_fn, True))
+            if unicode(e) == _BROKEN_PIPE_ERR:
+                raise
         except Exception as e:
             # is_tombo_error = False
             failed_reads_q.put((
@@ -1545,9 +1553,14 @@ def _resquiggle_worker(
             continue
 
         try:
-            map_info = rsqgl_conn.recv()
+            # if re-squiggle process/connection dies unexpectedly
+            try:
+                map_info = rsqgl_conn.recv()
+            except EOFError:
+                map_info = None
             if map_info is None:
                 # this thread has finished the reads queue
+                # (or died unexpectedly)
                 del rsqgl_conns[conn_num]
                 continue
 
@@ -1619,8 +1632,12 @@ def _io_and_mappy_thread_worker(
             continue
 
         if fast5_fn is None:
-            # signal that all reads have been processed to child process
-            map_conn.send(None)
+            try:
+                # signal that all reads have been processed to child process
+                map_conn.send(None)
+            except BrokenPipeError:
+                # ignore if the re-squiggle process was killed during run
+                pass
             # update with all reads processed from this thread
             progress_q.put(num_processed % proc_update_interval)
             break
@@ -1648,6 +1665,12 @@ def _io_and_mappy_thread_worker(
                 obs_filter, index_q, q_score_thresh, sig_match_thresh, std_ref,
                 sig_len_rng, seq_len_rng)
         except th.TomboError as e:
+            # if re-squiggle connection is dead then this thread can no longer
+            # successfully process reads
+            if unicode(e) == _BROKEN_PIPE_ERR:
+                # update with all reads processed from this thread
+                progress_q.put(num_processed % proc_update_interval)
+                break
             failed_reads_q.put((str(e), fast5_fn, True))
         finally:
             try:
@@ -1878,7 +1901,7 @@ def resquiggle_all_reads(
         index_p.start()
 
     # now open mapping thread for each map connection created above
-    resquiggle_ts = []
+    map_and_io_ts = []
     for map_conn in map_conns:
         map_args = (fast5_q, progress_q, failed_reads_q, index_q, bc_grp,
                     bc_subgrps, corr_grp, aligner, outlier_thresh, compute_sd,
@@ -1888,14 +1911,14 @@ def resquiggle_all_reads(
                              args=map_args)
         t.daemon = True
         t.start()
-        resquiggle_ts.append(t)
+        map_and_io_ts.append(t)
 
     # wait for all mapping and re-squiggling workers to finish
     files_p.join()
+    for t in map_and_io_ts:
+        t.join()
     for rsqgl_p in rsqgl_ps:
         rsqgl_p.join()
-    for t in resquiggle_ts:
-        t.join()
 
     # in a very unlikely case the progress/fail queue could die while the
     # main process remains active and thus we would have a deadlock here
