@@ -113,6 +113,11 @@ Tombo can also be installed directly from source (mostly for development) by run
 
 ********
 
+Known Issues
+""""""""""""
+
+Tombo does not support multi-read FAST5 format read data files. Please use the ``multi_to_single_fast5`` command from the `ont_fast5_api package <https://github.com/nanoporetech/ont_fast5_api>`_ in order to convert to single-read FAST5 format before processing with Tombo.
+
 Help
 """"
 
