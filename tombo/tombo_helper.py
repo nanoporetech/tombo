@@ -1907,7 +1907,7 @@ class intervalData(object):
         reg_base_data[r_int_start:r_int_start + r_len] = r_seq
         return reg_base_data, r_int_start + r_len
 
-    def add_seq(self, genome_index=None):
+    def add_seq(self, genome_index=None, error_end=True):
         """Extract the forward strand genomic sequence for an interval from reads or genome_index if provided
 
         Args:
@@ -1915,7 +1915,7 @@ class intervalData(object):
         """
         if genome_index is not None:
             return self.update(seq=genome_index.get_seq(
-                self.chrm, self.start, self.end))
+                self.chrm, self.start, self.end, error_end=error_end))
 
         # handle case where no read overlaps whole region
         # let each read contibute its sequence and fill the rest

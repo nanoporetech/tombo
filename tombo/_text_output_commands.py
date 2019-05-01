@@ -404,14 +404,15 @@ def write_most_signif(
     else:
         genome_index = th.Fasta(fasta_fn)
         for p_int in plot_intervals:
-            p_int.add_seq(genome_index)
+            p_int.add_seq(genome_index, error_end=False)
 
     if VERBOSE: th.status_message('Outputting region seqeuences.')
     with io.open(seqs_fn, 'wt') as seqs_fp:
         for p_int in plot_intervals:
             reg_seq = (p_int.seq if p_int.strand == '+' else
                        th.rev_comp(p_int.seq))
-            seqs_fp.write('>{0}\n{1}\n'.format(p_int.reg_text, ''.join(reg_seq)))
+            seqs_fp.write(
+                '>{0}\n{1}\n'.format(p_int.reg_text, ''.join(reg_seq)))
 
     return
 
