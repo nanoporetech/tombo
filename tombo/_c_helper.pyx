@@ -298,7 +298,8 @@ def c_calc_llh_ratio(
 def c_calc_llh_ratio_const_var(
         np.ndarray[DTYPE_t] reg_means, np.ndarray[DTYPE_t] reg_ref_means,
         np.ndarray[DTYPE_t] reg_alt_means, DTYPE_t const_var):
-    cdef DTYPE_t ref_diff, alt_diff, running_llhr, obs_mean
+    cdef DTYPE_t running_llhr = 0.0
+    cdef DTYPE_t ref_diff, alt_diff, obs_mean
     cdef DTYPE_INT_t idx
     for idx in range(reg_means.shape[0]):
         obs_mean = reg_means[idx]

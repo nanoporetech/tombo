@@ -4051,7 +4051,7 @@ def compute_alt_model_read_stats(
                 const_var = r_ref_vars[alt_pos]
                 if use_standard_llhr:
                     pos_lh_ratio = c_calc_llh_ratio_const_var(
-                        *(pos_args + const_var))
+                        *(pos_args + [const_var]))
                 else:
                     pos_lh_ratio = c_calc_scaled_llh_ratio_const_var(
                         *(pos_args + [const_var, OCLLHR_SCALE,
