@@ -114,6 +114,10 @@ def plot_roc(
         if len(mod_names) != len(set(mod_names)):
             th.error_message_and_exit('Modified base names are not unique.')
 
+        if fasta_fn is None:
+            th.error_message_and_exit(
+                'Must provide a reference FASTA (--genome-fasta) in order ' +
+                'to plot a roc curve from motif descriptions.')
         if VERBOSE: th.status_message('Parsing genome.')
         genome_index = th.Fasta(fasta_fn)
 
