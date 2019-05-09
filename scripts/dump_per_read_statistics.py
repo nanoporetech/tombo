@@ -1,13 +1,16 @@
 #! /usr/bin/env python
+"""Dump per-read statistics
+
+This script takes a per-read statistics file and dumps its contents out into a tab-separated values file. The columns in the file are 'chrm', 'pos', 'strand', 'read_id' and 'stat'.
+"""
 from tombo import tombo_stats
 from tombo.tombo_helper import intervalData
+import argparse
 import sys
 import os
 
-def main():
-    if len(sys.argv) < 2:
-        sys.exit('missing argument for filename')
-    fname = sys.argv[1]
+def extract_per_read_stats(fname):
+    """Dump per-read statistics to tab-separated values"""
     if not os.path.isfile(fname):
         sys.exit('"{}" is not a valid file'.format(fname))
 
@@ -24,5 +27,17 @@ def main():
                     out_fp.write('{}\t{}\t{}\t{}\t{}\n'.format(
                         chrm, pos, strand, read_id, stat))
 
+
+def main(fname):
+    extract_per_read_stats(fname)
+
+
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        'input_file',
+        type=str,
+        help="the per-read statistics file produced by tombo"
+    )
+    args = parser.parse_args()
+    main(args.input_file)
