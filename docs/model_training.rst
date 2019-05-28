@@ -42,7 +42,7 @@ In order to address these goals, two alternative model estimation procedures are
 Motif-specific Alternative Reference Estimation
 -----------------------------------------------
 
-The motif-specific model estimation procedure (available via ``tombo build_model estimate_motif_alt_reference`` command) requires a sample containing modified bases at either known locations or completely modified within a known sequence motif. If the sample is assumed to contain modifications at only some motif sites the ``--valid-locations-filename`` (e.g. human CpG methylation) option is provided. Otherwise the model will be fit from all motif sites.
+The motif-specific model estimation procedure (available via ``tombo build_model estimate_motif_alt_reference`` command) requires a sample containing modified bases at either known locations or completely modified within a known sequence motif. If the sample is assumed to contain modifications at only some motif sites the ``--valid-locations-filename`` (e.g. human CpG methylation) option is provided. If provided, the ``--valid-locations-filename`` should be in `BED format <https://genome.ucsc.edu/FAQ/FAQformat.html#format1>`_. Otherwise the model will be fit from all motif sites.
 
 For motif-specific models, the estimation procedure is quite similar to the canonical model estimation method, except that instead of using all sites with sufficeint coverage, only known modified sites are included in the model. As such these models can be much more accurate than the all-contexts models.
 

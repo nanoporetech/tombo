@@ -473,8 +473,10 @@ def parse_genome_regions(all_regs_text):
     return parsed_regs
 
 def parse_locs_file(locs_fn):
-    """Parse BED files containing genomic locations (assumes single base locations, so end coordinate is ignored).
+    """Parse BED files containing genomic locations (assumes single base
+    locations, so end coordinate is ignored).
     """
+    n_added, n_failed = 0, 0
     raw_locs = defaultdict(set)
     with open(locs_fn) as locs_fp:
         for line in locs_fp:
@@ -483,8 +485,22 @@ def parse_locs_file(locs_fn):
                 # bed specs indicate 0-based start so don't shift here
                 pos = int(pos)
                 raw_locs[(chrm, strand)].add(pos)
+                n_added += 1
             except:
+                n_failed += 1
                 continue
+
+    if n_failed > 0:
+        if n_added > 0:
+            warning_message((
+                'Some provided locations ({}) were incorrectly formatted. ' +
+                'Ensure that provided file ({}) is in BED format.').format(
+                    n_failed, locs_fn))
+        else:
+            warning_message((
+                'All provided locations from {} were incorrectly formatted. ' +
+                'Ensure that provided file is in BED format.').format(
+                    locs_fn))
 
     return dict((cs, np.array(sorted(cs_poss)))
                 for cs, cs_poss in raw_locs.items())
