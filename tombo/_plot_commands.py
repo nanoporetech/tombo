@@ -143,8 +143,19 @@ def plot_roc(
                 stat_gt_info, genome_index, stats_per_block,
                 total_stats_limit)
         for mod_name, mod_stats in stat_type_stats.items():
+            if len(mod_stats) == 0:
+                th.warning_message((
+                    'Statistics from {} for modified base {} do not contain ' +
+                    'any valid sites overlapping ground truth data.').format(
+                        stats_fn, mod_name))
+                continue
             all_stats[mod_name] = mod_stats
         stats.close()
+
+    if len(all_stats) == 0:
+        th.error_message_and_exit(
+            'No provided statistics contain any valid sites overlapping ' +
+            'ground truth data.')
 
     if VERBOSE: th.status_message('Computing accuracy statistics.')
     tp_rates, fp_rates, precisions, mod_names_for_r = prep_accuracy_rates(
@@ -290,6 +301,12 @@ def plot_per_read_roc(
                 stat_gt_info, genome_index, stats_per_block,
                 total_stats_limit)
         for mod_name, mod_stats in stat_type_stats.items():
+            if len(mod_stats) == 0:
+                th.warning_message((
+                    'Statistics from {} for modified base {} do not contain ' +
+                    'any valid sites overlapping ground truth data.').format(
+                        pr_stats_fn, mod_name))
+                continue
             all_stats[mod_name] = mod_stats
         pr_stats.close()
 
@@ -298,6 +315,11 @@ def plot_per_read_roc(
             all_stats_for_r[mod_name] = r.DataFrame({
                 'stat':r.FloatVector(unzip_stats[0]),
                 'motif_match':r.BoolVector(unzip_stats[1])})
+
+    if len(all_stats) == 0:
+        th.error_message_and_exit(
+            'No provided statistics contain any valid sites overlapping ' +
+            'ground truth data.')
 
     # python2 rpy2 ListVector can't take unicode keys
     if sys.version_info[0] < 3:
@@ -374,6 +396,12 @@ def plot_ctrl_samp_per_read_roc(
         for mod_name, mod_stats in pr_stats.compute_ctrl_motif_stats(
                 pr_ctrl_stats, stat_motif_descs, genome_index, stats_per_block,
                 total_stats_limit).items():
+            if len(mod_stats) == 0:
+                th.warning_message((
+                    'Statistics from {} for modified base {} do not contain ' +
+                    'any valid sites overlapping ground truth data.').format(
+                        pr_stats_fn, mod_name))
+                continue
             all_motif_stats[mod_name] = mod_stats
         pr_stats.close()
         pr_ctrl_stats.close()
@@ -383,6 +411,11 @@ def plot_ctrl_samp_per_read_roc(
             all_motif_stats_for_r[mod_name] = r.DataFrame({
                 'stat':r.FloatVector(unzip_stats[0]),
                 'motif_match':r.BoolVector(unzip_stats[1])})
+
+    if len(all_motif_stats) == 0:
+        th.error_message_and_exit(
+            'No provided statistics contain any valid sites overlapping ' +
+            'ground truth data.')
 
     # python2 rpy2 ListVector can't take unicode keys
     if sys.version_info[0] < 3:
