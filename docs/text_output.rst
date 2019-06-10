@@ -18,7 +18,7 @@ Several statistics are available for output:
 * ``valid_coverage`` - The coverage level for reads that are mapped, validly re-squiggled and outside the interval specified by ``--single-read-threshold`` specified in a ``--statistics-filename``.
 * ``dampened_fraction`` - The estimated fraction of significantly modified reads (non-``level_sample_compare`` modified base detection methods only)
 * ``fraction`` - The raw fraction of significantly modified reads (non-``level_sample_compare`` modified base detection methods only)
-* ``statistic`` - Statistic produced from ``level_sample_compare`` method
+* ``statistic`` - Statistic produced from ``level_sample_compare`` method (default outputs the effect size statistic; if ``--store-p-value`` is specified to ``detect_modfications`` command then the negative log p-value is output).
 * ``signal`` - The mean signal level across all reads mapped to this location
 * ``signal_sd`` - The mean signal standard deviation across all reads mapped to this location (not available unless ``--include-event-stdev`` was provided in ``tombo resquiggle`` command)
 * ``dwell`` - The mean number of raw observations observed assigned to this location
