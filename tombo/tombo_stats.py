@@ -1621,7 +1621,7 @@ def center_model_to_median_norm(
             all_raw_signal, scale_values=scale_values)
 
     def get_read_corr_factors(r_data):
-        with h5py.File(r_data.fn, 'r+') as fast5_data:
+        with h5py.File(r_data.fn, 'r') as fast5_data:
             all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'][:]
             event_starts, r_seq = th.get_multiple_slots_read_centric(
                 fast5_data, ('start', 'base'), r_data.corr_group)
