@@ -129,7 +129,8 @@ DEFAULT_TRIM_RNA_PARAMS = th.trimRnaParams(
 
 def transform_and_trim_stats(reg_stats, are_pvals, trim_value):
     if are_pvals:
-        reg_stats = -np.log10(reg_stats)
+        with np.errstate(divide='ignore'):
+            reg_stats = -np.log10(reg_stats)
         nan_r_stats = np.nan_to_num(reg_stats)
         reg_stats[nan_r_stats > trim_value] = trim_value
     else:
@@ -3169,8 +3170,9 @@ class LevelStats(ModelStats):
         self._stat_slot = str('stat')
         if self.stat_type in (KS_TEST_TXT, U_TEST_TXT, T_TEST_TXT):
             self._stat_text = '-log10(p-value): {0:.2g}'
-            self._stat_transform = lambda pos_stat: -np.log10(
-                pos_stat[self._stat_slot])
+            with np.errstate(divide='ignore'):
+                self._stat_transform = lambda pos_stat: -np.log10(
+                    pos_stat[self._stat_slot])
         elif self.stat_type == KS_STAT_TEST_TXT:
             self._stat_text = 'D Statistic: {0:.2g}'
             self._stat_transform = lambda pos_stat: (
@@ -3318,8 +3320,9 @@ class PerReadStats(object):
 
         self._stat_slot = str('stat')
         self._stat_text = '-log10(p-value): {0:.2g}'
-        self._stat_transform = lambda pos_stat: -np.log10(
-            pos_stat[self._stat_slot])
+        with np.errstate(divide='ignore'):
+            self._stat_transform = lambda pos_stat: -np.log10(
+                pos_stat[self._stat_slot])
 
         return
 
