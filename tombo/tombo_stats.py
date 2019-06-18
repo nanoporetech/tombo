@@ -3170,9 +3170,12 @@ class LevelStats(ModelStats):
         self._stat_slot = str('stat')
         if self.stat_type in (KS_TEST_TXT, U_TEST_TXT, T_TEST_TXT):
             self._stat_text = '-log10(p-value): {0:.2g}'
-            with np.errstate(divide='ignore'):
-                self._stat_transform = lambda pos_stat: -np.log10(
-                    pos_stat[self._stat_slot])
+            def neg_log10(pos_stat):
+                slot_stat = pos_stat[self._stat_slot]
+                with np.errstate(divide='ignore'):
+                    r_stat = -np.log10(slot_stat)
+                return r_stat
+            self._stat_transform = neg_log10
         elif self.stat_type == KS_STAT_TEST_TXT:
             self._stat_text = 'D Statistic: {0:.2g}'
             self._stat_transform = lambda pos_stat: (
@@ -3320,9 +3323,12 @@ class PerReadStats(object):
 
         self._stat_slot = str('stat')
         self._stat_text = '-log10(p-value): {0:.2g}'
-        with np.errstate(divide='ignore'):
-            self._stat_transform = lambda pos_stat: -np.log10(
-                pos_stat[self._stat_slot])
+        def neg_log10(pos_stat):
+            slot_stat = pos_stat[self._stat_slot]
+            with np.errstate(divide='ignore'):
+                r_stat = -np.log10(slot_stat)
+            return r_stat
+        self._stat_transform = neg_log10
 
         return
 
