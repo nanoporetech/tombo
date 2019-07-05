@@ -1298,8 +1298,9 @@ def map_read(
     seq_data = get_read_seq(
         fast5_data, bc_grp, bc_subgrp, seq_samp_type, q_score_thresh)
     try:
-        alignment = next(aligner.map(str(seq_data.seq), buf=map_thr_buf))
-    except StopIteration:
+        # enumerate all alignments to avoid mappy memory leak
+        alignment = list(aligner.map(str(seq_data.seq), buf=map_thr_buf))[0]
+    except IndexError:
         raise th.TomboError('Alignment not produced')
 
     chrm = alignment.ctg
