@@ -4136,7 +4136,8 @@ def collate_reg_stats(
         valid_read_ids = [
             rep_r_id for rep_r_id, is_valid in zip(
                 [rep_r_id for r_id, r_len in read_ids
-                 for rep_r_id in repeat(r_id, r_len)], valid_poss) if is_valid]
+                 for rep_r_id in repeat(r_id.decode(), r_len)], valid_poss)
+            if is_valid]
         read_id_lookup = dict((
             (read_id, read_id_val)
             for read_id_val, read_id in enumerate(set(valid_read_ids))))
