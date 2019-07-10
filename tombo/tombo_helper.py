@@ -1084,7 +1084,9 @@ def get_raw_read_slot(fast5_data):
     try:
         raw_read_slot = next(iter(fast5_data['/Raw/Reads'].values()))
     except KeyError:
-        raise TomboError('Raw data is not found in /Raw/Reads/Read_[read#]')
+        raise TomboError(
+            'Raw data is not found in /Raw/Reads/Read_[read#]. Note that ' +
+            'Tombo does not support multi-fast5 format.')
 
     return raw_read_slot
 
