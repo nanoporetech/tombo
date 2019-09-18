@@ -37,7 +37,7 @@ extras_require = ['pyfaidx']
 if sys.version_info[0] < 3:
     extras_require.append('rpy2<=2.8.6')
 else:
-    extras_require.append('rpy2')
+    extras_require.append('rpy2<=2.9.5')
 
 ext_modules = [
     Extension(str("tombo._c_dynamic_programming"),
