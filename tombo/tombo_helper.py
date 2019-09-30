@@ -1988,26 +1988,21 @@ class intervalData(object):
             if r_means is None: return None
             if r_data.start > self.start and r_data.end < self.end:
                 # handle reads that are contained in a region
-                start_overlap = self.end - r_data.start
-                end_overlap = r_data.end - self.start
                 # create region with nan values
-                r_reg_means = np.empty(self.end - self.start)
-                r_reg_means[:] = np.NAN
-                r_reg_means[-start_overlap:end_overlap] = r_means[
-                    -end_overlap:start_overlap]
+                r_reg_means = np.full(self.end - self.start, np.NAN)
+                r_reg_means[r_data.start - self.start:
+                            r_data.end - self.start] = r_means
             elif r_data.start > self.start:
                 # handle reads that start in middle of region
                 start_overlap = self.end - r_data.start
                 # create region with nan values
-                r_reg_means = np.empty(self.end - self.start)
-                r_reg_means[:] = np.NAN
+                r_reg_means = np.full(self.end - self.start, np.NAN)
                 r_reg_means[-start_overlap:] = r_means[:start_overlap]
             elif r_data.end < self.end:
                 # handle reads that end inside region
                 end_overlap = r_data.end - self.start
                 # create region with nan values
-                r_reg_means = np.empty(self.end - self.start)
-                r_reg_means[:] = np.NAN
+                r_reg_means = np.full(self.end - self.start, np.NAN)
                 r_reg_means[:end_overlap] = r_means[-end_overlap:]
             else:
                 r_reg_means = r_means[
