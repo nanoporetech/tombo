@@ -205,9 +205,9 @@ def _get_ann_queues(prog_q, warn_q, num_read_ids, wp_conn):
                     'basecalls.', file=sys.stderr)
             been_warned[_WARN_OVRWRT_VAL] = True
         else:
-            if VERBOSE: bar.write(
-                    _WARN_PREFIX + 'Invalid warning code encountered.',
-                    file=sys.stderr)
+            if VERBOSE:
+                bar.write('{}Invalid warning code encountered: {}'.format(
+                    _WARN_PREFIX, warn_val), file=sys.stderr)
 
         return
 
@@ -325,8 +325,8 @@ def _get_prep_queue(read_ids_q, prog_q, warn_q, gp_conn, num_fast5s):
                         bar.write(ovrwrt_mess, file=sys.stderr)
                     been_warned[_WARN_OVRWRT_VAL] = True
                 else:
-                    bar.write(_WARN_PREFIX + 'Invalid warning code encountered.',
-                              file=sys.stderr)
+                    bar.write('{}Invalid warning code encountered: {}'.format(
+                        _WARN_PREFIX, warn_val), file=sys.stderr)
             except queue.Empty:
                 try:
                     if VERBOSE: bar.update(prog_q.get(block=False))
@@ -345,9 +345,9 @@ def _get_prep_queue(read_ids_q, prog_q, warn_q, gp_conn, num_fast5s):
             if VERBOSE and not been_warned[_WARN_OVRWRT_VAL]:
                 bar.write(ovrwrt_mess, file=sys.stderr)
                 been_warned[_WARN_OVRWRT_VAL] = True
-            else:
-                bar.write(_WARN_PREFIX + 'Invalid warning code encountered.',
-                          file=sys.stderr)
+        else:
+            bar.write('{}Invalid warning code encountered: {}'.format(
+                _WARN_PREFIX, warn_val), file=sys.stderr)
     while not prog_q.empty():
         if VERBOSE: bar.update(prog_q.get(block=False))
 
