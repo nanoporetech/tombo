@@ -4381,6 +4381,11 @@ def compute_group_reg_stats(
         reg_cov.append(samp_cov[cov_start:cov_end])
         reg_ctrl_cov.append(ctrl_cov[cov_start:cov_end])
 
+    # if the valid coveraage only intersects the end of the region,
+    # there may be no valid stats from this region.
+    if len(reg_stats) == 0:
+        return []
+
     return [(stat_type, th.groupStats(
         np.concatenate(reg_stats), np.concatenate(reg_poss),
         reg_data.chrm, reg_data.strand, reg_data.start,
