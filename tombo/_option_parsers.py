@@ -1170,7 +1170,7 @@ def get_filter_stuck_parser():
     req_args.add_argument(fast5dir_opt[0], required=True, **fast5dir_opt[1])
 
     filter_args = parser.add_argument_group('Read Filtering Argument')
-    filter_args.add_argument(obsfilt_opt[0], **obsfilt_opt[1])
+    filter_args.add_argument(obsfilt_opt[0], required=True, **obsfilt_opt[1])
 
     fast5_args = parser.add_argument_group('FAST5 Data Argument')
     fast5_args.add_argument(corrgrp_opt[0], **corrgrp_opt[1])
