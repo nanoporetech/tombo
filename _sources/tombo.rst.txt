@@ -1,0 +1,35 @@
+tombo package
+=============
+
+.. automodule:: tombo
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Submodules
+----------
+
+tombo.resquiggle module
+-----------------------
+
+.. automodule:: tombo.resquiggle
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+tombo.tombo\_helper module
+--------------------------
+
+.. automodule:: tombo.tombo_helper
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+tombo.tombo\_stats module
+-------------------------
+
+.. automodule:: tombo.tombo_stats
+   :members:
+   :undoc-members:
+   :show-inheritance:
+

@@ -1,0 +1,375 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Plotting Commands &mdash; Tombo 1.5.1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+        <script async="async" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Read Filtering Commands" href="filtering.html" />
+    <link rel="prev" title="Text Outputs" href="text_output.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Tombo
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.5.1
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tombo Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Tombo Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="resquiggle.html">Re-squiggle Algorithm</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modified_base_detection.html">Modified Base Detection</a></li>
+<li class="toctree-l1"><a class="reference internal" href="text_output.html">Text Outputs</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Plotting Commands</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#genome-anchored-plotting">Genome Anchored Plotting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#plot-region-selection">Plot Region Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#model-plotting">Model Plotting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#over-plotting">Over-Plotting</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#per-read-statistic-plotting">Per-read Statistic Plotting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#motif-centered-statistic-plotting">Motif-centered Statistic Plotting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#other-plotting-commands">Other Plotting Commands</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#k-mer-signal-levels">K-mer Signal Levels</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#roc-curves">ROC Curves</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="filtering.html">Read Filtering Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rna.html">RNA Processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_training.html">Model Training (Advanced Users Only)</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tombo.html">tombo package</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Tombo</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Plotting Commands</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/plotting.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="plotting-commands">
+<h1>Plotting Commands<a class="headerlink" href="#plotting-commands" title="Permalink to this headline">¶</a></h1>
+<p>In order to enhance modified base detection and give users a better grasp of raw nanopore data, Tombo provides a number of raw signal plotting commands.</p>
+<div class="section" id="genome-anchored-plotting">
+<h2>Genome Anchored Plotting<a class="headerlink" href="#genome-anchored-plotting" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="plot-region-selection">
+<h3>Plot Region Selection<a class="headerlink" href="#plot-region-selection" title="Permalink to this headline">¶</a></h3>
+<p>Most Tombo plotting functions are genome-anchored. These commands create plots analogous to a genome browser, but including all raw signal within a region. The available commands differ in their mode of genome region selection. This allows users to plot regions of interest for many research contexts.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">max_coverage</span></code> - Select regions with maximal coverage</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">genome_location</span></code> - Select specified genomic locations</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">motif_centered</span></code> - Select regions with a specific motif (follows <a class="reference external" href="https://www.neb.com/tools-and-resources/usage-guidelines/single-letter-codes">NEB single letter codes</a>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">max_difference</span></code> - Select regions where two samples’ average signal differs most</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">most_significant</span></code> - Select most consistently/significantly mofidied locations</p></li>
+</ul>
+<p>These plotting commands produce raw signal level plots such at the example below. Options are available for each of these plots to logically select genomic regions based on the given criterion.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>All genome-anchored plots use 1-based coordinate systems (similar to the majority of genome browsers).</p>
+</div>
+<hr class="docutils" />
+<div class="figure align-center" id="id1">
+<img alt="_images/single_samp.png" src="_images/single_samp.png" />
+<p class="caption"><span class="caption-text">Single sample raw signal plot</span><a class="headerlink" href="#id1" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="model-plotting">
+<h3>Model Plotting<a class="headerlink" href="#model-plotting" title="Permalink to this headline">¶</a></h3>
+<p>Plots are also enabled to visualize the different testing frameworks available in Tombo. These include options to add a control sample’s raw signal, the canonical model or any alternative base model.</p>
+<p>Control these plots with these options: <code class="docutils literal notranslate"><span class="pre">--control-fast5-basedirs</span></code>, <code class="docutils literal notranslate"><span class="pre">--plot-standard-model</span></code>, <code class="docutils literal notranslate"><span class="pre">--plot-alternate-model</span> <span class="pre">5mC</span></code>, <code class="docutils literal notranslate"><span class="pre">--tombo-model-filename</span></code>, and <code class="docutils literal notranslate"><span class="pre">--alternate-model-filename</span></code>.</p>
+<p>For alternative model plotting (<code class="docutils literal notranslate"><span class="pre">--plot-alternate-model</span></code>), note that, as of v1.5, alternative models are spcified for a specific position within each label. Thus a global alternative model cannot be plotted. As such, the alternative model is only displayed around the central base in each plot and only when applicable (i.e. the cetnral base fits the model motif). So the alternative levels may not appear for some regions when a plot specifies the alternative model option. The alternative model levels should always be plotted when plotting using the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">most_significant</span></code> command and specifying the same model used in the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code> call.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id2">
+<img alt="_images/sample_comp.png" src="_images/sample_comp.png" />
+<p class="caption"><span class="caption-text">Control sample comparison plot</span><a class="headerlink" href="#id2" title="Permalink to this image">¶</a></p>
+</div>
+<div class="figure align-center" id="id3">
+<img alt="_images/model_comp.png" src="_images/model_comp.png" />
+<p class="caption"><span class="caption-text">Canonical model plot</span><a class="headerlink" href="#id3" title="Permalink to this image">¶</a></p>
+</div>
+<div class="figure align-center" id="id4">
+<img alt="_images/alt_model_comp.png" src="_images/alt_model_comp.png" />
+<p class="caption"><span class="caption-text">Alternate model plot</span><a class="headerlink" href="#id4" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="over-plotting">
+<h3>Over-Plotting<a class="headerlink" href="#over-plotting" title="Permalink to this headline">¶</a></h3>
+<p>When high coverage regions are plotted, the raw signal plots can become less interpretable and inflate PDF file sizes. By default, when read coverage exceeds 50X reads are randomly downsampled to 50X coverage (change this threshold with the <code class="docutils literal notranslate"><span class="pre">--overplot-threshold</span></code> option). Three additional over-plotting types (boxplot, quantile and density) are available as shown below (chose which over-plotting type to use with the <code class="docutils literal notranslate"><span class="pre">--overplot-type</span></code> option).</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id5">
+<img alt="_images/boxplot.png" src="_images/boxplot.png" />
+<p class="caption"><span class="caption-text">Boxplot over-plotting option</span><a class="headerlink" href="#id5" title="Permalink to this image">¶</a></p>
+</div>
+<div class="figure align-center" id="id6">
+<img alt="_images/quantile.png" src="_images/quantile.png" />
+<p class="caption"><span class="caption-text">Quantile over-plotting option</span><a class="headerlink" href="#id6" title="Permalink to this image">¶</a></p>
+</div>
+<div class="figure align-center" id="id7">
+<img alt="_images/density.png" src="_images/density.png" />
+<p class="caption"><span class="caption-text">Density over-plotting option</span><a class="headerlink" href="#id7" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="per-read-statistic-plotting">
+<h2>Per-read Statistic Plotting<a class="headerlink" href="#per-read-statistic-plotting" title="Permalink to this headline">¶</a></h2>
+<p>All testing in the Tombo framework is applied first on a per-read basis; to visualize these per-read results, per-read statistic plots are available. Per-read statistics are an optional output from any <code class="docutils literal notranslate"><span class="pre">detect_modifications</span></code> command via the <code class="docutils literal notranslate"><span class="pre">--per-read-statistics-filename</span></code> option, and the output file specified by this option is required in order to the plot per-read statistics command. Create these plots with the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">per_read</span></code> command.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id8">
+<img alt="_images/pre_read_5mC.png" src="_images/pre_read_5mC.png" />
+<p class="caption"><span class="caption-text">Alternative 5mC model testing</span><a class="headerlink" href="#id8" title="Permalink to this image">¶</a></p>
+</div>
+<div class="figure align-center" id="id9">
+<img alt="_images/per_read_do_novo.png" src="_images/per_read_do_novo.png" />
+<p class="caption"><span class="caption-text">De novo, standard model, per-read testing</span><a class="headerlink" href="#id9" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="motif-centered-statistic-plotting">
+<h2>Motif-centered Statistic Plotting<a class="headerlink" href="#motif-centered-statistic-plotting" title="Permalink to this headline">¶</a></h2>
+<p>In several biological contexts base modifications occur at specific motifs. In order to visualize the distribution of Tombo statistical test results centered on a motif of biolgical interest (or a discovered motif) the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">motif_with_stats</span></code> command is provided.</p>
+<p>This command identifies a number (defined by <code class="docutils literal notranslate"><span class="pre">--num-statistics</span></code>) of genomic regions centered on this motif with the highest significance testing values. Importantly, the identified highest testing values need not be found within the actual motif, but simply within a region containing the motif defined by <code class="docutils literal notranslate"><span class="pre">--num-context</span></code>. In this way, non-interesting motifs (motifs which don’t direct modifications) will not contain more significant statistics centered on a specific position within the provided motif. A number (defined by <code class="docutils literal notranslate"><span class="pre">--num-regions</span></code>) of example regions with the highest test statistics centered on the motif of interest are added at the top portion of this plot.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id10">
+<img alt="_images/stat_dist.png" src="_images/stat_dist.png" />
+<p class="caption"><span class="caption-text">Example statistics distribution around <a class="reference external" href="https://www.neb.com/tools-and-resources/usage-guidelines/dam-and-dcm-methylases-of-e-coli">biologically relevant CCWGG motif in E. coli</a></span><a class="headerlink" href="#id10" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="other-plotting-commands">
+<h2>Other Plotting Commands<a class="headerlink" href="#other-plotting-commands" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="k-mer-signal-levels">
+<h3>K-mer Signal Levels<a class="headerlink" href="#k-mer-signal-levels" title="Permalink to this headline">¶</a></h3>
+<p>In order to investigate the signal levels of a particular set of reads, the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">kmer</span></code> command is provided. This plot extracts the observed signal levels from a set of reads and groups the signal by the local genomic sequence context (k-mer) and plots the resulting distributions of signal levels.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id11">
+<img alt="_images/kmer_levels.png" src="_images/kmer_levels.png" />
+<p class="caption"><span class="caption-text">Example current level distribution plot</span><a class="headerlink" href="#id11" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="roc-curves">
+<h3>ROC Curves<a class="headerlink" href="#roc-curves" title="Permalink to this headline">¶</a></h3>
+<p>In order to validate the performance of modified base detection results at a known sequence motif or set of ground truth locations, a set of ground truth evaluation plotting commands are prodived (<code class="docutils literal notranslate"><span class="pre">roc</span></code>, <code class="docutils literal notranslate"><span class="pre">sample_compare_roc</span></code>, <code class="docutils literal notranslate"><span class="pre">per_read_roc</span></code>, and <code class="docutils literal notranslate"><span class="pre">sample_compare_per_read_roc</span></code>). Each of these commands produced both a receiver operating characteristic (ROC) curve as well as a Precision-Recall curve. This command also outputs a table of area under the curve (AUC) and mean average precision (mean AP) for all provided ground truth sets.</p>
+<p>For the <code class="docutils literal notranslate"><span class="pre">roc</span></code> and <code class="docutils literal notranslate"><span class="pre">per_read_roc</span></code> commands ground truth sites are compared to modified base statistics at all other “swap base” sites in the genome. Users should be aware that for more specific motifs the AUC statistic may be somewhat misleading and are not directly comparable from one motif to the next. The <code class="docutils literal notranslate"><span class="pre">sample_compare_roc</span></code>, and <code class="docutils literal notranslate"><span class="pre">sample_compare_per_read_roc</span></code> commands instead use a separate control sample as the ground truth and includes only sites at the ground truth motif. This creates balanced validation metrics that are more comparable between two motifs and/or modifications.</p>
+<p>Below is an example command and resulting plot for identifying the known dam and dcm methylase contexts in E. coli using all three provided testing methods.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>tombo plot roc --statistics-filenames <span class="se">\</span>
+    native.sample_comp.tombo.stats <span class="se">\</span>
+    native.de_novo.tombo.stats <span class="se">\</span>
+    native.alt.5mC.tombo.stats <span class="se">\</span>
+    native.alt.6mA.tombo.stats <span class="se">\</span>
+    --motif-descriptions <span class="se">\</span>
+    CCWGG:2:<span class="s2">&quot;dcm 5mC Sample Compare&quot;</span>::GATC:2:<span class="s2">&quot;dam 6mA Sample Compare&quot;</span> <span class="se">\</span>
+    CCWGG:2:<span class="s2">&quot;dcm 5mC De Novo&quot;</span>::GATC:2:<span class="s2">&quot;dam 6mA De Novo&quot;</span> <span class="se">\</span>
+    CCWGG:2:<span class="s2">&quot;dcm 5mC Alt. Model&quot;</span> <span class="se">\</span>
+    GATC:2:<span class="s2">&quot;dam 6mA Alt. Model&quot;</span> <span class="se">\</span>
+    --genome-fasta e_coli.fasta
+</pre></div>
+</div>
+<hr class="docutils" />
+<div class="figure align-center" id="id12">
+<img alt="_images/roc.png" src="_images/roc.png" />
+<p class="caption"><span class="caption-text">Example ROC curve plot</span><a class="headerlink" href="#id12" title="Permalink to this image">¶</a></p>
+</div>
+<hr class="docutils" />
+<p>For the per-read ROC plots, along with ROC and precision-recall curves these commands plot a distribution of test statistics for motif-matching and non-motif-matching sites for each motif provided (see figure below). These plots can be very useful in picking a <code class="docutils literal notranslate"><span class="pre">--single-read-threshold</span></code> for use in either the <code class="docutils literal notranslate"><span class="pre">detect_modifications</span></code> or <code class="docutils literal notranslate"><span class="pre">aggregate_per_read_stats</span></code> commands.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>tombo plot per_read_roc <span class="se">\</span>
+    --statistics-filenames vs_pcr.tombo.per_read_stats de_novo.tombo.per_read_stats <span class="se">\</span>
+    5mC_model.5mC.tombo.per_read_stats 6mA_model.6mA.tombo.per_read_stats <span class="se">\</span>
+    --motif-descriptions CCWGG:2:<span class="s2">&quot;dcm 5mC Sample Comp&quot;</span>::GATC:2:<span class="s2">&quot;dam 6mA Sample Comp&quot;</span> <span class="se">\</span>
+    CCWGG:2:<span class="s2">&quot;dcm 5mC De novo&quot;</span>::GATC:2:<span class="s2">&quot;dam 6mA De novo&quot;</span> <span class="se">\</span>
+    CCWGG:2:<span class="s2">&quot;dcm 5mC Alt Comp&quot;</span> GATC:2:<span class="s2">&quot;dam 6mA Alt Comp&quot;</span>  <span class="se">\</span>
+    --genome-fasta e_coli.fasta
+</pre></div>
+</div>
+<hr class="docutils" />
+<div class="figure align-center" id="id13">
+<img alt="_images/per_read_stat_dist.png" src="_images/per_read_stat_dist.png" />
+<p class="caption"><span class="caption-text">Example per-read statistic distribution</span><a class="headerlink" href="#id13" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="filtering.html" class="btn btn-neutral float-right" title="Read Filtering Commands" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="text_output.html" class="btn btn-neutral float-left" title="Text Outputs" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017-18, Oxford Nanopore Technologies
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

@@ -1,0 +1,399 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Tombo Tutorials &mdash; Tombo 1.5.1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+        <script async="async" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Tombo Commands" href="examples.html" />
+    <link rel="prev" title="Welcome to Tombo’s documentation!" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Tombo
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.5.1
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Tombo Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#human-cpg-methylation-detection">Human CpG Methylation Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#de-novo-bacterial-modified-base-detection">De novo Bacterial Modified Base Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#build-motif-specific-model-from-ground-truth">Build Motif-specific Model from Ground Truth</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#rna-level-testing">RNA Level Testing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Tombo Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="resquiggle.html">Re-squiggle Algorithm</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modified_base_detection.html">Modified Base Detection</a></li>
+<li class="toctree-l1"><a class="reference internal" href="text_output.html">Text Outputs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="plotting.html">Plotting Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="filtering.html">Read Filtering Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rna.html">RNA Processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_training.html">Model Training (Advanced Users Only)</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tombo.html">tombo package</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Tombo</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Tombo Tutorials</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/tutorials.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="tombo-tutorials">
+<h1>Tombo Tutorials<a class="headerlink" href="#tombo-tutorials" title="Permalink to this headline">¶</a></h1>
+<p>This page contains several tutorials with commands to perform suggested Tombo analysis pipelines.</p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#human-cpg-methylation-detection" id="id1">Human CpG Methylation Detection</a></p></li>
+<li><p><a class="reference internal" href="#de-novo-bacterial-modified-base-detection" id="id2">De novo Bacterial Modified Base Detection</a></p></li>
+<li><p><a class="reference internal" href="#build-motif-specific-model-from-ground-truth" id="id3">Build Motif-specific Model from Ground Truth</a></p></li>
+<li><p><a class="reference internal" href="#rna-level-testing" id="id4">RNA Level Testing</a></p></li>
+</ul>
+</div>
+<div class="section" id="human-cpg-methylation-detection">
+<h2><a class="toc-backref" href="#id1">Human CpG Methylation Detection</a><a class="headerlink" href="#human-cpg-methylation-detection" title="Permalink to this headline">¶</a></h2>
+<p>Detect CpG methylation and output to browser file wiggle format.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># re-squiggle raw reads</span>
+<span class="n">tombo</span> <span class="n">resquiggle</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> <span class="n">reference</span><span class="o">.</span><span class="n">fasta</span> \
+   <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="n">most</span><span class="o">-</span><span class="n">common</span><span class="o">-</span><span class="n">errors</span> <span class="mi">5</span>
+
+<span class="c1"># run modified base detection</span>
+<span class="n">tombo</span> <span class="n">detect_modifications</span> <span class="n">alternative_model</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">human_cpg_testing</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">bases</span> <span class="n">CpG</span> <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+
+<span class="c1"># output to genome browser compatible format</span>
+<span class="n">tombo</span> <span class="n">text_output</span> <span class="n">browser_files</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">filename</span> <span class="n">human_cpg_testing</span><span class="o">.</span><span class="n">CpG</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">stats</span> \
+   <span class="o">--</span><span class="n">file</span><span class="o">-</span><span class="n">types</span> <span class="n">coverage</span> <span class="n">dampened_fraction</span> \
+   <span class="o">--</span><span class="n">browser</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">human_cpg_testing</span>
+</pre></div>
+</div>
+<p>Resulting files:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>human_cpg_testing.coverage.plus.bedgraph</p></li>
+<li><p>human_cpg_testing.coverage.minus.bedgraph</p></li>
+<li><p>human_cpg_testing.CpG.dampened_fraction_modified_reads.plus.wig</p></li>
+<li><p>human_cpg_testing.CpG.dampened_fraction_modified_reads.minus.wig</p></li>
+</ul>
+</div></blockquote>
+<p>can be loaded into a genome browser for visualization or processed with bioinformatic tools taking the wiggle format.</p>
+</div>
+<div class="section" id="de-novo-bacterial-modified-base-detection">
+<h2><a class="toc-backref" href="#id2">De novo Bacterial Modified Base Detection</a><a class="headerlink" href="#de-novo-bacterial-modified-base-detection" title="Permalink to this headline">¶</a></h2>
+<p>This tutorial walks through the steps to estimate a methylase recognition motif as well as identifying the most likely modified base within that motif. The tutorial then walks through the steps to train a more accurate motif model and use the model to call modified sites in a new sample. Finally, Tombo provides tools to validate the accuracy for this model.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># re-squiggle raw reads</span>
+<span class="n">tombo</span> <span class="n">resquiggle</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> <span class="n">reference</span><span class="o">.</span><span class="n">fasta</span> \
+   <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="n">most</span><span class="o">-</span><span class="n">common</span><span class="o">-</span><span class="n">errors</span> <span class="mi">5</span>
+
+<span class="c1"># run de novo modified base detection for motif discovery</span>
+<span class="n">tombo</span> <span class="n">detect_modifications</span> <span class="n">de_novo</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">de_novo_testing</span> \
+   <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+
+<span class="c1"># output reference sequence around most significantly modified sites</span>
+<span class="n">tombo</span> <span class="n">text_output</span> <span class="n">signif_sequence_context</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">filename</span> <span class="n">de_novo_testing</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">stats</span> \
+   <span class="o">--</span><span class="n">sequences</span><span class="o">-</span><span class="n">filename</span> <span class="n">de_novo_testing</span><span class="o">.</span><span class="n">fasta</span>
+
+<span class="c1"># use command line meme (conda install -c bioconda meme) to estimate modified motif(s)</span>
+<span class="n">meme</span> <span class="o">-</span><span class="n">oc</span> <span class="n">de_novo_testing</span><span class="o">.</span><span class="n">meme</span> <span class="o">-</span><span class="n">dna</span> \
+   <span class="o">-</span><span class="n">mod</span> <span class="n">zoops</span> <span class="n">de_novo_testing</span><span class="o">.</span><span class="n">fasta</span>
+</pre></div>
+</div>
+<p>MEME will produce enriched motifs given the sites identified by Tombo de novo modified base detection. These motifs can be use to search public data bases for known methlyase recognition motifs and the exact modified base identity.</p>
+<p>While the Tombo framework cannot identify the type of modified base present within a motif context, the relative position of the modified base within that motif can be estimated using the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">motif_with_stats</span></code> command. This plot will identify the sites in the reference with the most significantly modified base testing values within a set distance of the designated motif and plot the generated statistics centered on this motif. For example if one had found the E. coli dcm <code class="docutils literal notranslate"><span class="pre">CCWGG</span></code> motif the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">motif_with_stats</span></code> command could be run as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">tombo</span> <span class="n">plot</span> <span class="n">motif_with_stats</span> <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">motif</span> <span class="n">CCWGG</span> <span class="o">--</span><span class="n">genome</span><span class="o">-</span><span class="n">fasta</span> <span class="n">reference</span><span class="o">.</span><span class="n">fasta</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">filename</span> <span class="n">de_novo_testing</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">stats</span> \
+   <span class="o">--</span><span class="n">pdf</span><span class="o">-</span><span class="n">filename</span> <span class="n">de_novo_testing</span><span class="o">.</span><span class="n">pdf</span>
+</pre></div>
+</div>
+<p>This would produce a plot like this:</p>
+<div class="figure align-center">
+<img alt="_images/stat_dist.png" src="_images/stat_dist.png" />
+</div>
+<hr class="docutils" />
+<p>Note that the most significant sites identified for this plot need not be within the motif provided. So if a random motif (not containing a methylase recognition motif in the sample of interest) is provided there should be no enrichment for significant sites within the motif. For example the <code class="docutils literal notranslate"><span class="pre">CAW</span></code> motif produces the following results:</p>
+<div class="figure align-center">
+<img alt="_images/stat_dist_null.png" src="_images/stat_dist_null.png" />
+</div>
+<hr class="docutils" />
+<p>Following this analysis a more accurate Tombo motif model can be produced in order to test for this specific modification in this or new samples.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># build model at discovered CCWGG motif and test on this sample</span>
+<span class="n">tombo</span> <span class="n">build_model</span> <span class="n">estimate_motif_alt_reference</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">filename</span> <span class="n">novel_de_novo</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">model</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">name</span> <span class="n">novel_mod</span> <span class="o">--</span><span class="n">motif</span><span class="o">-</span><span class="n">description</span> <span class="n">CCWGG</span><span class="p">:</span><span class="mi">2</span> \
+   <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+<span class="n">tombo</span> <span class="n">detect_modifications</span> <span class="n">alternative_model</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">novel_de_novo</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">filename</span> <span class="n">novel_de_novo</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">model</span> <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+
+<span class="c1"># use this model to call modifications in a new control sample</span>
+<span class="n">tombo</span> <span class="n">resquiggle</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">control</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> <span class="n">reference</span><span class="o">.</span><span class="n">fasta</span> \
+   <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="n">most</span><span class="o">-</span><span class="n">common</span><span class="o">-</span><span class="n">errors</span> <span class="mi">5</span>
+<span class="n">tombo</span> <span class="n">detect_modifications</span> <span class="n">alternative_model</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">control</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">novel_de_novo</span><span class="o">.</span><span class="n">control</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">filename</span> <span class="n">novel_de_novo</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">model</span> <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+</pre></div>
+</div>
+<p>Finally the quality of this model can be tested by comparing the results to a control sample which does not contain modifications (e.g. PCR).</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># validate model with ground truth comparison</span>
+<span class="n">tombo</span> <span class="n">plot</span> <span class="n">sample_compare_roc</span> <span class="o">--</span><span class="n">genome</span><span class="o">-</span><span class="n">fasta</span> <span class="n">reference</span><span class="o">.</span><span class="n">fasta</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">filenames</span> <span class="n">novel_de_novo</span><span class="o">.</span><span class="n">novel_mod</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">stats</span> \
+   <span class="o">--</span><span class="n">control</span><span class="o">-</span><span class="n">statistics</span><span class="o">-</span><span class="n">filenames</span> <span class="n">novel_de_novo</span><span class="o">.</span><span class="n">control</span><span class="o">.</span><span class="n">novel_mod</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">stats</span> \
+   <span class="o">--</span><span class="n">motif</span><span class="o">-</span><span class="n">descriptions</span> <span class="n">CCWGG</span><span class="p">:</span><span class="mi">2</span><span class="p">:</span><span class="s2">&quot;Novel De novo Modification&quot;</span> \
+   <span class="o">--</span><span class="n">pdf</span><span class="o">-</span><span class="n">filename</span> <span class="n">novel_de_novo</span><span class="o">.</span><span class="n">samp_comp_roc</span><span class="o">.</span><span class="n">pdf</span>
+</pre></div>
+</div>
+<p>This command will output quality metrics (AUC and mean AP) as well as plotting the ROC curve and precision-recall curve.</p>
+</div>
+<div class="section" id="build-motif-specific-model-from-ground-truth">
+<h2><a class="toc-backref" href="#id3">Build Motif-specific Model from Ground Truth</a><a class="headerlink" href="#build-motif-specific-model-from-ground-truth" title="Permalink to this headline">¶</a></h2>
+<p>In this tutorial a model is built from a sample containing modifications at known locations (e.g. bisulfite sequencing).</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In order to estimate a Tombo alternate base motif model, the sample must contain a valid reference observation for each k-mer (as defined by <code class="docutils literal notranslate"><span class="pre">--upstream-bases</span></code> and <code class="docutils literal notranslate"><span class="pre">--downstream-bases</span></code>), and ideally many observations for each k-mer.</p>
+<p>Note also that these estimated k-mer levels are approximations of the expected signal levels and that larger sequence contexts likely modulate the signal levels in most cases.</p>
+</div>
+<p>In this example, we have a sample with a modification occuring at the second base in TT dimers (as defined by the <code class="docutils literal notranslate"><span class="pre">--motif-description</span> <span class="pre">TT:2</span></code> option) and the modification exists specifically at the sites defined within the provided <code class="docutils literal notranslate"><span class="pre">--valid-locations-filename</span> <span class="pre">modified_locations.bed</span></code> file.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">tombo</span> <span class="n">resquiggle</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> <span class="n">reference</span><span class="o">.</span><span class="n">fasta</span> \
+   <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span> <span class="o">--</span><span class="n">num</span><span class="o">-</span><span class="n">most</span><span class="o">-</span><span class="n">common</span><span class="o">-</span><span class="n">errors</span> <span class="mi">5</span>
+
+<span class="c1"># build model specifying valid modificaiton locations</span>
+<span class="n">tombo</span> <span class="n">build_model</span> <span class="n">estimate_motif_alt_reference</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">filename</span> <span class="n">known_TT_mod</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">model</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">name</span> <span class="n">TT_mod</span> <span class="o">--</span><span class="n">motif</span><span class="o">-</span><span class="n">description</span> <span class="n">TT</span><span class="p">:</span><span class="mi">2</span> \
+   <span class="o">--</span><span class="n">valid</span><span class="o">-</span><span class="n">locations</span><span class="o">-</span><span class="n">filename</span> <span class="n">modified_locations</span><span class="o">.</span><span class="n">bed</span> \
+   <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+</pre></div>
+</div>
+<p>As in the previous de novo bacterial tutorial, the quality of this model can be tested by comparing the results to a control sample which does not contain modifications (e.g. PCR).</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># test on modified and control samples</span>
+<span class="n">tombo</span> <span class="n">detect_modifications</span> <span class="n">alternative_model</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">modified_sample</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">filename</span> <span class="n">known_TT_mod</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">model</span> <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+<span class="n">tombo</span> <span class="n">detect_modifications</span> <span class="n">alternative_model</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">control</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">control_sample</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">model</span><span class="o">-</span><span class="n">filename</span> <span class="n">known_TT_mod</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">model</span> <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+
+<span class="c1"># validate model with ground truth comparison</span>
+<span class="n">tombo</span> <span class="n">plot</span> <span class="n">sample_compare_roc</span> <span class="o">--</span><span class="n">genome</span><span class="o">-</span><span class="n">fasta</span> <span class="n">reference</span><span class="o">.</span><span class="n">fasta</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">filenames</span> <span class="n">modified_sample</span><span class="o">.</span><span class="n">TT_mod</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">stats</span> \
+   <span class="o">--</span><span class="n">control</span><span class="o">-</span><span class="n">statistics</span><span class="o">-</span><span class="n">filenames</span> <span class="n">control_sample</span><span class="o">.</span><span class="n">TT_mod</span><span class="o">.</span><span class="n">tombo</span><span class="o">.</span><span class="n">stats</span> \
+   <span class="o">--</span><span class="n">motif</span><span class="o">-</span><span class="n">descriptions</span> <span class="n">TT</span><span class="p">:</span><span class="mi">2</span><span class="p">:</span><span class="s2">&quot;Known TT Modification&quot;</span> \
+   <span class="o">--</span><span class="n">pdf</span><span class="o">-</span><span class="n">filename</span> <span class="n">TT_mod</span><span class="o">.</span><span class="n">samp_comp_roc</span><span class="o">.</span><span class="n">pdf</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="rna-level-testing">
+<h2><a class="toc-backref" href="#id4">RNA Level Testing</a><a class="headerlink" href="#rna-level-testing" title="Permalink to this headline">¶</a></h2>
+<p>RNA modifications can be more subtle to detect in raw nanopore data, so the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">level_sample_compare</span></code> compare method has been added in version 1.5. This tutorial walks through running this analysis and some considerations when doing so.</p>
+<p>Running the <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> command is quite similar to other modified base detection methods:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">tombo</span> <span class="n">detect_modifications</span> <span class="n">level_sample_compare</span> \
+   <span class="o">--</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">alternate</span><span class="o">-</span><span class="n">fast5</span><span class="o">-</span><span class="n">basedirs</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">comparison</span><span class="o">/</span><span class="n">fast5s</span><span class="o">/</span> \
+   <span class="o">--</span><span class="n">statistics</span><span class="o">-</span><span class="n">file</span><span class="o">-</span><span class="n">basename</span> <span class="n">level_testing</span> \
+   <span class="o">--</span><span class="n">statistic</span><span class="o">-</span><span class="nb">type</span> <span class="n">ks</span> <span class="o">--</span><span class="n">processes</span> <span class="mi">4</span>
+</pre></div>
+</div>
+<p>There are several considerations when running this command:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>This command computes effect size measures by default (as statistical measures are generally too dependent on sequencing depth, but are available via the <code class="docutils literal notranslate"><span class="pre">--store-p-value</span></code> option). Thus a higher read coverage threshold generally provides more robust results (<code class="docutils literal notranslate"><span class="pre">--minimum-test-reads</span></code> has a default of <code class="docutils literal notranslate"><span class="pre">50</span></code> for <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> command).</p></li>
+<li><p>The effect size meaasure produced should not be interpreted as a fraction of modified bases or confidence metric for a modified base at a site (though effect sizes for KS and U tests are in the range fro 0 to 1). Different modifications within different sequence contexts will produce different effect sizes under ideal conditions. But given higher read depth peaks in this value within a sample can be useful especially for hypothesis generation.</p></li>
+</ul>
+</div></blockquote>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="examples.html" class="btn btn-neutral float-right" title="Tombo Commands" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="index.html" class="btn btn-neutral float-left" title="Welcome to Tombo’s documentation!" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017-18, Oxford Nanopore Technologies
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

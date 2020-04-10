@@ -1,0 +1,372 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Modified Base Detection &mdash; Tombo 1.5.1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+        <script async="async" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Text Outputs" href="text_output.html" />
+    <link rel="prev" title="Re-squiggle Algorithm" href="resquiggle.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Tombo
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.5.1
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tombo Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Tombo Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="resquiggle.html">Re-squiggle Algorithm</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Modified Base Detection</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#specific-alternate-base-detection-recommended">Specific Alternate Base Detection (Recommended)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#de-novo-non-canonical-base-method">De novo Non-canonical Base Method</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#canonical-sample-comparison-methods">Canonical Sample Comparison Methods</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#aggregating-per-read-statistics">Aggregating Per-read Statistics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#dampened-fraction-estimates">Dampened Fraction Estimates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#multi-processing">Multi-processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-statistics-file-format">Tombo Statistics File Format</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#per-read-statistics-file-format">Per-read Statistics File Format</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="text_output.html">Text Outputs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="plotting.html">Plotting Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="filtering.html">Read Filtering Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rna.html">RNA Processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_training.html">Model Training (Advanced Users Only)</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tombo.html">tombo package</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Tombo</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Modified Base Detection</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/modified_base_detection.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="modified-base-detection">
+<h1>Modified Base Detection<a class="headerlink" href="#modified-base-detection" title="Permalink to this headline">¶</a></h1>
+<p>Tombo enables four methods (including two sample comparison methods) for detecting shifts in raw current signal level, indicative of non-canonical bases. These four methods allow researchers to investigate non-canonical bases given any sample type, while enabling more accurate detection of specific modifications when applicable.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id1">
+<img alt="_images/testing_method_comparison.png" src="_images/testing_method_comparison.png" />
+<p class="caption"><span class="caption-text">Tombo modified base testing methods.</span><a class="headerlink" href="#id1" title="Permalink to this image">¶</a></p>
+</div>
+<hr class="docutils" />
+<p>All four methods are accessed by the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code> command group as described below.</p>
+<p><strong>TL;DR</strong>:</p>
+<ul class="simple">
+<li><p>Motif-specific models (new in version 1.5; E. coli dcm and dam and CpG methylation motifs available) provide the most accurate modified base detection and are thus the preferred method where applicable.</p>
+<ul>
+<li><p>Access these models via the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">alternative_model</span></code> command with the <code class="docutils literal notranslate"><span class="pre">--alternate-bases</span> <span class="pre">dam</span> <span class="pre">dcm</span> <span class="pre">CpG</span></code> option.</p></li>
+</ul>
+</li>
+<li><p>All-context alternate models (less accurate than motif models) identify 5-methylcytosine (5mC; DNA or RNA) and N6-methyladenosine (6mA; DNA only) in any sequence context, run <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">alternative_model</span></code> with the <code class="docutils literal notranslate"><span class="pre">--alternate-bases</span> <span class="pre">5mC</span> <span class="pre">6mA</span></code> option.</p></li>
+<li><p>For more experimental <em>de novo</em> modified base detection run <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">de_novo</span></code> providing only a set of reads to compare with the canonical base model</p></li>
+<li><p>For modified base detection via comparison to a control sample (e.g. PCR or IVT) run <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">model_sample_compare</span></code> with a control set of reads (<code class="docutils literal notranslate"><span class="pre">--control-fast5-basedirs</span></code>)</p></li>
+<li><p>For modified base detection via comparison to any second sample run <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">level_sample_compare</span></code> with a second set of reads (<code class="docutils literal notranslate"><span class="pre">--alternate-fast5-basedirs</span></code>)</p></li>
+<li><p>Each <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code> command will produce a binary file (not intended for use outside the Tombo framework)</p>
+<ul>
+<li><p>To extract useful text files see the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">text_output</span></code> commands</p></li>
+<li><p>To visualize raw signal around significant regions use the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">most_significant</span></code> command</p></li>
+<li><p>To assess testing results given a ground truth (motif or previously identified sites) use the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">motif_with_stats</span></code>, <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">roc</span></code>, <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">sample_compare_roc</span></code>, <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">per_read_roc</span></code> and  <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">sample_compare_per_read_roc</span></code> commands</p></li>
+</ul>
+</li>
+</ul>
+<div class="admonition hint">
+<p class="admonition-title">Hint</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">resquiggle</span></code> command must be run on a set of reads before processing with <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code>.</p>
+</div>
+<div class="section" id="specific-alternate-base-detection-recommended">
+<h2>Specific Alternate Base Detection (Recommended)<a class="headerlink" href="#specific-alternate-base-detection-recommended" title="Permalink to this headline">¶</a></h2>
+<p>In order to detect a specific non-canonical base, use the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">alternative_model</span></code> command. This command identifies sites where signal matches the expected levels for an alternate base better than the canonical expected levels. This command computes a statistic similar to a log likelihood ratio (LLR) but dynamically scaled to be more robust to outlier signal levels. This statistic is computed for each “swap base” within each read provided (e.g. each cytosine for 5mC detection or each adenine for 6mA detection).</p>
+<p>This statistic is computed by scaling the LLR by the normal likelihood function with the same variance and mean halfway between the canonical and alternate expected signal levels. Three additional scaling factors are added to this function in order to give greater weight to sequence contexts with larger differences between the canonical and alternate expected signal levels, which inherently provide more power to distinguish the canonical and alternate base signal levels. These parameters are also set so that values are on relatively the same scale as a log likelihood ratio for setting <code class="docutils literal notranslate"><span class="pre">--single-read-threshold</span></code> values. Default values for the scale factors below are <span class="math notranslate nohighlight">\(S_f = 4\)</span>, <span class="math notranslate nohighlight">\(S_{f2} = 3\)</span> and <span class="math notranslate nohighlight">\(S_p = 0.3\)</span>, which produce the functions shown in the figure below. Users can experiment with the effect of these parameters with the provided <code class="docutils literal notranslate"><span class="pre">scripts/outlier_robust_llr.R</span></code> script.</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}\begin{align}
+ScaleDiff&amp; = NormSignal - \frac{CanonicalMean + AltMean}{2}\\
+MeanDiffs&amp; = |CanonicalMean - AltMean|\\
+OutlierRobustLlr&amp; = \frac{e^{\frac{ScaleDiff^2}{S_f \cdot \sigma^2}} \cdot LLR}{\sigma^2 \cdot {MeanDiffs}^{S_p} \cdot S_{f2}}
+\end{align}\end{split}\]</div>
+<p>In order to compute a standard log likelihood ratio, use the <code class="docutils literal notranslate"><span class="pre">--standard-log-likelihood-ratio</span></code> option.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id2">
+<img alt="_images/outlier_robust_llr.gif" src="_images/outlier_robust_llr.gif" />
+<p class="caption"><span class="caption-text">Tombo outlier-robust versus standard likelihood ratio statistic over varied differences between canonical and alternate expected signal levels.</span><a class="headerlink" href="#id2" title="Permalink to this image">¶</a></p>
+</div>
+<hr class="docutils" />
+<p>This statistic is computed and summed over all positions where the base of interest is included in the modeled k-mer. The default DNA model is a 6-mer, so the signal at the six surrounding genomic bases contribute to the resulting statistic at any one position. For example, for 5mC detection within in a TGGTA <strong>C</strong> GTCCG context, the signal will be tested against expected canonical and alternate 5mC levels at the following locations:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">TGGTA</span> <span class="o">**</span><span class="n">C</span><span class="o">**</span> <span class="n">GTCCG</span>
+<span class="o">-----------------</span>
+<span class="n">TGGTA</span> <span class="o">**</span><span class="n">C</span><span class="o">**</span>
+ <span class="n">GGTA</span> <span class="o">**</span><span class="n">C</span><span class="o">**</span> <span class="n">G</span>
+  <span class="n">GTA</span> <span class="o">**</span><span class="n">C</span><span class="o">**</span> <span class="n">GT</span>
+   <span class="n">TA</span> <span class="o">**</span><span class="n">C</span><span class="o">**</span> <span class="n">GTC</span>
+    <span class="n">A</span> <span class="o">**</span><span class="n">C</span><span class="o">**</span> <span class="n">GTCC</span>
+      <span class="o">**</span><span class="n">C</span><span class="o">**</span> <span class="n">GTCCG</span>
+</pre></div>
+</div>
+<p>New alternate base models will be added as they are trained and validated internally. This is the perferred method for modified base detection if a model is available for your biological sample of interest as the exact modification position is identified.</p>
+<p>Motif-specific models were added in version 1.5 and provide more accurate results based on the model estimation procedure. These motif-specific models will also help to improve the all-context models in the future. Motif-specific models are available for E. coli dam and dcm methylation as well as CpG methylation.</p>
+<p>Motif-specific models are much more user-friendly to train as seen in the <a class="reference internal" href="model_training.html"><span class="doc">Model Training (Advanced Users Only)</span></a> section.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>tombo detect_modifications alternative_model --fast5-basedirs &lt;fast5s-base-directory&gt; <span class="se">\</span>
+    --alternate-bases CpG --statistics-file-basename sample.alt_model
+</pre></div>
+</div>
+</div>
+<div class="section" id="de-novo-non-canonical-base-method">
+<h2>De novo Non-canonical Base Method<a class="headerlink" href="#de-novo-non-canonical-base-method" title="Permalink to this headline">¶</a></h2>
+<p>In order to perform <em>de novo</em> non-canonical base detection, use the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">de_novo</span></code> command. This method is ideal for unknown modification motif detection when using in combination with the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">text_output</span> <span class="pre">signif_sequence_context</span></code> command and motif detection software (e.g. <a class="reference external" href="http://meme-suite.org/tools/meme">MEME</a>).</p>
+<p>For each read at each position, this method performs a hypothesis test against the canonical model based on the genomic sequence. Note that this method can be quite error prone and may result in a high false positive rate. This method has the advantage of being the lowest barrier to entry, requiring only a set of reads and a reference sequence, allowing any nanopore researcher to start investigating potentially any type of modified base.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>tombo detect_modifications de_novo --fast5-basedirs &lt;fast5s-base-directory&gt; <span class="se">\</span>
+    --statistics-file-basename sample.de_novo
+</pre></div>
+</div>
+</div>
+<div class="section" id="canonical-sample-comparison-methods">
+<h2>Canonical Sample Comparison Methods<a class="headerlink" href="#canonical-sample-comparison-methods" title="Permalink to this headline">¶</a></h2>
+<p>As of version 1.5, Tombo provides two sample comparison methods for modified base detection (<code class="docutils literal notranslate"><span class="pre">model_sample_compare</span></code> and <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code>).</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">model_sample_compare</span></code> method (equivalent to <code class="docutils literal notranslate"><span class="pre">sample_compare</span></code> method from Tombo versions &lt;1.5) uses a control set of reads (e.g. PCR for DNA or IVT for RNA; provided via the <code class="docutils literal notranslate"><span class="pre">--control-fast5-basedirs</span></code> option) to adjust the canonical model for un-modeled local effects. This locally adjusted model is then used as in the <code class="docutils literal notranslate"><span class="pre">de_novo</span></code> method to identify deviations from this expected level. The amount of adjustment based on the observed levels can be controlled with the <code class="docutils literal notranslate"><span class="pre">--model-prior-weights</span></code> option, which essentially sets a number of pseudo-observations supporting the canonical model. Use the <code class="docutils literal notranslate"><span class="pre">--sample-only-estimates</span></code> option to estimate the local expected level only from observed reads (recommended only for high coverage samples).</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> method (new in version 1.5) compares two sets of reads to identify inequality in signal level distributions. This method, unlike the other three detection methods, does not perform per-read testing, but compares the two groups of signal levels at each reference position. This method applies either a KS-test (default), U-test or T-test and saves either an effect size statistic (default) or significance p-value. For each test the effect size statistics are the D-statistic for the KS-test, the common language effect size for the U-test (transformed to <code class="docutils literal notranslate"><span class="pre">abs(0.5</span> <span class="pre">-</span> <span class="pre">S)</span> <span class="pre">*</span> <span class="pre">2</span></code> to result in a 0 to 1 scale with 1 indicating a modification) and Cohen’s D for the T-test.</p>
+<p>It is recommended that a higher <code class="docutils literal notranslate"><span class="pre">--minimum-test-reads</span></code> value be set for the <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> command (default is 50) in order to obtain a reliable estimate for the effect size and avoid high false positive rates. This method can be the most reliable for many direct RNA applications where a comparison sample is available.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>tombo detect_modifications model_sample_compare --fast5-basedirs &lt;fast5s-base-directory&gt; <span class="se">\</span>
+    --control-fast5-basedirs &lt;control-fast5s-base-directory&gt; <span class="se">\</span>
+    --statistics-file-basename sample.model_compare_sample
+
+tombo detect_modifications level_sample_compare --fast5-basedirs &lt;fast5s-base-directory&gt; <span class="se">\</span>
+    --alternate-fast5-basedirs &lt;alternate-fast5s-base-directory&gt; <span class="se">\</span>
+    --statistics-file-basename sample.level_compare_sample
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Due to the nature of nanopore sequencing, the context surrounding the read head effects the electric current observed at any position. Thus shifts in signal due to a modified base may occur at several positions to either side of the true assigned modified base location. In order to account for this, the canonical sample and <em>de novo</em> modfied base detection methods accept the <code class="docutils literal notranslate"><span class="pre">--fishers-method-context</span></code> option which combines test values, using <a class="reference external" href="https://en.wikipedia.org/wiki/Fisher%27s_method">Fisher’s Method</a>, over a moving window across each read. For the <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> method the statistics are averaged over this window. This can help to center significant values on true modified base positions. The default value for this parameter is 1, but reasonable results can be obtained for values between 0 and 3.</p>
+</div>
+</div>
+<div class="section" id="aggregating-per-read-statistics">
+<h2>Aggregating Per-read Statistics<a class="headerlink" href="#aggregating-per-read-statistics" title="Permalink to this headline">¶</a></h2>
+<p>All of the above methods (except the <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> method) compute per-read, per-genome location test statistics. In order to facilitate research at the reference location level, these per-read statistics are combined at each reference position by applying a global threshold identifying each read as supporting a canonical or alternate base. This results in a fraction of reads indicating a modified base at each reference position. This global threshold may consist of a single threshold value or a pair of values (where test statistics between the values do not contribute to the estimated fraction of modified reads).</p>
+<p>All <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code> methods enable output of per-read test statistics (<code class="docutils literal notranslate"><span class="pre">--per-read-statistics-basename</span></code>). Tombo also provides the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">aggregate_per_read_stats</span></code> command in order to apply different global threshold values to per-read statistics without re-computing these statistics. Note it is not possible to change other testing parameters from this command (e.g. <code class="docutils literal notranslate"><span class="pre">--fishers-method-context</span></code>).</p>
+</div>
+<div class="section" id="dampened-fraction-estimates">
+<h2>Dampened Fraction Estimates<a class="headerlink" href="#dampened-fraction-estimates" title="Permalink to this headline">¶</a></h2>
+<p>At low coverage locations the fraction of modified reads estimates can be poor. Thus the <code class="docutils literal notranslate"><span class="pre">--coverage-dampen-counts</span></code> option is provided in order to dampen the estimated fraction of modified reads at low coverage locations. This allows easier use of the dampened fraction statistic in downstream analysis.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>The fraction estimate includes pseudo-counts added to the un-modified and modified read counts (as specified by the <code class="docutils literal notranslate"><span class="pre">--coverage-dampen-counts</span></code> option)</p></li>
+<li><p>This is equivalent to using a beta prior when estimating the fraction of reads modified at each position</p></li>
+<li><p>Test the effect of different dampen counts using the <code class="docutils literal notranslate"><span class="pre">scripts/test_beta_priors.R</span></code> (the default values are shown below)</p></li>
+<li><p>The raw fraction is still included in the statistics file as well</p></li>
+</ul>
+</div></blockquote>
+<hr class="docutils" />
+<div class="figure align-center" id="id3">
+<img alt="_images/dampened_fraction.png" src="_images/dampened_fraction.png" />
+<p class="caption"><span class="caption-text">Heatmap showing the resulting dampened farction of modified reads given the default <code class="docutils literal notranslate"><span class="pre">--coverage-dampen-counts</span></code> values over range of coverage and number of un-modified reads for default <code class="docutils literal notranslate"><span class="pre">--coverage-dampen-counts</span> <span class="pre">2</span> <span class="pre">0</span></code>.</span><a class="headerlink" href="#id3" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="multi-processing">
+<h2>Multi-processing<a class="headerlink" href="#multi-processing" title="Permalink to this headline">¶</a></h2>
+<p>Tombo statistical testing provides the option to perform testing spread across multiple processes. This also limits the memory requirement for modified base detection, as only signal levels within a multiprocess block are held in memory. For very high coverage samples, consider lowering the <code class="docutils literal notranslate"><span class="pre">--multiprocess-region-size</span></code> value to minimize computational memory usage.</p>
+<p>Multi-processing is performed over batches delineated by regular intervals across chromosomes covered by at least one read. The interval size is determined by the <code class="docutils literal notranslate"><span class="pre">--multiprocess-region-size</span></code> option and processed by a number of processors indicated by the <code class="docutils literal notranslate"><span class="pre">--processes</span></code> option. The produced per-base (and per-reda) results are identical no matter the multi-processing options selected. These regions are also used as batches to store the pre-read statistics file.</p>
+</div>
+<div class="section" id="tombo-statistics-file-format">
+<h2>Tombo Statistics File Format<a class="headerlink" href="#tombo-statistics-file-format" title="Permalink to this headline">¶</a></h2>
+<p>For all modified base detection methods, the result is a binary Tombo statistics file. This file contains statistics associated with each genomic base producing a valid result. This file is not intended for use outside of the Tombo framework. Several Tombo commands (e.g. <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">text_output</span> <span class="pre">browser_files</span></code>, <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">text_output</span> <span class="pre">signif_sequence_context</span></code> and <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">most_significant</span></code>) take the binary statistics file as an input, accommodating many user pipelines downstream of modified base detection.</p>
+<p>While the Tombo statistics file is meant to be a binary file not processed by outside tools its contents are described here for completeness. Access to this file is recommended through the <code class="docutils literal notranslate"><span class="pre">tombo.tombo_helper.TomboStats</span></code> object in the Tombo python API.</p>
+<p>The Tombo statistics file is in <a class="reference external" href="https://support.hdfgroup.org/HDF5/whatishdf5.html">HDF5 format</a>. Attributes at the root level are 1) <code class="docutils literal notranslate"><span class="pre">stat_type</span></code> indicating which testing method was used (<code class="docutils literal notranslate"><span class="pre">model_compare</span></code>, <code class="docutils literal notranslate"><span class="pre">de_novo</span></code>, <code class="docutils literal notranslate"><span class="pre">model_sample_compare</span></code>, or <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code>), 2) <code class="docutils literal notranslate"><span class="pre">block_size</span></code> indicating the number of genomic bases in each statistics block and 3) <cite>Cov_Threshold`</cite> containing the coverage threshold applied to this file (except for <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> files).</p>
+<p>Blocks of statistics are stored in the <code class="docutils literal notranslate"><span class="pre">Statistic_Blocks</span></code> group. Within this group, each block of statistics is found within a group named <code class="docutils literal notranslate"><span class="pre">Group_NNN</span></code>. Each group contains attributes for the block <code class="docutils literal notranslate"><span class="pre">start</span></code>, <code class="docutils literal notranslate"><span class="pre">chrm</span></code> and <code class="docutils literal notranslate"><span class="pre">strand</span></code>. The <code class="docutils literal notranslate"><span class="pre">block_stats</span></code> data set contains the per-location statistics records. Each record contains the following attributes: <code class="docutils literal notranslate"><span class="pre">damp_frac</span></code>, <code class="docutils literal notranslate"><span class="pre">frac</span></code>, <code class="docutils literal notranslate"><span class="pre">pos</span></code>, <code class="docutils literal notranslate"><span class="pre">chrm</span></code>, <code class="docutils literal notranslate"><span class="pre">strand</span></code>, <code class="docutils literal notranslate"><span class="pre">cov</span></code>, <code class="docutils literal notranslate"><span class="pre">control_cov</span></code>, and <code class="docutils literal notranslate"><span class="pre">valid_cov</span></code>. For <code class="docutils literal notranslate"><span class="pre">level_sample_compare</span></code> files the <code class="docutils literal notranslate"><span class="pre">damp_frac</span></code> and <code class="docutils literal notranslate"><span class="pre">frac</span></code> values are replaced by the <code class="docutils literal notranslate"><span class="pre">stat</span></code> value.</p>
+<p><code class="docutils literal notranslate"><span class="pre">frac</span></code> contains the fraction of valid (not including per-read statistics within the interval specified by <code class="docutils literal notranslate"><span class="pre">--single_read_threshold</span></code>) reads at this genomic position identified as the standard base.</p>
+<p><code class="docutils literal notranslate"><span class="pre">cov</span></code>, <code class="docutils literal notranslate"><span class="pre">control_cov</span></code>, and <code class="docutils literal notranslate"><span class="pre">valid_cov</span></code> contain the read coverage at the genomic position for the sample and control reads. <code class="docutils literal notranslate"><span class="pre">control_cov</span></code> is only applicable for the control sample comparison testing method. <code class="docutils literal notranslate"><span class="pre">valid_cov</span></code> contains the number of reads contributing to the <code class="docutils literal notranslate"><span class="pre">frac</span></code> of tested reads as defined by <code class="docutils literal notranslate"><span class="pre">--single-read-threshold</span></code>.</p>
+</div>
+<div class="section" id="per-read-statistics-file-format">
+<h2>Per-read Statistics File Format<a class="headerlink" href="#per-read-statistics-file-format" title="Permalink to this headline">¶</a></h2>
+<p>Per-read statistics can be stored by setting the <code class="docutils literal notranslate"><span class="pre">--per-read-statistics-basename</span></code> option to any <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code> command. This output file can then be used in downstream Tombo sub-commands (e.g. the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">plot</span> <span class="pre">per_read</span></code> and <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">aggregate_per_read_stats</span></code> commands).</p>
+<p>For advanced users, the Tombo per-read statsitics file can be accessed via the Tombo python API using the <code class="docutils literal notranslate"><span class="pre">tombo.tombo_stats.PerReadStats</span></code> class. This class provides initialization, simply taking the per-read statsitics filename. The <code class="docutils literal notranslate"><span class="pre">PerReadStats</span></code> class supports the <code class="docutils literal notranslate"><span class="pre">get_region_stats</span></code> function which takes a <code class="docutils literal notranslate"><span class="pre">tombo.tombo_helper.intervalData</span></code> object specifying an interval of interest. This will return a numpy array containing a record for each read (specified by the <code class="docutils literal notranslate"><span class="pre">read_id</span></code> field) and each tested genomic position (<code class="docutils literal notranslate"><span class="pre">pos</span></code> field) along with the test statistic (<code class="docutils literal notranslate"><span class="pre">stat</span></code> field) at that location.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>All other optional arguments to the <code class="docutils literal notranslate"><span class="pre">tombo.tombo_stats.PerReadStats</span></code> constructor should be left as <code class="docutils literal notranslate"><span class="pre">None</span></code>; setting these values will delete the file and construct a blank per-read statistics file.</p>
+</div>
+<p>The per-read statistics file is in the HDF5 format. All blocks are stored within the <code class="docutils literal notranslate"><span class="pre">Statistic_Blocks</span></code> slot. The size of the blocks is stored in the <code class="docutils literal notranslate"><span class="pre">block_size</span></code> attribute (defined by the <code class="docutils literal notranslate"><span class="pre">--multiprocess-region-size</span></code> option) and the type of statistical test applied is stored in the <code class="docutils literal notranslate"><span class="pre">stat_type</span></code> attribute.</p>
+<p>Each genomic block is stored in a different <code class="docutils literal notranslate"><span class="pre">Block_[##]</span></code> slot. These slots do not have any particular order. Within each block the <code class="docutils literal notranslate"><span class="pre">chrm</span></code>, <code class="docutils literal notranslate"><span class="pre">strand</span></code> and <code class="docutils literal notranslate"><span class="pre">start</span></code> of the block are stored. The block statistics are stored in the <code class="docutils literal notranslate"><span class="pre">block_stats</span></code> slot. Per-read statistics contain a record for each tested location within each read. Each record contains the genomic position (<code class="docutils literal notranslate"><span class="pre">pos</span></code>), the test statistic (<code class="docutils literal notranslate"><span class="pre">stat</span></code>; hypothesis test p-value or log likelihood ratio as indicated by the statistic type), and the <code class="docutils literal notranslate"><span class="pre">read_id</span></code>. A single read spanning multiple blocks will contain statistics in more than one block. An individual read’s statistics can be reconstructed using the <code class="docutils literal notranslate"><span class="pre">read_id</span></code> field.</p>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="text_output.html" class="btn btn-neutral float-right" title="Text Outputs" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="resquiggle.html" class="btn btn-neutral float-left" title="Re-squiggle Algorithm" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017-18, Oxford Nanopore Technologies
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

@@ -1,0 +1,263 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Read Filtering Commands &mdash; Tombo 1.5.1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+        <script async="async" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="RNA Processing" href="rna.html" />
+    <link rel="prev" title="Plotting Commands" href="plotting.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Tombo
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.5.1
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tombo Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Tombo Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="resquiggle.html">Re-squiggle Algorithm</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modified_base_detection.html">Modified Base Detection</a></li>
+<li class="toctree-l1"><a class="reference internal" href="text_output.html">Text Outputs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="plotting.html">Plotting Commands</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Read Filtering Commands</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-filter-genome-locations"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">genome_locations</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-filter-raw-signal-matching"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">raw_signal_matching</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-filter-q-score"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">q_score</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-filter-level-coverage"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">level_coverage</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-filter-stuck"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">stuck</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-filter-clear-filters"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">clear_filters</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rna.html">RNA Processing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_training.html">Model Training (Advanced Users Only)</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tombo.html">tombo package</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Tombo</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Read Filtering Commands</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/filtering.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="read-filtering-commands">
+<h1>Read Filtering Commands<a class="headerlink" href="#read-filtering-commands" title="Permalink to this headline">¶</a></h1>
+<p>Read filtering commands can be useful to extract the most out out of a set of reads for modified base detection. Read filtering commands effect only the Tombo index file, and so filters can be cleared or applied iteratively without re-running the re-squiggle command. Five filters are currently made available (<code class="docutils literal notranslate"><span class="pre">genome_locations</span></code>, <code class="docutils literal notranslate"><span class="pre">raw_signal_matching</span></code>, <code class="docutils literal notranslate"><span class="pre">q_score</span></code>,  <code class="docutils literal notranslate"><span class="pre">level_coverage</span></code> and <code class="docutils literal notranslate"><span class="pre">stuck</span></code>).</p>
+<div class="admonition hint">
+<p class="admonition-title">Hint</p>
+<p>Hint: Save a set of filters for later use by copying the Tombo index file: <code class="docutils literal notranslate"><span class="pre">cp</span> <span class="pre">path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index</span> <span class="pre">save.native.tombo.index</span></code>. To re-set to a set of saved filters after applying further filters simply replace the index file: <code class="docutils literal notranslate"><span class="pre">cp</span> <span class="pre">save.native.tombo.index</span> <span class="pre">path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index</span></code>.</p>
+</div>
+<div class="section" id="tombo-filter-genome-locations">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">genome_locations</span></code><a class="headerlink" href="#tombo-filter-genome-locations" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">genome_locations</span></code> command filters out reads falling outside of a specified set of <code class="docutils literal notranslate"><span class="pre">--include-regions</span></code>. These regions can either be whole chromosomes/sequence records or sub-regions within sequence records.</p>
+</div>
+<div class="section" id="tombo-filter-raw-signal-matching">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">raw_signal_matching</span></code><a class="headerlink" href="#tombo-filter-raw-signal-matching" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">raw_signal_matching</span></code> command filters out reads with poor matching between raw observed signal and expected signal levels from the canonical base model. Specify a new threshold to apply with the <code class="docutils literal notranslate"><span class="pre">--signal-matching-score</span></code> option. These scores are the mean half z-score (absolute value of z-score) taken over all bases of a read. A reasonable range for this threshold should be approxiamtely between 0.5 and 3. Reads with a larger fraction of modifications may require a larger value to process successfully.</p>
+</div>
+<div class="section" id="tombo-filter-q-score">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">q_score</span></code><a class="headerlink" href="#tombo-filter-q-score" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">q_score</span></code> command filters out reads with poor mean basecalling quality scores. This value can be indicative of low quality reads. Set this value with the <code class="docutils literal notranslate"><span class="pre">--q-score</span></code> option.</p>
+</div>
+<div class="section" id="tombo-filter-level-coverage">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">level_coverage</span></code><a class="headerlink" href="#tombo-filter-level-coverage" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">level_coverage</span></code> command aims to filter reads to achieve more even read depth across a genome/transcriptome. This may be useful in canonical and alternative model estimation. This filter may also help make test statistics more comparable across the genome.</p>
+<p>This filter is applied by randomly selecting reads weighted by the approximate coverage at the mapped location of each read. The number of reads removed from downstream processing is defined by the <code class="docutils literal notranslate"><span class="pre">--percent-to-filter</span></code> option.</p>
+<p>This filter is likely to be more useful for PCR’ed sample where duplicate locations are more likely to accumulate and cause large spikes in coverage.</p>
+</div>
+<div class="section" id="tombo-filter-stuck">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">stuck</span></code><a class="headerlink" href="#tombo-filter-stuck" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">stuck</span></code> command aims to remove reads where bases tend to get stuck in the pore for longer durations of time. These reads can be indicative of poor quality reads and thus negatively effect modified base detection.</p>
+<p>This filter is based on the number of observations per genomic base along a read. The filter can be set on any number of percentiles of obervations per base. Reasonable values depend strongly on the sample type (DNA or RNA). A reasonable filter for DNA reads would be to filter reads with 99th percentile &gt; 200 obs/base or a maximum base with &gt; 5k obs/base. This filter would be set with the <code class="docutils literal notranslate"><span class="pre">--obs-per-base-filter</span> <span class="pre">99:200</span> <span class="pre">100:5000</span></code> option. Larger values should be used for RNA reads.</p>
+</div>
+<div class="section" id="tombo-filter-clear-filters">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">clear_filters</span></code><a class="headerlink" href="#tombo-filter-clear-filters" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filters</span> <span class="pre">clear_filters</span></code> command removes any applied filters to this sample (including those applied during the <code class="docutils literal notranslate"><span class="pre">resquiggle</span></code> command; though reads that failed before signal to sequence assignment will not be included). New filters can then be applied to this set of reads.</p>
+<p>All Tombo sub-commands will respect the filtered reads when parsed for processing.</p>
+<div class="admonition hint">
+<p class="admonition-title">Hint</p>
+<p>Save a set of filters for later use by copying the Tombo index file: <code class="docutils literal notranslate"><span class="pre">cp</span> <span class="pre">path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index</span> <span class="pre">save.native.tombo.index</span></code>. To re-set to a set of saved filters after applying further filters simply replace the index file: <code class="docutils literal notranslate"><span class="pre">cp</span> <span class="pre">save.native.tombo.index</span> <span class="pre">path/to/native/rna/.fast5s.RawGenomeCorrected_000.tombo.index</span></code>.</p>
+</div>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="rna.html" class="btn btn-neutral float-right" title="RNA Processing" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="plotting.html" class="btn btn-neutral float-left" title="Plotting Commands" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017-18, Oxford Nanopore Technologies
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

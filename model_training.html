@@ -1,0 +1,321 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Model Training (Advanced Users Only) &mdash; Tombo 1.5.1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+        <script async="async" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="tombo package" href="tombo.html" />
+    <link rel="prev" title="RNA Processing" href="rna.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Tombo
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.5.1
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tombo Tutorials</a></li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Tombo Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="resquiggle.html">Re-squiggle Algorithm</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modified_base_detection.html">Modified Base Detection</a></li>
+<li class="toctree-l1"><a class="reference internal" href="text_output.html">Text Outputs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="plotting.html">Plotting Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="filtering.html">Read Filtering Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rna.html">RNA Processing</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Model Training (Advanced Users Only)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-build-model-estimate-reference"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_reference</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#alternative-model-estimation">Alternative Model Estimation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#alternative-reference-goals">Alternative Reference Goals</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#motif-specific-alternative-reference-estimation">Motif-specific Alternative Reference Estimation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#all-contexts-alternative-reference-estimation">All-contexts Alternative Reference Estimation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#base-level-extraction">Base Level Extraction</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#signal-level-density-estimation">Signal Level Density Estimation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#alternative-base-density-isolation">Alternative Base Density Isolation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#alternative-base-incorporation-rate">Alternative Base Incorporation Rate</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#canonical-density-subtraction">Canonical Density “Subtraction”</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#alternative-model-output">Alternative Model Output</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-build-model-event-resquiggle"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">event_resquiggle</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#tombo-build-model-estimate-scale"><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_scale</span></code></a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tombo.html">tombo package</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Tombo</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Model Training (Advanced Users Only)</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/model_training.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="model-training-advanced-users-only">
+<h1>Model Training (Advanced Users Only)<a class="headerlink" href="#model-training-advanced-users-only" title="Permalink to this headline">¶</a></h1>
+<p>Model training is made available via several Tombo commands, but should be used with care as these methods can be very sensetive to the samples used. Commands relevant to model training are found within the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span></code> command group. The commands are <code class="docutils literal notranslate"><span class="pre">estimate_reference</span></code> for estimating a canonical bases model, <code class="docutils literal notranslate"><span class="pre">estimate_alt_reference</span></code> for estimation of a non-canonical alternative base model, <code class="docutils literal notranslate"><span class="pre">estimate_motif_alt_reference</span></code> for estimation of a more accurate motif-specific non-canonical alternate base model, and <code class="docutils literal notranslate"><span class="pre">event_resquiggle</span></code> for re-squiggling reads without a model (requires event-based base caller results).</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Model training produces a binary Tombo model file (as those packaged with Tombo found in the code repository in <code class="docutils literal notranslate"><span class="pre">tombo/tombo_models</span></code>). User-created Tombo models can be used in re-squiggling, modified base detection and plotting commands using the advanced <code class="docutils literal notranslate"><span class="pre">--tombo-model-filename</span></code> option. This option is generally for advanced users training their own models, so this option is not shown in the command line help documentation, but is available for all applicable commands. Similarly user-created alternative models can be passed to plotting commands via the hidden <code class="docutils literal notranslate"><span class="pre">--alternate-model-filename</span></code> option and passed to applicable commands via the advanced <code class="docutils literal notranslate"><span class="pre">--alternate-model-filenames</span></code> option.</p>
+</div>
+<div class="section" id="tombo-build-model-estimate-reference">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_reference</span></code><a class="headerlink" href="#tombo-build-model-estimate-reference" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_reference</span></code> command is provided to estimate a Tombo model for canonical bases only.</p>
+<p>To estimate a canonical model, first genomic base levels are parsed from reads as assigned by a re-squiggle command (either <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">event_resquiggle</span></code> or <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">resquiggle</span></code> processed reads are acceptable) and grouped by their genomic base assignment. By default, the median and standard deviation of the current level over reads covering each genomic position is computed. The <code class="docutils literal notranslate"><span class="pre">--estimate-mean</span></code> option will trigger this to be computed as a mean instead, though this can be sensetive to outlier read signal assignment and is thus not recommended.</p>
+<p>All genomic current levels are then grouped based on the reference sequence local k-mer. The k-mer is defined by the <code class="docutils literal notranslate"><span class="pre">--upstream-bases</span></code> and <code class="docutils literal notranslate"><span class="pre">--downstream-bases</span></code> options. Note that the modeled k-mer will be one longer than the sum of these two options as the k-mer includes the <em>dominant</em>, central position as well. The central position generally has the strongest correlation with the current signal level as can be seen with the <code class="docutils literal notranslate"><span class="pre">plot</span> <span class="pre">kmer</span></code> command.</p>
+<p>The reference signal level and spread for each k-mer are then estimated by taking the median of the signal level and mean of the standard deviation over all observations of each k-mer across the genome. By default, a single global standard deviation is taken as the median over all k-mers. The <code class="docutils literal notranslate"><span class="pre">--kmer-specific-sd</span></code> option is provided in order to estimate a seperate standard deviation for each k-mer, but is not recommended as this can have negative effects on some Tombo analyses. In particular, k-mer specific standard deviation estimates can produce poor re-squiggle results due to signal being “packed” into high SD k-mers. Note that these levels are an approximation for the expected signal levels at a position, but consistent deviations from this model indicate that nanopore signal is modulated at some rate by longer range sequence effects.</p>
+<p>These values are stored in the output file in the binary HDF5 format and can be passed to any Tombo command that takes a Tombo model file.</p>
+<p>Several options are supplied in order to ensure more robust parameter estimates via read depth thresholds at various stages of model estimation (<code class="docutils literal notranslate"><span class="pre">--minimum-test-reads</span></code>, <code class="docutils literal notranslate"><span class="pre">--coverage-threshold</span></code> and <code class="docutils literal notranslate"><span class="pre">--minimum-kmer-observations</span></code>).</p>
+<p>The model estimation command is capable of using mutiple processes via the <code class="docutils literal notranslate"><span class="pre">--multiprocess-region-size</span></code> and <code class="docutils literal notranslate"><span class="pre">--processes</span></code> options with similar behavior as these options in the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code> command. The multi-processing only applies to the genome position level computation and not the global model estimation stage; as such changes in multi-processing options will not change resulting models.</p>
+</div>
+<div class="section" id="alternative-model-estimation">
+<h2>Alternative Model Estimation<a class="headerlink" href="#alternative-model-estimation" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="alternative-reference-goals">
+<h3>Alternative Reference Goals<a class="headerlink" href="#alternative-reference-goals" title="Permalink to this headline">¶</a></h3>
+<p>One goal of the Tombo suite of tools is to make alternative model estimation more accessible. Key to this goal is the estimation of an alternative model from a relatively simple to prodcue biological sample. A significant additional goal is the estimation of a model capable of detecting an alternative base in all sequence contexts.</p>
+<p>In order to address these goals, two alternative model estimation procedures are provided. The first method estimates a model from a set of known modifications (either from alternative evidence or from a known modification motif). The second method attempts to estimate an alternative model over all contexts, but generally produces a less accurate model.</p>
+</div>
+<div class="section" id="motif-specific-alternative-reference-estimation">
+<h3>Motif-specific Alternative Reference Estimation<a class="headerlink" href="#motif-specific-alternative-reference-estimation" title="Permalink to this headline">¶</a></h3>
+<p>The motif-specific model estimation procedure (available via <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_motif_alt_reference</span></code> command) requires a sample containing modified bases at either known locations or completely modified within a known sequence motif. If the sample is assumed to contain modifications at only some motif sites the <code class="docutils literal notranslate"><span class="pre">--valid-locations-filename</span></code> (e.g. human CpG methylation) option is provided. If provided, the <code class="docutils literal notranslate"><span class="pre">--valid-locations-filename</span></code> should be in <a class="reference external" href="https://genome.ucsc.edu/FAQ/FAQformat.html#format1">BED format</a>. Otherwise the model will be fit from all motif sites.</p>
+<p>For motif-specific models, the estimation procedure is quite similar to the canonical model estimation method, except that instead of using all sites with sufficeint coverage, only known modified sites are included in the model. As such these models can be much more accurate than the all-contexts models.</p>
+<p>When these models are used within the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span> <span class="pre">alternative_model</span></code> command only sites at the motif specified will output modified base predictions.</p>
+</div>
+<div class="section" id="all-contexts-alternative-reference-estimation">
+<h3>All-contexts Alternative Reference Estimation<a class="headerlink" href="#all-contexts-alternative-reference-estimation" title="Permalink to this headline">¶</a></h3>
+<p>The all-context model estimation procedure (available via <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_alt_reference</span></code> command) requires a sample containing the four canonical bases along with a <strong>single, known, alternative base incorporated randomly instead of one canonical base</strong> with a known genome (referred to as the “<em>alternative sample</em>” below). The rate of alternative base incorporation should ideally be between 15% and 35%, though a larger range may be acceptable. Key to this method is that the exact known location of alternative base incorporation is not needed, though the base must incorporate in place of only a single canonical base (referred to as the “<em>swap base</em>” below and specified with the <code class="docutils literal notranslate"><span class="pre">--alternate-model-base</span></code> option to <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_alt_reference</span></code>).</p>
+<p>The creation of such a sample for the estimation of the included 5-methylcytosine (5mC) model was completed by introducing 25% (ratio to canonical dCTP) 5-methyl-dCTP into a standard PCR reaction in E. coil. Note that a standard PCR’ed (or otherwise produced canonical bases only) sample is also required for alternative model estimation (referred to as the “<em>standard sample</em>” below). For the included N6-methyladenosine (6mA) model, the sample was produced using an in vitro methylase thus exemplifying the flexibility of the alternative model estimation method to different sample preparation techniques. These samples were then re-squiggled and processed with the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_alt_reference</span></code> command to produce the included 5mC and 6mA models.</p>
+<div class="section" id="base-level-extraction">
+<h4>Base Level Extraction<a class="headerlink" href="#base-level-extraction" title="Permalink to this headline">¶</a></h4>
+<p>Given the above descsribed standard and alternative samples, the alternative model estimation procedure begins with the extraction of the current signal level from a number of reads from both samples. These signal levels are grouped by the genomic k-mer at the location assigned by the re-squiggle algorithm. Importantly, in contrast to standard reference estimation, the signal is not averaged or otherwise processed at the genomic position level. This is because each swap base genomic position contains some proportion of canonical and alternative bases.</p>
+<p>Reads continue to be processed until every k-mer has at least <code class="docutils literal notranslate"><span class="pre">--minimum-kmer-observations</span></code> unique event observations. For PCR’ed samples in paricular, the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">filter</span> <span class="pre">level_coverage</span></code> command can help speed up this processing step if the sample coverage is highly variable. In order to save on the memory footprint, event levels are no longer stored once 10,000 obervations have been made for a particular k-mer.</p>
+</div>
+<div class="section" id="signal-level-density-estimation">
+<h4>Signal Level Density Estimation<a class="headerlink" href="#signal-level-density-estimation" title="Permalink to this headline">¶</a></h4>
+<p>Once enough observations have been parsed for each k-mer, a kernel density estimate is computed for each k-mer within the standard and alternative samples. This kernel density estimate can be controled with the <code class="docutils literal notranslate"><span class="pre">--kernel-density-bandwidth</span></code> option. The density estimates can be stored by specifying the <code class="docutils literal notranslate"><span class="pre">--save-density-basename</span></code> option, and this is highly recommended as the event extraction can be a long process. Future estimation efforts can then load these density estimates using the <code class="docutils literal notranslate"><span class="pre">--alternate-density-filename</span></code> and <code class="docutils literal notranslate"><span class="pre">--control-density-filename</span></code> options. Additionally, the <code class="docutils literal notranslate"><span class="pre">scripts/debug_est_alt.R</span></code> script can produce some useful visualizations from these files.</p>
+</div>
+<div class="section" id="alternative-base-density-isolation">
+<h4>Alternative Base Density Isolation<a class="headerlink" href="#alternative-base-density-isolation" title="Permalink to this headline">¶</a></h4>
+<p>After standard and alternative kernel density estimation, an algorithm is applied to isolate the alternative distribution. This algorithm assumes that a portion of each alternative current level density represents the canonical only density. Thus when this portion of the alternative density is “subtracted” away, the alternative base distribution is all that is left.</p>
+</div>
+<div class="section" id="alternative-base-incorporation-rate">
+<h4>Alternative Base Incorporation Rate<a class="headerlink" href="#alternative-base-incorporation-rate" title="Permalink to this headline">¶</a></h4>
+<p>The first step in this process is to estimate the fraction of each k-mer alternative density composed of canonical signal levels. In order to estimate this value, the ratio of the highest peak of the standard density and the closest peak in the alternative sample density is computed for all k-mers including exactly one swap base. Before this ratio computation, alternative densities is shifted due to scaling issues for highly modified samples. This shift is estimated from the emperical signal levl distributions at each non-swap-base-containing k-mer and is fitted with a quadratic function.</p>
+<p>Most of these k-mers are likely to shift the signal only slightly (though this may not hold true for large or charged alternative bases). Some small proportion of k-mers are likely to shift the signal observed significantly such that the standard and alternative base densities are essentially seperated and thus the ratio of these peaks represents close to the true alternative base incorporation rate. Thus a lower percentile of these ratios is taken as the true rate of alternative base incorporation. This percentile is defined by the <code class="docutils literal notranslate"><span class="pre">--alt-fraction-percentile</span></code> option, with a default value of the fifth percentile. This value is also printed to stderr during the estimation command as a reference.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id1">
+<img alt="_images/alt_density_est.png" src="_images/alt_density_est.png" />
+<p class="caption"><span class="caption-text">Canonical and spike-in 5mC example 6-mer signal level distributions and estimated 5mC distribution</span><a class="headerlink" href="#id1" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="canonical-density-subtraction">
+<h4>Canonical Density “Subtraction”<a class="headerlink" href="#canonical-density-subtraction" title="Permalink to this headline">¶</a></h4>
+<p>Once the alternative base incorporation rate has been obtained, the alternative base expected level is computed by first isolating the alternative base density. This computation simply involoves subtracting, from the alternative sample kernel density estimate, the canonical kernel density estimate scaled by the alternative base incorporation rate. Any position where the scaled canonical density is greater than the alternative sample density is set to zero. Each k-mer’s expected signal level is then taken as the weighted mean computed from the isolated alternative density. The spread for each k-mer is taken as the globally estimated standard deviation from the canonical model estimation as spread measures from the isolated distribution are not robust.</p>
+<p>For k-mers not containing any swap bases, the standard model expected level is taken. For kmers containing more than one swap base, the canonical distribution scaling factor is adjusted appropraitely assuming that each swap base has the same estimated incorporation rate. This is why only single swap base k-mers are used in the incorporation rate estimation stage.</p>
+</div>
+<div class="section" id="alternative-model-output">
+<h4>Alternative Model Output<a class="headerlink" href="#alternative-model-output" title="Permalink to this headline">¶</a></h4>
+<p>The alternative model is then saved to the file specified with the <code class="docutils literal notranslate"><span class="pre">--alternate-model-filename</span></code> option. Also specified is the <code class="docutils literal notranslate"><span class="pre">--alternate-model-name</span></code> option, which should be a short name describing the alternative base. When <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">detect_modifications</span></code> is run with this alternative model, the results are saved with this short name included in the output Tombo statsitics filename.</p>
+</div>
+</div>
+</div>
+<div class="section" id="tombo-build-model-event-resquiggle">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">event_resquiggle</span></code><a class="headerlink" href="#tombo-build-model-event-resquiggle" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">event_resquiggle</span></code> command performs the re-squiggle algorithm first developed as part of the nanoraw software package. This command requires an events table, but does not require an expected current level model. In the model training framework, this command can be useful as the original model training step, for example when no Tombo model is available for a particular chemistry.</p>
+<p>In comparison to the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">resquiggle</span></code> command, this method maps a read to a genome, but then takes the initial signal to base assignment from the Events table. The read is anchored to the raw signal at locations where the read maps correctly to the genome. Where ever a read incorrectly maps to the genome the re-squiggle algorithm discovers new base boundaries based only on the significant changes in signal level (generally indicative of transition from one base to the next).</p>
+<p>This method has several known failure modes and thus the model aware re-squiggle algorithm is strongly preferred when a valid model is available.</p>
+<p>Note that this method does make alternative signal normalization methods available, but only median normalization is supported in all other Tombo commands.</p>
+<hr class="docutils" />
+<div class="figure align-center" id="id2">
+<img alt="_images/old_correction_plot.png" src="_images/old_correction_plot.png" />
+<p class="caption"><span class="caption-text">Event re-squiggle correction process from basecalls (top segments) to genomic sequence(bottom segments)</span><a class="headerlink" href="#id2" title="Permalink to this image">¶</a></p>
+</div>
+</div>
+<hr class="docutils" />
+<div class="section" id="tombo-build-model-estimate-scale">
+<h2><code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_scale</span></code><a class="headerlink" href="#tombo-build-model-estimate-scale" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">build_model</span> <span class="pre">estimate_scale</span></code> command is provided in order to estimate a global scaling parameter from a sub-set of reads in a run (as is performed by default at the beginning of the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">resquiggle</span></code> command). The value returned may be useful as the value passed to the <code class="docutils literal notranslate"><span class="pre">--fixed-scale</span></code> option of the <code class="docutils literal notranslate"><span class="pre">tombo</span> <span class="pre">resquiggle</span></code> command in certain situations, but is considered experimental at this time.</p>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="tombo.html" class="btn btn-neutral float-right" title="tombo package" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="rna.html" class="btn btn-neutral float-left" title="RNA Processing" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017-18, Oxford Nanopore Technologies
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>
