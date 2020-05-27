@@ -4106,8 +4106,9 @@ def apply_per_read_thresh(
         valid_cov = reg_cov
 
     if stat_type == SAMP_COMP_TXT:
-        ctrl_cov = [ctrl_cov[pos] if pos in ctrl_cov else 0
-                    for pos in stat_locs]
+        ctrl_cov = [
+            ctrl_cov[pos] if ctrl_cov is not None and pos in ctrl_cov else 0
+            for pos in stat_locs]
     else:
         # convert to list since python2 repeat objects can't be pickled
         ctrl_cov = list(repeat(0, stat_locs.shape[0]))
