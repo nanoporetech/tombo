@@ -1,6 +1,7 @@
 numModelVals <- 20
 pseudoQuants <- seq(1/numModelVals,1-(1/numModelVals),
                     1/numModelVals)
+USE_COWPLOT <- FALSE
 
 plotMotifStats <- function(PlotDat, BaseDat, StatsDat,
                            ModelDat, AltModelDat=NULL){
@@ -131,19 +132,22 @@ plotMotifStats <- function(PlotDat, BaseDat, StatsDat,
               axis.title.x=element_blank(),
               panel.grid.minor.y=element_blank()) +
         ylab('Fraction Modified or -log10(p-value)')))
-    maxWidth <- do.call(grid::unit.pmax,
-                        sapply(ps, function(x) x$widths[1:4]))
-    ps <- lapply(ps, function(p){
-        p$widths[1:4] <- maxWidth
-        return(p)})
     # close dev null sink
     foo <- dev.off()
-    do.call(
-        grid.arrange,
-        c(ps, list(ncol=1, heights=c(rep(1, length(regions)), 3))))
-    ##library(cowplot)
-    ##print(do.call(
-    ##    plot_grid,
-    ##    c(ps, list(ncol=1, align='v',
-    ##               rel_heights=c(rep(1, length(regions)), 3)))))
+    if(USE_COWPLOT){
+        library(cowplot)
+        print(do.call(
+            plot_grid,
+            c(ps, list(ncol=1, align='v',
+                       rel_heights=c(rep(1, length(regions)), 3)))))
+    } else {
+        maxWidth <- do.call(grid::unit.pmax,
+                            sapply(ps, function(x) x$widths[1:4]))
+        ps <- lapply(ps, function(p){
+            p$widths[1:4] <- maxWidth
+            return(p)})
+        do.call(
+            grid.arrange,
+            c(ps, list(ncol=1, heights=c(rep(1, length(regions)), 3))))
+    }
 }
