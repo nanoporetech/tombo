@@ -70,6 +70,7 @@ __all__ = [
 VERBOSE = True
 
 _PROFILE_RSQGL = False
+_PROFILE_IO_MAP = False
 
 # use (mapping) clipped bases at the start of read to identify start position
 USE_START_CLIP_BASES = False
@@ -1682,6 +1683,14 @@ def _io_and_mappy_thread_worker(
             num_processed, proc_update_interval)
 
     return
+
+if _PROFILE_IO_MAP:
+    _io_map_wrapper = _io_and_mappy_thread_worker
+    def _io_and_mappy_thread_worker(*args):
+        import cProfile
+        cProfile.runctx('_io_map_wrapper(*args)', globals(), locals(),
+                        filename='io_map_main.prof')
+        return
 
 
 ############################################
