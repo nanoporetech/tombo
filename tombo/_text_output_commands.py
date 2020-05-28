@@ -370,13 +370,16 @@ def write_all_browser_files(
             FRAC_WIG_TYPE, DFRAC_WIG_TYPE, STAT_WIG_TYPE, VCOV_WIG_TYPE)):
         if VERBOSE: th.status_message('Loading statistics from file.')
         all_stats = ts.TomboStats(stats_fn)
-        if all_stats.is_model_stats and any((
+        if not all_stats.is_model_stats and any((
                 FRAC_WIG_TYPE in wig_types, DFRAC_WIG_TYPE in wig_types,
                 VCOV_WIG_TYPE in wig_types)):
-            th.TomboError('Cannot output fraction, dampened_fraction or ' +
-                          'valid_coverage for LevelStats statistics.')
-        if not all_stats.is_model_stats and STAT_WIG_TYPE in wig_types:
-            th.TomboError('Cannot output stat for ModelStats statistics.')
+            raise th.TomboError(
+                'Cannot output --file-type fraction, dampened_fraction or ' +
+                'valid_coverage for level sample compare statistics.')
+        if all_stats.is_model_stats and STAT_WIG_TYPE in wig_types:
+            raise th.TomboError(
+                'Cannot output `--file-type statistics` for aggregated ' +
+                'per-read statistics.')
         write_frac_wigs(
             all_stats, wig_base, FRAC_WIG_TYPE in wig_types,
             DFRAC_WIG_TYPE in wig_types, STAT_WIG_TYPE in wig_types,
