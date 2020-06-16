@@ -375,7 +375,7 @@ def _prep_fastq_slot_worker(
             prog_q.put(_PROC_UPDATE_INTERVAL)
 
         try:
-            with h5py.File(fast5_fn) as fast5_data:
+            with h5py.File(fast5_fn, 'r+') as fast5_data:
                 try:
                     read_id = _prep_fast5_for_fastq(
                         fast5_data, bc_grp, bc_subgrp, overwrite)
