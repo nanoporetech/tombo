@@ -1393,7 +1393,11 @@ def _io_and_map_read(
     except th.TomboError:
         # channel info is not needed currently, so just pass
         channel_info = None
-    all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'][:]
+    try:
+        all_raw_signal = th.get_raw_read_slot(fast5_data)['Signal'][:]
+    except OSError:
+        raise th.TomboError(
+            'Cannot read raw signal data (inflate() probably failed)')
     if not (sig_len_rng is None or
             sig_len_rng[0] < all_raw_signal.shape[0] < sig_len_rng[1]):
         raise th.TomboError('Raw signal not within --signal-length-range')
