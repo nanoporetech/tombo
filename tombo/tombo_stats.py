@@ -3397,8 +3397,8 @@ class PerReadStats(object):
             if 'read_id_vals' in self.per_read_blocks[block_name]:
                 block_read_id_lookup = dict([
                     (read_id_val, read_id) for read_id, read_id_val in
-                    zip(self.per_read_blocks[block_name]['read_ids'].value,
-                        self.per_read_blocks[block_name]['read_id_vals'].value)])
+                    zip(self.per_read_blocks[block_name]['read_ids'][()],
+                        self.per_read_blocks[block_name]['read_id_vals'][()])])
             else:
                 # read_ids previously stored (inefficiently) as attributes
                 # so parse read_ids attributes for backwards compatibility
