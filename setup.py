@@ -6,7 +6,9 @@ import sys
 import re
 
 from setuptools import setup, Extension
+from distutils.version import LooseVersion
 from setuptools.command.build_ext import build_ext as _build_ext
+
 
 # Get the version number from _version.py, and exe_path
 verstrline = open(os.path.join('tombo', '_version.py'), 'r').readlines()[-1]
@@ -23,6 +25,13 @@ def readme():
 
 try:
     import numpy as np
+    if LooseVersion(np.__version__) >= LooseVersion("1.20.0"):
+        sys.stderr.write(
+            '*' * 60 + '\nINSTALLATION ERROR:\n'
+            '\tTombo is only compatible with numpy < 1.20. Please downgrade ' +
+            'numpy and reinstall tombo `pip install numpy<1.20`\n' +
+            '*' * 60 + '\n')
+        sys.exit()
     include_dirs = [np.get_include()]
 except:
     sys.stderr.write(
@@ -57,7 +66,7 @@ setup(
     name = "ont-tombo",
     version = __version__,
     packages = ["tombo"],
-    install_requires = ['h5py', 'numpy', 'scipy', 'cython',
+    install_requires = ['h5py', 'numpy < 1.20', 'scipy', 'cython',
                         'setuptools >= 18.0', 'mappy >= 2.10', 'future', 'tqdm'],
     extras_require={'full':extras_require},
 
