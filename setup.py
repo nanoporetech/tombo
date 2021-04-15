@@ -66,7 +66,7 @@ setup(
     name = "ont-tombo",
     version = __version__,
     packages = ["tombo"],
-    install_requires = ['h5py', 'numpy < 1.20', 'scipy', 'cython',
+    install_requires = ['h5py < 3', 'numpy < 1.20', 'scipy', 'cython',
                         'setuptools >= 18.0', 'mappy >= 2.10', 'future', 'tqdm'],
     extras_require={'full':extras_require},
 
