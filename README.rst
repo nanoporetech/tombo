@@ -1,5 +1,10 @@
-.. image:: /ONT_logo.png
+.. image:: /ONT_logo_deprecate.png
   :width: 800
+
+We have a new bioinformatic resource that replaces the functionality of this project! See our new repository here: `remora <https://github.com/nanoporetech/remora>`_.
+
+This repository is now unsupported and we do not recommend its use.
+Please contact Oxford Nanopore: support@nanoporetech.com for help with your application if it is not possible to upgrade.
 
 ******************
 
