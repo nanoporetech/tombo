@@ -321,7 +321,7 @@ def write_cov_wig(reads_index, out_base, group_text):
 
 def write_all_browser_files(
         fast5s_dirs, ctrl_fast5s_dirs, corr_grp, bc_subgrps,
-        stats_fn, wig_base, wig_types, motif_descs, fasta_fn):
+        stats_fn, wig_base, wig_types, fasta_fn, motif_descs):
     if fast5s_dirs is not None:
         reads_index = th.TomboReads(fast5s_dirs, corr_grp, bc_subgrps)
         if reads_index.is_empty():
@@ -383,7 +383,7 @@ def write_all_browser_files(
         write_frac_wigs(
             all_stats, wig_base, FRAC_WIG_TYPE in wig_types,
             DFRAC_WIG_TYPE in wig_types, STAT_WIG_TYPE in wig_types,
-            VCOV_WIG_TYPE in wig_types, motif_descs, fasta_fn)
+            VCOV_WIG_TYPE in wig_types, fasta_fn, motif_descs)
 
     return
 
