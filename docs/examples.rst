@@ -2,7 +2,7 @@
 Tombo Commands
 **************
 
-This page contains breif descriptions of the most common Tombo commands. For more detail on each commands' options and further algorithm details, please see the corresponding documentation sections.
+This page contains brief descriptions of the most common Tombo commands. For more detail on each command's options and further algorithm details, please see the corresponding documentation sections.
 
 ------------------------------------------
 Re-squiggle (Raw Signal Genomic Alignment)
@@ -18,7 +18,7 @@ The ``resquiggle`` command will add infomation (the mapped reference location an
 
    The ``resquiggle`` command must be run before any further processing by Tombo commands.
 
-**Note**: Tombo currenly includes default canonical models for both DNA or RNA data (supporting R9.4 and R9.5; 1D and 1D^2; R9.*.1 chemistries). Analysis of other nanopore data types is not supported at this time (e.g. R7 data). If DNA or RNA sample type is not explicitly specified (via ``--dna`` or ``--rna`` options) the sample type will be detected automatically from the raw read files.
+**Note**: Tombo currently includes default canonical models for both DNA or RNA data (supporting R9.4 and R9.5; 1D and 1D^2; R9.*.1 chemistries). Analysis of other nanopore data types is not supported at this time (e.g. R7 data). If DNA or RNA sample type is not explicitly specified (via ``--dna`` or ``--rna`` options) the sample type will be detected automatically from the raw read files.
 
 For more details see the :doc:`re-squiggle documentation </resquiggle>`.
 
@@ -68,7 +68,7 @@ All modified base detection methods, except the ``level_sample_compare`` method,
 
       - Run using ``tombo detect_modifications level_sample_compare`` command.
       - This method performs either a ks-test (default), u-test or t-test to identify sites where signal levels deviate between two samples.
-      - This method is ideal for high coverage samples (in order to accurately estimate the effect size measures) and comparison of two potentailly non-canonical samples (e.g. a KO experiment).
+      - This method is ideal for high coverage samples (in order to accurately estimate the effect size measures) and comparison of two potentially non-canonical samples (e.g. a KO experiment).
 
    b. ``model_sample_compare``
 
